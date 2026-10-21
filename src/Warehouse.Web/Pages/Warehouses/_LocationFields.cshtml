@@ -1,0 +1,48 @@
+@using Warehouse.Domain.Warehousing
+@model (Warehouse.Web.Pages.Warehouses.LocationForm Form, Warehouse.Application.Settings.SystemSettings Settings, bool IsNew)
+@* 儲位欄位；備註與結構化屬性依系統設定開關顯示（M3-06）。欄位名稱為 Form.xxx。 *@
+<input type="hidden" name="Form.NotesShown" value="@Model.Settings.LocationNotesEnabled.ToString().ToLowerInvariant()" />
+<input type="hidden" name="Form.AttributesShown" value="@Model.Settings.LocationAttributesEnabled.ToString().ToLowerInvariant()" />
+<div class="form-grid">
+    <label for="Form_Code">儲位碼 *</label>
+    <div>
+        <input type="text" id="Form_Code" name="Form.Code" value="@Model.Form.Code" maxlength="@Location.CodeMaxLength"
+               readonly="@(!Model.IsNew)" required placeholder="例：W1-A-01-03-02" />
+        @if (Model.IsNew)
+        {
+            <div class="muted">大寫英數，以 - 分段，最多 6 段；建立後不可修改。</div>
+        }
+    </div>
+    <label for="Form_Name">名稱</label>
+    <input type="text" id="Form_Name" name="Form.Name" value="@Model.Form.Name" maxlength="@Location.NameMaxLength" />
+    @if (Model.Settings.LocationNotesEnabled)
+    {
+        <label for="Form_Note">備註</label>
+        <textarea id="Form_Note" name="Form.Note" maxlength="@Location.NoteMaxLength">@Model.Form.Note</textarea>
+    }
+    @if (Model.Settings.LocationAttributesEnabled)
+    {
+        <label>區／架／層／格</label>
+        <div class="filters">
+            <input type="text" name="Form.Zone" value="@Model.Form.Zone" maxlength="@Location.SegmentMaxLength" placeholder="區" aria-label="區" size="4" />
+            <input type="text" name="Form.Rack" value="@Model.Form.Rack" maxlength="@Location.SegmentMaxLength" placeholder="架" aria-label="架" size="4" />
+            <input type="text" name="Form.Level" value="@Model.Form.Level" maxlength="@Location.SegmentMaxLength" placeholder="層" aria-label="層" size="4" />
+            <input type="text" name="Form.Bin" value="@Model.Form.Bin" maxlength="@Location.SegmentMaxLength" placeholder="格" aria-label="格" size="4" />
+        </div>
+        <label for="Form_LocationType">儲位類型</label>
+        <select id="Form_LocationType" name="Form.LocationType">
+            <option value="">（未設定）</option>
+            @foreach (var type in Enum.GetValues<LocationType>())
+            {
+                <option value="@type" selected="@(Model.Form.LocationType == type)">@Display.Of(type)</option>
+            }
+        </select>
+        <label for="Form_MaxLoadKg">承重上限（kg）</label>
+        <input type="number" id="Form_MaxLoadKg" name="Form.MaxLoadKg" value="@Model.Form.MaxLoadKg" min="0" step="0.01" />
+        <label>其他</label>
+        <div>
+            <label><input type="checkbox" name="Form.TemperatureControlled" value="true" checked="@Model.Form.TemperatureControlled" /> 溫控</label>
+            <label><input type="checkbox" name="Form.Hazardous" value="true" checked="@Model.Form.Hazardous" /> 危險品</label>
+        </div>
+    }
+</div>

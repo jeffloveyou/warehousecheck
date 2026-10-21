@@ -1,0 +1,70 @@
+@page
+@model Warehouse.Web.Pages.Warehouses.IndexModel
+@{
+    ViewData["Title"] = "倉庫";
+    var editing = Model.EditId is not null;
+}
+<h1>倉庫</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (Model.CanManage)
+{
+    <form method="post" asp-page-handler="Save" asp-route-edit="@Model.EditId" class="panel" id="warehouse-form">
+        <h2>@(editing ? "修改倉庫名稱" : "新增倉庫")</h2>
+        <div asp-validation-summary="All" class="field-error"></div>
+        <input type="hidden" asp-for="Version" />
+        <div class="form-grid">
+            <label for="Code">代碼</label>
+            <input type="text" id="Code" name="Code" value="@Model.Code" maxlength="8" readonly="@editing" placeholder="例：W1" />
+            <label for="Name">名稱</label>
+            <input type="text" id="Name" name="Name" value="@Model.Name" maxlength="50" />
+        </div>
+        <div class="actions">
+            <button type="submit" id="warehouse-save">@(editing ? "儲存" : "新增")</button>
+            @if (editing)
+            {
+                <a href="/Warehouses">取消</a>
+            }
+        </div>
+        <p class="muted">代碼 1～8 碼大寫英數，建立後不可修改（儲位 QR 內容會用到）。</p>
+    </form>
+}
+<div class="table-wrap">
+    <table id="warehouse-list">
+        <thead><tr><th>代碼</th><th>名稱</th><th>儲位數</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var w in Model.Warehouses)
+            {
+                <tr>
+                    <td>@w.Code</td>
+                    <td>@w.Name</td>
+                    <td><a href="/Warehouses/Locations?warehouseId=@w.Id">@w.LocationCount</a></td>
+                    <td>@(w.IsActive ? "啟用" : "停用")</td>
+                    <td>
+                        <a href="/Warehouses/Locations?warehouseId=@w.Id">儲位</a>
+                        @if (Model.CanManage)
+                        {
+                            <a href="/Warehouses?edit=@w.Id">改名</a>
+                            <form method="post" asp-page-handler="Toggle" class="inline">
+                                <input type="hidden" name="id" value="@w.Id" />
+                                <input type="hidden" name="version" value="@w.Version" />
+                                <input type="hidden" name="isActive" value="@((!w.IsActive).ToString().ToLowerInvariant())" />
+                                <button type="submit" class="link">@(w.IsActive ? "停用" : "啟用")</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Warehouses.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">尚未建立倉庫。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>

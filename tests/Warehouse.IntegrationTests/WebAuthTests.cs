@@ -421,6 +421,53 @@ public partial class WebAuthTests
         Assert.Equal(HttpStatusCode.OK, (await web.Client.GetAsync("/Items", Ct)).StatusCode);                   // 其他頁面不受影響
     }
 
+    // T-M3-01-11
+    [Fact]
+    public async Task 倉庫頁_作業員可看不可改_倉庫主管可新增_設定頁只限系統管理員_掃碼API()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var operatorName = NewUserName();
+        var managerName = NewUserName();
+        var adminName = NewUserName();
+        await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+        await WebSession.CreateUserAsync(factory, managerName, Password, Roles.WarehouseManager);
+        await WebSession.CreateUserAsync(factory, adminName, Password, Roles.SystemAdmin);
+        var op = WebSession.Create(factory);
+        var manager = WebSession.Create(factory);
+        var admin = WebSession.Create(factory);
+        await op.LoginAsync(operatorName, Password);
+        await manager.LoginAsync(managerName, Password);
+        await admin.LoginAsync(adminName, Password);
+        var code = "P" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+
+        Assert.DoesNotContain("warehouse-form", await op.GetStringAsync("/Warehouses"));
+        var denied = await op.PostFormAsync("/Warehouses", "/Warehouses?handler=Save", new Dictionary<string, string>
+        {
+            ["Code"] = code, ["Name"] = "作業員偷建",
+        });
+        Assert.StartsWith("/Account/AccessDenied", denied.Headers.Location!.OriginalString);
+
+        var created = await manager.PostFormAsync("/Warehouses", "/Warehouses?handler=Save", new Dictionary<string, string>
+        {
+            ["Code"] = code, ["Name"] = "主管建立",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, created.StatusCode);
+        var warehouses = await op.Client.GetFromJsonAsync<JsonElement>("/api/warehouses", Ct);
+        var warehouseId = warehouses.EnumerateArray().Single(w => w.GetProperty("code").GetString() == code).GetProperty("id").GetGuid();
+
+        var locationPage = $"/Warehouses/Locations?warehouseId={warehouseId}";
+        var location = await manager.PostFormAsync(locationPage, $"/Warehouses/Locations?handler=Create&WarehouseId={warehouseId}",
+            new Dictionary<string, string> { ["Form.Code"] = $"{code}-A-01", ["Form.Zone"] = "A", ["Form.Hazardous"] = "true" });
+        Assert.Equal(HttpStatusCode.Redirect, location.StatusCode);
+
+        var scan = await op.Client.GetFromJsonAsync<JsonElement>($"/api/scan?code=" + Uri.EscapeDataString($"wh:loc:{code.ToLowerInvariant()}:{code.ToLowerInvariant()}-a-01"), Ct);
+        Assert.Equal("Location", scan.GetProperty("kind").GetString());
+        Assert.Equal("A", scan.GetProperty("location").GetProperty("zone").GetString());
+
+        Assert.StartsWith("/Account/AccessDenied", (await op.Client.GetAsync("/Settings", Ct)).Headers.Location!.OriginalString);
+        Assert.Contains("settings-form", await admin.GetStringAsync("/Settings"));
+    }
+
     private static string NewUserName() => "u" + Guid.NewGuid().ToString("N")[..10];
 
     [GeneratedRegex("name=\"RequestId\" value=\"([0-9a-f-]+)\"")]

@@ -23,6 +23,21 @@ public static class Policies
     /// <summary>新增物料的專屬別名、共用關鍵字：作業員、物料管理員（ADR-0013）。</summary>
     public const string ItemsIndex = "Items.Index";
 
+    /// <summary>維護倉庫、儲位、倉位圖片、物料常用倉位：倉庫主管（M3）。</summary>
+    public const string WarehousesManage = "Warehouses.Manage";
+
+    /// <summary>查詢倉庫、儲位、結存、異動、期初單：任何登入者。</summary>
+    public const string StockRead = "Stock.Read";
+
+    /// <summary>建立、修改、送出、取消期初單：作業員、倉庫主管。</summary>
+    public const string OpeningEdit = "Opening.Edit";
+
+    /// <summary>核准、退回期初單：倉庫主管（另依 D-07 設定檢查是否可自核）。</summary>
+    public const string OpeningApprove = "Opening.Approve";
+
+    /// <summary>系統設定：系統管理員。</summary>
+    public const string SettingsManage = "Settings.Manage";
+
     /// <summary>維護分類與單位：物料管理員。</summary>
     public const string MasterDataManage = "MasterData.Manage";
 
@@ -34,7 +49,12 @@ public static class Policies
             .AddPolicy(ItemsSubmit, p => p.RequireRole(Roles.Operator, Roles.ItemManager))
             .AddPolicy(ItemsReview, p => p.RequireRole(Roles.ItemManager))
             .AddPolicy(ItemsIndex, p => p.RequireRole(Roles.Operator, Roles.ItemManager))
-            .AddPolicy(MasterDataManage, p => p.RequireRole(Roles.ItemManager));
+            .AddPolicy(MasterDataManage, p => p.RequireRole(Roles.ItemManager))
+            .AddPolicy(WarehousesManage, p => p.RequireRole(Roles.WarehouseManager))
+            .AddPolicy(StockRead, p => p.RequireAuthenticatedUser())
+            .AddPolicy(OpeningEdit, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
+            .AddPolicy(OpeningApprove, p => p.RequireRole(Roles.WarehouseManager))
+            .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin));
         return services;
     }
 }

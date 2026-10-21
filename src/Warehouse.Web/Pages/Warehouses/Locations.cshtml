@@ -1,0 +1,101 @@
+@page
+@model Warehouse.Web.Pages.Warehouses.LocationsModel
+@using Warehouse.Domain.Warehousing
+@{
+    ViewData["Title"] = "儲位";
+}
+<h1>儲位 @(Model.CurrentWarehouse is { } w ? $"－{w.Code} {w.Name}" : "")</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="get" class="filters" id="location-filters">
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var wh in Model.Warehouses)
+        {
+            <option value="@wh.Id" selected="@(wh.Id == Model.WarehouseId)">@wh.Code @wh.Name</option>
+        }
+    </select>
+    <input type="text" name="q" value="@Model.Keyword" placeholder="儲位碼、名稱、區、架" aria-label="關鍵字" />
+    <select name="Status" aria-label="狀態">
+        <option value="">全部狀態</option>
+        @foreach (var status in Enum.GetValues<LocationStatus>())
+        {
+            <option value="@status" selected="@(Model.Status == status)">@Display.Of(status)</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+    <a href="/Warehouses">回倉庫清單</a>
+</form>
+
+<p class="muted">共 @Model.Result.TotalCount 筆</p>
+<div class="table-wrap">
+    <table id="location-list">
+        <thead>
+            <tr>
+                <th>倉庫</th><th>儲位碼</th><th>名稱</th><th>狀態</th>
+                @if (Model.Settings.LocationAttributesEnabled)
+                {
+                    <th>區／架／層／格</th><th>類型</th>
+                }
+                @if (Model.Settings.LocationNotesEnabled)
+                {
+                    <th>備註</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var l in Model.Result.Items)
+            {
+                <tr>
+                    <td>@l.WarehouseCode</td>
+                    <td><a href="/Warehouses/Location/@l.Id">@l.Code</a></td>
+                    <td>@l.Name</td>
+                    <td class="location-@l.Status">@Display.Of(l.Status)</td>
+                    @if (Model.Settings.LocationAttributesEnabled)
+                    {
+                        <td>@string.Join(" / ", new[] { l.Zone, l.Rack, l.Level, l.Bin }.Where(s => s is not null))</td>
+                        <td>@(l.LocationType is { } t ? Display.Of(t) : "")</td>
+                    }
+                    @if (Model.Settings.LocationNotesEnabled)
+                    {
+                        <td>@l.Note</td>
+                    }
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="7" class="muted">沒有符合條件的儲位。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>
+
+@if (Model.CanManage && Model.CurrentWarehouse is { IsActive: true } current)
+{
+    <form method="post" asp-page-handler="Create" asp-route-WarehouseId="@Model.WarehouseId" class="panel" id="location-form">
+        <h2>在 @current.Code 新增儲位</h2>
+        <partial name="_LocationFields" model="(Model.Form, Model.Settings, true)" />
+        <div class="actions"><button type="submit" id="location-create">新增</button></div>
+    </form>
+}
+else if (Model.CanManage && Model.WarehouseId is null)
+{
+    <p class="muted">先選擇倉庫，才能新增儲位。</p>
+}

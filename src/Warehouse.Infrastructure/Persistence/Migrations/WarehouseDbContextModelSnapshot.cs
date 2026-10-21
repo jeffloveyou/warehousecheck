@@ -76,6 +76,13 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             ConcurrencyStamp = "0b1f6a10-0003-4c3a-9a00-000000000003",
                             Name = "Operator",
                             NormalizedName = "OPERATOR"
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000004"),
+                            ConcurrencyStamp = "0b1f6a10-0003-4c3a-9a00-000000000004",
+                            Name = "WarehouseManager",
+                            NormalizedName = "WAREHOUSEMANAGER"
                         });
                 });
 
@@ -846,6 +853,157 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Warehousing.Location", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Bin")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("bin");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Hazardous")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("hazardous");
+
+                    b.Property<string>("Level")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("level");
+
+                    b.Property<string>("LocationType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("location_type");
+
+                    b.Property<decimal?>("MaxLoadKg")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("max_load_kg");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Rack")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("rack");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<bool>("TemperatureControlled")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("temperature_controlled");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.Property<string>("Zone")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("zone");
+
+                    b.HasKey("Id")
+                        .HasName("pk_locations");
+
+                    b.HasIndex("WarehouseId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ux_locations_warehouse_code");
+
+                    b.ToTable("locations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_locations_code_format", "code ~ '^[A-Z0-9]+(-[A-Z0-9]+){0,5}$'");
+
+                            t.HasCheckConstraint("ck_locations_max_load", "max_load_kg IS NULL OR max_load_kg >= 0");
+
+                            t.HasCheckConstraint("ck_locations_status", "status IN ('Available', 'Inspection', 'Inactive')");
+
+                            t.HasCheckConstraint("ck_locations_type", "location_type IS NULL OR location_type IN ('Shelf', 'Floor', 'Pallet', 'Cold', 'Hazmat')");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Warehousing.WarehouseSite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_warehouses");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_warehouses_code");
+
+                    b.ToTable("warehouses", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_warehouses_code_format", "code ~ '^[A-Z0-9]{1,8}$'");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Infrastructure.Identity.AppUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -942,6 +1100,64 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Persistence.AuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("After")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("after");
+
+                    b.Property<string>("Before")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("before");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("entity_type");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_audit_logs");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_audit_logs_occurred_at");
+
+                    b.HasIndex("EntityType", "EntityId", "OccurredAt")
+                        .HasDatabaseName("ix_audit_logs_entity_type_entity_id_occurred_at");
+
+                    b.ToTable("audit_logs", (string)null);
+                });
+
             modelBuilder.Entity("Warehouse.Infrastructure.Persistence.ItemCodeCounter", b =>
                 {
                     b.Property<string>("Prefix")
@@ -961,6 +1177,65 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_item_code_counters_last_number", "last_number >= 1");
 
                             t.HasCheckConstraint("ck_item_code_counters_prefix_format", "prefix ~ '^[A-Z0-9]{2,4}$'");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Infrastructure.Persistence.SystemSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("key");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("updated_by_name");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Key")
+                        .HasName("pk_system_settings");
+
+                    b.ToTable("system_settings", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Key = "stock.opening.allow_self_approval",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 10, 22, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            UpdatedByName = "系統預設",
+                            Value = "false"
+                        },
+                        new
+                        {
+                            Key = "location.notes.enabled",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 10, 22, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            UpdatedByName = "系統預設",
+                            Value = "true"
+                        },
+                        new
+                        {
+                            Key = "location.attributes.enabled",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 10, 22, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            UpdatedByName = "系統預設",
+                            Value = "true"
+                        },
+                        new
+                        {
+                            Key = "location.images.enabled",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 10, 22, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            UpdatedByName = "系統預設",
+                            Value = "true"
                         });
                 });
 
@@ -1081,6 +1356,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_item_reviews_items_item_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Warehousing.Location", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_locations_warehouses_warehouse_id");
                 });
 #pragma warning restore 612, 618
         }
