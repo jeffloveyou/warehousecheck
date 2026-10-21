@@ -1,0 +1,15 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "系統狀態";
+}
+<h1>倉庫管理系統 – 系統狀態</h1>
+<dl class="status">
+    <dt>系統版本</dt><dd id="version">@Model.Info.Version</dd>
+    <dt>資料庫連線</dt>
+    <dd id="dbConnected" class="@(Model.Info.DatabaseConnected ? "ok" : "bad")">@(Model.Info.DatabaseConnected ? "已連線" : "無法連線")</dd>
+    <dt>資料庫版本</dt><dd id="dbVersion">@(Model.Info.DatabaseVersion ?? "-")</dd>
+    <dt>伺服器時間 (UTC)</dt><dd id="serverTime">@Model.Info.ServerTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+</dl>
+@* 重新整理＝重新 GET 本頁；不輪詢，使用者按了才查詢 *@
+<form method="get"><button id="refresh" type="submit">重新整理</button></form>

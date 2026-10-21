@@ -15,7 +15,8 @@ public static class SystemEndpoints
         group.MapGet("/system/info", GetSystemInfoAsync);
     }
 
-    private static async Task<SystemInfoResponse> GetSystemInfoAsync(
+    /// <summary>取得系統資訊；API 端點與 Web 的系統狀態頁共用此方法。</summary>
+    public static async Task<SystemInfoResponse> GetSystemInfoAsync(
         IDatabaseStatus databaseStatus, CancellationToken requestAborted)
     {
         var connected = false;
