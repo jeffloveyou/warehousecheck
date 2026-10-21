@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Warehouse.Api/Warehouse.Api.csproj" />
+    <Project Path="src/Warehouse.Application/Warehouse.Application.csproj" />
+    <Project Path="src/Warehouse.Domain/Warehouse.Domain.csproj" />
+    <Project Path="src/Warehouse.Infrastructure/Warehouse.Infrastructure.csproj" />
+    <Project Path="src/Warehouse.Web/Warehouse.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Warehouse.IntegrationTests/Warehouse.IntegrationTests.csproj" />
+    <Project Path="tests/Warehouse.UnitTests/Warehouse.UnitTests.csproj" />
+  </Folder>
+</Solution>
