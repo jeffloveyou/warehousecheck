@@ -1,16 +1,27 @@
 using System.Text.Encodings.Web;
 using System.Text.Unicode;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.WebEncoders;
 using Warehouse.Api;
 using Warehouse.Infrastructure;
+using Warehouse.Web;
 
-var builder = WebApplication.CreateBuilder(args);
+// 以 Windows 服務執行時，目前目錄是 C:\Windows\System32，必須把內容根目錄設為程式所在目錄才找得到 wwwroot
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
+});
+builder.AddExternalConfigDirectory();
+// 不是以 Windows 服務啟動時（開發、測試、Linux）不會有任何作用
+builder.Services.AddWindowsService(options => options.ServiceName = "Warehouse");
 
 var connectionString = builder.Configuration.GetConnectionString("Warehouse");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException(
-        "未設定連線字串 ConnectionStrings:Warehouse。開發環境請用 dotnet user-secrets 設定，見 docs/04-開發手冊.md §2.1。");
+        "未設定連線字串 ConnectionStrings:Warehouse。開發環境請用 dotnet user-secrets 設定；"
+        + "伺服器請放在 WAREHOUSE_CONFIG_DIR 目錄的 appsettings.Production.json，見 docs/04-開發手冊.md §2.1、§10。");
 }
 
 builder.Services.AddProblemDetails();
