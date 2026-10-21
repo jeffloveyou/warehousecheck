@@ -9,15 +9,20 @@
     4. 寫入 release.json：版本、commit、RID、部署型式、建置時間、大小，供部署腳本與排查使用
 .PARAMETER Runtime
     win-x64（Windows PC）、linux-x64（x86 NAS／Linux PC）、linux-arm64（ARM NAS）。
+.PARAMETER Project
+    Web（主程式，預設）或 Proxy（M0-12 反向代理）。Proxy 的版本資料夾名稱前加 proxy-。
 .PARAMETER SelfContained
     自含 .NET Runtime，目標機不必安裝 .NET；檔案較大。
 .EXAMPLE
     .\scripts\publish.ps1 -Runtime win-x64
     .\scripts\publish.ps1 -Runtime linux-arm64 -SelfContained -SkipTests
+    .\scripts\publish.ps1 -Project Proxy -SkipTests
 #>
 param(
     [ValidateSet('win-x64', 'linux-x64', 'linux-arm64')]
     [string]$Runtime = 'win-x64',
+    [ValidateSet('Web', 'Proxy')]
+    [string]$Project = 'Web',
     [switch]$SelfContained,
     [string]$OutputRoot = 'artifacts/publish',
     [switch]$SkipTests,
@@ -41,7 +46,9 @@ $commit = (git rev-parse HEAD).Trim()
 $shortCommit = $commit.Substring(0, 7)
 $version = (dotnet msbuild src/Warehouse.Web/Warehouse.Web.csproj -getProperty:Version).Trim()
 $mode = if ($SelfContained) { 'sc' } else { 'fdd' }
-$name = "$version-$shortCommit-$Runtime-$mode"
+$entry = "Warehouse.$Project"
+$prefix = if ($Project -eq 'Proxy') { 'proxy-' } else { '' }
+$name = "$prefix$version-$shortCommit-$Runtime-$mode"
 $output = Join-Path $OutputRoot $name
 if (Test-Path $output) { throw "已存在 $output；同一版本不覆寫，請先提交新的 commit 或手動刪除。" }
 
@@ -51,13 +58,14 @@ if (-not $SkipTests) {
 
 $selfContainedArg = if ($SelfContained) { 'true' } else { 'false' }
 Invoke-Step "發布 $name" {
-    dotnet publish src/Warehouse.Web -c Release -r $Runtime --self-contained $selfContainedArg -o $output --nologo -v quiet
+    dotnet publish src/$entry -c Release -r $Runtime --self-contained $selfContainedArg -o $output --nologo -v quiet
 }
 
 $files = Get-ChildItem $output -Recurse -File
-$dll = Join-Path $output 'Warehouse.Web.dll'
+$dll = Join-Path $output "$entry.dll"
 $release = [ordered]@{
     name = $name
+    entry = $entry
     version = (Get-Item $dll).VersionInfo.ProductVersion
     commit = $commit
     runtime = $Runtime
