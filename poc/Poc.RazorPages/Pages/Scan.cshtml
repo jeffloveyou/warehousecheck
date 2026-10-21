@@ -1,0 +1,10 @@
+@page "/scan"
+@model ScanModel
+@{
+    ViewData["Title"] = "掃碼";
+}
+<h1>掃碼</h1>
+<input id="scan-input" type="text" autocomplete="off" autofocus />
+<p>已掃 <span id="scan-count">0</span> 筆</p>
+<ul id="scan-list"></ul>
+<script src="/js/scan.js" defer></script>

@@ -1,0 +1,54 @@
+@page "/login"
+@* 登入做法：在元件內用 [SupplyParameterFromForm] 接表單，提交處理器直接用 HttpContext 寫 cookie 後 NavigateTo("/")。
+   理由：與其他頁面一致地使用 Blazor 表單模型（含 antiforgery 的 <AntiforgeryToken />），才是我們要量測的框架行為；
+   改用 Minimal API 會繞過元件模型。靜態 SSR 的表單 POST 在回應開始前處理，因此可以寫 cookie 並回 302。 *@
+@inject NavigationManager Navigation
+
+<PageTitle>登入</PageTitle>
+
+<h1>登入</h1>
+<form method="post" @onsubmit="Submit" @formname="login" data-enhance>
+    <AntiforgeryToken />
+    <div class="field">
+        <label for="username">帳號</label>
+        <input type="text" id="username" name="username" value="@Username" autocomplete="off" />
+        @if (usernameError is not null)
+        {
+            <div class="field-error">@usernameError</div>
+        }
+    </div>
+    <button id="login-submit" type="submit">登入</button>
+</form>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm(Name = "username", FormName = "login")]
+    private string? Username { get; set; }
+
+    private string? usernameError;
+
+    private void Submit()
+    {
+        var name = Username?.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            usernameError = "請輸入帳號";
+            return;
+        }
+
+        if (HttpContext is null)
+        {
+            return;
+        }
+
+        HttpContext.Response.Cookies.Append(PocAuth.CookieName, name, new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Lax,
+            Path = "/"
+        });
+        Navigation.NavigateTo("/");
+    }
+}

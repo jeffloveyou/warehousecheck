@@ -1,0 +1,44 @@
+@page "/search"
+@model SearchModel
+@{
+    ViewData["Title"] = "查料";
+}
+<h1>查料</h1>
+<form id="search-form" method="get" action="/search">
+    <input id="q" name="q" type="text" value="@Model.Q" autocomplete="off" />
+    <button type="submit">搜尋</button>
+</form>
+@if (Model.Hint is not null)
+{
+    <p id="search-hint">@Model.Hint</p>
+}
+else if (Model.Result is { } result)
+{
+    <p>共 <span id="total-count">@result.TotalCount</span> 筆</p>
+    <table id="results">
+        <thead>
+            <tr><th>料號</th><th>品名</th><th>儲位</th><th>命中原因</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var hit in result.Hits)
+            {
+                <tr class="result-row">
+                    <td class="item-code">@hit.Item.ItemCode</td>
+                    <td class="item-name">@hit.Item.Name</td>
+                    <td class="location">@hit.Item.Location</td>
+                    <td class="hit-reason">@hit.HitReason</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="pager">
+        @if (result.Page > 1)
+        {
+            <a id="prev-page" href="/search?q=@Uri.EscapeDataString(Model.Q)&amp;page=@(result.Page - 1)">上一頁</a>
+        }
+        @if (result.Page < result.TotalPages)
+        {
+            <a id="next-page" href="/search?q=@Uri.EscapeDataString(Model.Q)&amp;page=@(result.Page + 1)">下一頁</a>
+        }
+    </div>
+}

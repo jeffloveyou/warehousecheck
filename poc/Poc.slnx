@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Poc.Bench/Poc.Bench.csproj" />
+  <Project Path="Poc.BlazorSsr/Poc.BlazorSsr.csproj" />
+  <Project Path="Poc.BlazorWasm/Poc.BlazorWasm.csproj" />
+  <Project Path="Poc.RazorPages/Poc.RazorPages.csproj" />
+  <Project Path="Poc.Shared/Poc.Shared.csproj" />
+</Solution>

@@ -1,0 +1,120 @@
+@page "/receipt"
+@using System.Globalization
+@inject NavigationManager Navigation
+
+<PageTitle>入庫</PageTitle>
+
+<h1>入庫</h1>
+
+@if (!string.IsNullOrEmpty(Done))
+{
+    <p id="receipt-success">入庫成功：料號 @Done，數量 @DoneQuantity</p>
+}
+
+@* 用一般 <form> + @formname + [SupplyParameterFromForm(Name=...)]（而非 EditForm 的 Model.xxx 命名），
+   讓欄位 name 與規格一致（itemCode / quantity / location / idempotencyKey）。驗證為伺服器端自訂驗證。 *@
+<form method="post" @onsubmit="Submit" @formname="receipt" data-enhance>
+    <AntiforgeryToken />
+    <input type="hidden" id="idempotencyKey" name="idempotencyKey" value="@IdempotencyKey" />
+    <div class="field">
+        <label for="itemCode">料號</label>
+        <input type="text" id="itemCode" name="itemCode" value="@ItemCode" autocomplete="off" />
+        @if (itemCodeError is not null)
+        {
+            <div class="field-error">@itemCodeError</div>
+        }
+    </div>
+    <div class="field">
+        <label for="quantity">數量</label>
+        <input type="number" id="quantity" name="quantity" value="@Quantity" autocomplete="off" />
+        @if (quantityError is not null)
+        {
+            <div class="field-error">@quantityError</div>
+        }
+    </div>
+    <div class="field">
+        <label for="location">儲位</label>
+        <input type="text" id="location" name="location" value="@Location" autocomplete="off" />
+        @if (locationError is not null)
+        {
+            <div class="field-error">@locationError</div>
+        }
+    </div>
+    <button id="receipt-submit" type="submit">入庫</button>
+</form>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromQuery(Name = "done")]
+    private string? Done { get; set; }
+
+    // 規格只要求 done=<料號>；數量另帶 qty 只為了在成功訊息顯示（不實際寫入任何資料）。
+    [SupplyParameterFromQuery(Name = "qty")]
+    private string? DoneQuantity { get; set; }
+
+    [SupplyParameterFromForm(Name = "idempotencyKey", FormName = "receipt")]
+    private string? IdempotencyKey { get; set; }
+
+    [SupplyParameterFromForm(Name = "itemCode", FormName = "receipt")]
+    private string? ItemCode { get; set; }
+
+    [SupplyParameterFromForm(Name = "quantity", FormName = "receipt")]
+    private string? Quantity { get; set; }
+
+    [SupplyParameterFromForm(Name = "location", FormName = "receipt")]
+    private string? Location { get; set; }
+
+    private string? itemCodeError;
+    private string? quantityError;
+    private string? locationError;
+
+    protected override void OnInitialized()
+    {
+        if (PocAuth.GetUser(HttpContext) is null)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        // GET 時產生新的冪等鍵；POST 驗證失敗時沿用表單帶回的值。
+        if (string.IsNullOrWhiteSpace(IdempotencyKey))
+        {
+            IdempotencyKey = Guid.NewGuid().ToString("N");
+        }
+    }
+
+    private void Submit()
+    {
+        var code = ItemCode?.Trim();
+        var item = FakeItemCatalog.FindByCode(code);
+        if (string.IsNullOrEmpty(code))
+        {
+            itemCodeError = "請輸入料號";
+        }
+        else if (item is null)
+        {
+            itemCodeError = "料號不存在";
+        }
+
+        if (!int.TryParse(Quantity?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var qty)
+            || qty < 1 || qty > 99999)
+        {
+            quantityError = "數量必須是 1～99999 的整數";
+        }
+
+        if (string.IsNullOrWhiteSpace(Location))
+        {
+            locationError = "請輸入儲位";
+        }
+
+        if (itemCodeError is not null || quantityError is not null || locationError is not null || item is null)
+        {
+            return;
+        }
+
+        // PRG：成功後 302 回 GET，避免重新整理重送表單。
+        Navigation.NavigateTo($"/receipt?done={Uri.EscapeDataString(item.ItemCode)}&qty={qty}");
+    }
+}

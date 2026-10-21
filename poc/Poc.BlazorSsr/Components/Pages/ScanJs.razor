@@ -1,0 +1,26 @@
+@page "/scan-js"
+@* 掃碼的「JS 佇列」變體：與 Razor Pages PoC 使用同一份 wwwroot/js/scan.js 與 /api/items/{code}，
+   用來區分「框架差異」與「表單送出 vs JS 佇列」的做法差異。
+   注意：enhanced navigation 進入本頁時，頁面內的 <script> 不會被執行，這也是要量測的行為。 *@
+@inject NavigationManager Navigation
+
+<PageTitle>掃碼（JS）</PageTitle>
+
+<h1>掃碼（JS 佇列）</h1>
+<input id="scan-input" type="text" autocomplete="off" autofocus />
+<p>已掃 <span id="scan-count">0</span> 筆</p>
+<ul id="scan-list"></ul>
+<script src="js/scan.js" defer></script>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (PocAuth.GetUser(HttpContext) is null)
+        {
+            Navigation.NavigateTo("/login");
+        }
+    }
+}

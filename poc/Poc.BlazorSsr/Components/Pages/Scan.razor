@@ -1,0 +1,98 @@
+@page "/scan"
+@* 掃碼做法（Blazor 靜態 SSR 最自然的方式，不寫任何自訂 JS）：
+   - 每筆掃碼 = 一次表單 POST（Enter 觸發 submit）。啟用 blazor.web.js 時由 enhanced form 以 fetch 送出並修補 DOM；
+     Poc__Enhanced=false 時為整頁表單 POST。
+   - 已掃清單跨請求保留：隱藏欄位 list 存目前清單（最新在前，每筆 Uri.EscapeDataString，以逗號分隔，最多 200 筆）。
+   - 送出後輸入框以 autofocus 取得焦點、內容清空（由伺服器重新輸出空的 value）。
+   已知風險：快速連掃時，前一個 enhanced form 請求還在進行中，使用者又在輸入框打字／按 Enter，
+   可能造成輸入遺失、清單被舊回應覆蓋或請求被取消；整頁 POST 變體則可能在載入中遺失按鍵。這正是 PoC 要量測的行為。 *@
+@inject NavigationManager Navigation
+
+<PageTitle>掃碼</PageTitle>
+
+<h1>掃碼</h1>
+<form method="post" @onsubmit="Submit" @formname="scan" data-enhance>
+    <AntiforgeryToken />
+    <input type="hidden" name="list" value="@SerializedList()" />
+    <div class="field">
+        <label for="scan-input">請掃描條碼後按 Enter</label>
+        <input type="text" id="scan-input" name="scanInput" value="@ScanInput" autofocus autocomplete="off" />
+    </div>
+</form>
+<p>已掃 <span id="scan-count">@entries.Count</span> 筆</p>
+<ul id="scan-list">
+    @foreach (var entry in entries)
+    {
+        var item = FakeItemCatalog.FindByCode(entry);
+        <li class="scan-row">
+            @if (item is not null)
+            {
+                <span class="item-code">@item.ItemCode</span>
+                <span class="item-name">@item.Name</span>
+            }
+            else
+            {
+                <span class="scan-error">找不到料號：@entry</span>
+            }
+        </li>
+    }
+</ul>
+
+@code {
+    private const int MaxEntries = 200;
+    private const int MaxEntryLength = 100;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm(Name = "scanInput", FormName = "scan")]
+    private string? ScanInput { get; set; }
+
+    [SupplyParameterFromForm(Name = "list", FormName = "scan")]
+    private string? ListState { get; set; }
+
+    // 最新在前。
+    private readonly List<string> entries = new();
+
+    protected override void OnInitialized()
+    {
+        if (PocAuth.GetUser(HttpContext) is null)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(ListState))
+        {
+            foreach (var part in ListState.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (entries.Count >= MaxEntries)
+                {
+                    break;
+                }
+                entries.Add(Uri.UnescapeDataString(part));
+            }
+        }
+    }
+
+    private void Submit()
+    {
+        var code = ScanInput?.Trim();
+        if (!string.IsNullOrEmpty(code))
+        {
+            if (code.Length > MaxEntryLength)
+            {
+                code = code[..MaxEntryLength];
+            }
+            entries.Insert(0, code);
+            if (entries.Count > MaxEntries)
+            {
+                entries.RemoveRange(MaxEntries, entries.Count - MaxEntries);
+            }
+        }
+        ScanInput = null;
+    }
+
+    private string SerializedList()
+        => string.Join(',', entries.Select(e => Uri.EscapeDataString(e)));
+}

@@ -1,0 +1,882 @@
+{
+  "generatedAt": "2026-10-21T18:45:31.6275515+08:00",
+  "mode": "full",
+  "environment": {
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "cpu": "AMD Ryzen 9 8940HX with Radeon Graphics",
+    "logicalCores": 32,
+    "totalMemoryGb": 15.2,
+    "dotnet": "10.0.13",
+    "note": "開發機＋CDP CPU 節流 4 倍模擬舊電腦；不等於實機量測"
+  },
+  "settings": {
+    "SearchRepeats": 30,
+    "LongRunSearches": 300,
+    "IdleSeconds": 60,
+    "CpuThrottleRate": 4
+  },
+  "serverMemory:razor-pages": {
+    "workingSetMb": 120.2,
+    "privateMb": 75
+  },
+  "serverMemory:blazor-ssr": {
+    "workingSetMb": 131.4,
+    "privateMb": 83.1
+  },
+  "serverMemory:blazor-ssr-noenhanced": {
+    "workingSetMb": 129.7,
+    "privateMb": 82.9
+  },
+  "runs": [
+    {
+      "target": "razor-pages",
+      "browser": "chromium-new",
+      "browserVersion": "153.0.8010.12",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 2,
+        "transferKb": 2.6,
+        "decodedKb": 2.3,
+        "domContentLoadedMs": 89,
+        "loadMs": 92,
+        "resources": [
+          {
+            "url": "/search",
+            "transfer": 1051,
+            "decoded": 898
+          },
+          {
+            "url": "/app.css",
+            "transfer": 1660,
+            "decoded": 1448
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 3,
+        "transferKb": 5.3,
+        "decodedKb": 4.7,
+        "domContentLoadedMs": 111,
+        "loadMs": 116,
+        "resources": [
+          {
+            "url": "/scan",
+            "transfer": 943,
+            "decoded": 790
+          },
+          {
+            "url": "/app.css",
+            "transfer": 1660,
+            "decoded": 1448
+          },
+          {
+            "url": "/js/scan.js",
+            "transfer": 2829,
+            "decoded": 2610
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 118
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 79,
+        "p95Ms": 91,
+        "maxMs": 136,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 116
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7156,
+        "settleMs": 2351
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 3.6,
+        "cpuPercent": 0.006
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 517,
+        "heapAfterKb": 1247,
+        "nodesBefore": 53,
+        "nodesAfter": 383,
+        "totalSeconds": 17.8
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "razor-pages",
+      "browser": "chromium-109",
+      "browserVersion": "109.0.5414.0",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 2,
+        "transferKb": 2.6,
+        "decodedKb": 2.3,
+        "domContentLoadedMs": 99,
+        "loadMs": 100,
+        "resources": [
+          {
+            "url": "/app.css",
+            "transfer": 1660,
+            "decoded": 1448
+          },
+          {
+            "url": "/search",
+            "transfer": 1051,
+            "decoded": 898
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 3,
+        "transferKb": 5.3,
+        "decodedKb": 4.7,
+        "domContentLoadedMs": 94,
+        "loadMs": 94,
+        "resources": [
+          {
+            "url": "/app.css",
+            "transfer": 1660,
+            "decoded": 1448
+          },
+          {
+            "url": "/scan",
+            "transfer": 943,
+            "decoded": 790
+          },
+          {
+            "url": "/js/scan.js",
+            "transfer": 2829,
+            "decoded": 2610
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 132
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 97,
+        "p95Ms": 110,
+        "maxMs": 128,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 127
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7831,
+        "settleMs": 2299
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 5.4,
+        "cpuPercent": 0.009
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 625,
+        "heapAfterKb": 1408,
+        "nodesBefore": 53,
+        "nodesAfter": 383,
+        "totalSeconds": 16.3
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "blazor-ssr",
+      "browser": "chromium-new",
+      "browserVersion": "153.0.8010.12",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 3,
+        "transferKb": 49.6,
+        "decodedKb": 199.1,
+        "domContentLoadedMs": 208,
+        "loadMs": 208,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/search",
+            "transfer": 1986,
+            "decoded": 1805
+          },
+          {
+            "url": "/_framework/blazor.web.cd06xom9c5.js",
+            "transfer": 47943,
+            "decoded": 200645
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 3,
+        "transferKb": 50.3,
+        "decodedKb": 199.4,
+        "domContentLoadedMs": 150,
+        "loadMs": 150,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/scan",
+            "transfer": 2642,
+            "decoded": 2139
+          },
+          {
+            "url": "/_framework/blazor.web.cd06xom9c5.js",
+            "transfer": 47943,
+            "decoded": 200645
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 79
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 82,
+        "p95Ms": 90,
+        "maxMs": 140,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 80
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 1,
+        "errorRowsExpected": 5,
+        "errorRows": 49,
+        "lostOrGarbled": 44,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：X-000049",
+          "ERR:找不到料號：019057",
+          "ERR:找不到料號：-018660",
+          "ERR:找不到料號：G-018263",
+          "ERR:找不到料號：-017866",
+          "ERR:找不到料號：E-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7323,
+        "settleMs": 2338
+      },
+      "scanJs": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7089,
+        "settleMs": 2298
+      },
+      "scanJsViaNavigation": {
+        "scanWorkedAfterNavigation": false
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 10.3,
+        "cpuPercent": 0.017
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 948,
+        "heapAfterKb": 1641,
+        "nodesBefore": 58,
+        "nodesAfter": 321,
+        "totalSeconds": 17.2
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "blazor-ssr",
+      "browser": "chromium-109",
+      "browserVersion": "109.0.5414.0",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 3,
+        "transferKb": 49.6,
+        "decodedKb": 199.1,
+        "domContentLoadedMs": 91,
+        "loadMs": 100,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/search",
+            "transfer": 1986,
+            "decoded": 1805
+          },
+          {
+            "url": "/_framework/blazor.web.cd06xom9c5.js",
+            "transfer": 47943,
+            "decoded": 200645
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 3,
+        "transferKb": 50.3,
+        "decodedKb": 199.4,
+        "domContentLoadedMs": 97,
+        "loadMs": 106,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/scan",
+            "transfer": 2642,
+            "decoded": 2139
+          },
+          {
+            "url": "/_framework/blazor.web.cd06xom9c5.js",
+            "transfer": 47943,
+            "decoded": 200645
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 84
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 108,
+        "p95Ms": 118,
+        "maxMs": 141,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 85
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 1,
+        "errorRowsExpected": 5,
+        "errorRows": 49,
+        "lostOrGarbled": 44,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：X-000049",
+          "ERR:找不到料號：E-019057",
+          "ERR:找不到料號：F-018660",
+          "ERR:找不到料號：G-018263",
+          "ERR:找不到料號：F-017866",
+          "ERR:找不到料號：E-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7896,
+        "settleMs": 2369
+      },
+      "scanJs": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7783,
+        "settleMs": 2369
+      },
+      "scanJsViaNavigation": {
+        "scanWorkedAfterNavigation": false
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 6.9,
+        "cpuPercent": 0.011
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 1029,
+        "heapAfterKb": 1762,
+        "nodesBefore": 58,
+        "nodesAfter": 321,
+        "totalSeconds": 16.9
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "blazor-ssr-noenhanced",
+      "browser": "chromium-new",
+      "browserVersion": "153.0.8010.12",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 2,
+        "transferKb": 2.8,
+        "decodedKb": 3.1,
+        "domContentLoadedMs": 80,
+        "loadMs": 82,
+        "resources": [
+          {
+            "url": "/search",
+            "transfer": 1927,
+            "decoded": 1746
+          },
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 2,
+        "transferKb": 3.4,
+        "decodedKb": 3.4,
+        "domContentLoadedMs": 39,
+        "loadMs": 41,
+        "resources": [
+          {
+            "url": "/scan",
+            "transfer": 2583,
+            "decoded": 2080
+          },
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 109
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 75,
+        "p95Ms": 90,
+        "maxMs": 127,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 115
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 1,
+        "errorRowsExpected": 5,
+        "errorRows": 49,
+        "lostOrGarbled": 44,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：-000049",
+          "ERR:找不到料號：-019057",
+          "ERR:找不到料號：-018660",
+          "ERR:找不到料號：-018263",
+          "ERR:找不到料號：-017866",
+          "ERR:找不到料號：-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7304,
+        "settleMs": 2309
+      },
+      "scanJs": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7150,
+        "settleMs": 2266
+      },
+      "scanJsViaNavigation": {
+        "scanWorkedAfterNavigation": true
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 4.3,
+        "cpuPercent": 0.007
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 517,
+        "heapAfterKb": 1251,
+        "nodesBefore": 55,
+        "nodesAfter": 318,
+        "totalSeconds": 17.4
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "blazor-ssr-noenhanced",
+      "browser": "chromium-109",
+      "browserVersion": "109.0.5414.0",
+      "firstLoadSearch": {
+        "path": "/search",
+        "requests": 2,
+        "transferKb": 2.8,
+        "decodedKb": 3.1,
+        "domContentLoadedMs": 106,
+        "loadMs": 106,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/search",
+            "transfer": 1927,
+            "decoded": 1746
+          }
+        ]
+      },
+      "firstLoadScan": {
+        "path": "/scan",
+        "requests": 2,
+        "transferKb": 3.4,
+        "decodedKb": 3.4,
+        "domContentLoadedMs": 100,
+        "loadMs": 100,
+        "resources": [
+          {
+            "url": "/app.btxowjijj3.css",
+            "transfer": 903,
+            "decoded": 1448
+          },
+          {
+            "url": "/scan",
+            "transfer": 2583,
+            "decoded": 2080
+          }
+        ]
+      },
+      "login": {
+        "ok": true,
+        "redirectedToLogin": true,
+        "emptyRejected": true,
+        "loginMs": 117
+      },
+      "searchLatency": {
+        "repeats": 30,
+        "p50Ms": 98,
+        "p95Ms": 103,
+        "maxMs": 127,
+        "pagingOk": true,
+        "totalCounts": {
+          "伺服": "2592",
+          "螺絲": "1357",
+          "Omron": "2563",
+          "EL-000125": "0",
+          "軸承": "1350",
+          "感測器": "1340",
+          "A1": "85",
+          "繼電器": "1347",
+          "THK": "2535",
+          "端子台": "1390"
+        }
+      },
+      "receipt": {
+        "ok": true,
+        "hasIdempotencyKey": true,
+        "validationShown": true,
+        "valueKeptAfterError": true,
+        "prgUrl": "/receipt?done=FG-000011&qty=5",
+        "submitMs": 139
+      },
+      "scan": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 1,
+        "errorRowsExpected": 5,
+        "errorRows": 49,
+        "lostOrGarbled": 44,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：-000049",
+          "ERR:找不到料號：-019057",
+          "ERR:找不到料號：-018660",
+          "ERR:找不到料號：-018263",
+          "ERR:找不到料號：-017866",
+          "ERR:找不到料號：-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7973,
+        "settleMs": 2398
+      },
+      "scanJs": {
+        "sent": 50,
+        "rowsShown": 50,
+        "validExpected": 45,
+        "validFound": 45,
+        "errorRowsExpected": 5,
+        "errorRows": 5,
+        "lostOrGarbled": 0,
+        "scanCountText": "50",
+        "sampleRows": [
+          "ERR:找不到料號：XX-000049",
+          "ME-019057",
+          "SF-018660",
+          "FG-018263",
+          "SF-017866",
+          "ME-017469"
+        ],
+        "autofocus": true,
+        "focusKeptAtEnd": true,
+        "typingMs": 7825,
+        "settleMs": 2337
+      },
+      "scanJsViaNavigation": {
+        "scanWorkedAfterNavigation": true
+      },
+      "idleCpu": {
+        "seconds": 60,
+        "busyMs": 5.1,
+        "cpuPercent": 0.008
+      },
+      "longRunMemory": {
+        "searches": 300,
+        "heapBeforeKb": 625,
+        "heapAfterKb": 1412,
+        "nodesBefore": 55,
+        "nodesAfter": 318,
+        "totalSeconds": 16.4
+      },
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    },
+    {
+      "target": "blazor-wasm",
+      "browser": "chromium-new",
+      "browserVersion": "153.0.8010.12",
+      "firstLoad": {
+        "requests": 42,
+        "uncompressedKb": 7283.6,
+        "brotliEstimateKb": 2309.2,
+        "firstRenderMs": 1659
+      },
+      "consoleErrors": []
+    },
+    {
+      "target": "blazor-wasm",
+      "browser": "chromium-109",
+      "browserVersion": "109.0.5414.0",
+      "firstLoad": {
+        "requests": 42,
+        "uncompressedKb": 7283.6,
+        "brotliEstimateKb": 2309.2,
+        "firstRenderMs": 2006
+      },
+      "consoleErrors": []
+    }
+  ]
+}
