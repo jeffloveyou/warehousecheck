@@ -36,6 +36,9 @@
 | `docs/adr/0003-V1業務規則與範圍.md` | 料號、建檔核准、別名、追蹤模式、條碼選配、V1 範圍 |
 | `docs/adr/0004-負庫存與預留庫存.md` | 負庫存例外與預留庫存的規則、併發與測試 |
 | `docs/adr/0005-開發環境M0範圍與AI角色.md` | 開發工具、規模基線、M0 範圍、更新策略、AI 角色 |
+| `docs/adr/0006-M0開工決策與Win7相容.md` | 必填欄位、料號前綴、儲位與單位、專案結構、備份、更新相容期、Win7 支援 |
+| `scripts/check-env.ps1` | M0-01 開發環境檢查（唯讀） |
+| `scripts/bootstrap-solution.ps1` | M0-02 建立 solution 與分層專案（執行一次） |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |
 | `templates/feature-handoff.md` | 每項功能的修改與驗證交接卡 |
 
