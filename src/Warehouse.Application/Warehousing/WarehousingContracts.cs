@@ -57,6 +57,9 @@ public interface IWarehouseService
 
     Task<LocationRow?> GetLocationAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>依「倉庫碼＋儲位碼」精確查詢（掃碼用；兩個唯一索引）；輸入會先正規化（大小寫、全形）。</summary>
+    Task<LocationRow?> GetLocationByCodeAsync(string warehouseCode, string locationCode, CancellationToken cancellationToken);
+
     /// <summary>新增儲位；倉庫必須存在且啟用。</summary>
     Task<Guid> CreateLocationAsync(Guid warehouseId, LocationInput input, Actor actor, CancellationToken cancellationToken);
 

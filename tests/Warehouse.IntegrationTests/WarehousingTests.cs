@@ -109,9 +109,10 @@ public class WarehousingTests
         {
             var settings = new SettingsService(db, TimeProvider.System);
             var before = await settings.GetAsync(Ct);
-            await settings.UpdateAsync(before with { AllowSelfApproveOpening = !before.AllowSelfApproveOpening }, admin, Ct);
+            var flipped = before with { AllowSelfApproveOpening = !before.AllowSelfApproveOpening };
+            await settings.UpdateAsync(before, flipped, admin, Ct);
             Assert.Equal(!before.AllowSelfApproveOpening, (await settings.GetAsync(Ct)).AllowSelfApproveOpening);
-            await settings.UpdateAsync(before, admin, Ct); // 改回原值
+            await settings.UpdateAsync(flipped, before, admin, Ct); // 改回原值
         }
 
         await using var check = MigratedDatabaseFixture.CreateContext();
@@ -136,6 +137,64 @@ public class WarehousingTests
         var ex = await Assert.ThrowsAsync<PostgresException>(() => new NpgsqlCommand(sql, connection).ExecuteNonQueryAsync(Ct));
 
         Assert.Equal(PostgresErrorCodes.RestrictViolation, ex.SqlState);
+    }
+
+    // T-M3-01-12（審查 #2：不會默默蓋掉別人的設定）
+    [Fact]
+    public async Task 設定_兩人各改不同項目都保留_改同一項時後者收到衝突()
+    {
+        var a = new Actor(Guid.NewGuid(), "管理員甲", false);
+        var b = new Actor(Guid.NewGuid(), "管理員乙", false);
+        SystemSettings opened;
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            opened = await new SettingsService(db, TimeProvider.System).GetAsync(Ct);
+        }
+
+        // 乙改自核；甲（用開頁時的舊值）只改圖片開關
+        await WithSettingsAsync(s => s.UpdateAsync(opened, opened with { AllowSelfApproveOpening = !opened.AllowSelfApproveOpening }, b, Ct));
+        await WithSettingsAsync(s => s.UpdateAsync(opened, opened with { LocationImagesEnabled = !opened.LocationImagesEnabled }, a, Ct));
+        var now = await WithSettingsAsync(s => s.GetAsync(Ct));
+        Assert.Equal(!opened.AllowSelfApproveOpening, now.AllowSelfApproveOpening); // 乙的修改還在
+        Assert.Equal(!opened.LocationImagesEnabled, now.LocationImagesEnabled);
+
+        // 甲又用舊畫面改自核 → 衝突
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(() =>
+            WithSettingsAsync(s => s.UpdateAsync(opened, opened with { AllowSelfApproveOpening = !opened.AllowSelfApproveOpening }, a, Ct)));
+
+        await WithSettingsAsync(s => s.UpdateAsync(now, opened, a, Ct)); // 還原，避免影響其他測試
+    }
+
+    // T-M3-01-13（審查 #1：精確查儲位，不受相似儲位數量影響）
+    [Fact]
+    public async Task 依倉庫碼與儲位碼精確查詢_大量相似儲位也找得到_大小寫全形皆可()
+    {
+        var crowded = await WithAsync(s => s.CreateWarehouseAsync(new WarehouseInput(Code(), "相似儲位"), Manager, Ct));
+        for (var n = 0; n < 60; n++)
+        {
+            await WithAsync(s => s.CreateLocationAsync(crowded, new LocationInput($"A-{n:D2}", Empty with { Name = "A" }), Manager, Ct));
+        }
+        var target = Code();
+        var w = await WithAsync(s => s.CreateWarehouseAsync(new WarehouseInput(target.ToLowerInvariant(), "目標"), Manager, Ct));
+        var id = await WithAsync(s => s.CreateLocationAsync(w, new LocationInput("a", Empty), Manager, Ct)); // 小寫輸入會正規化
+
+        var found = await WithAsync(s => s.GetLocationByCodeAsync(target.ToLowerInvariant(), "Ａ", Ct));
+
+        Assert.Equal(id, found!.Id);
+        Assert.Equal("A", found.Code);
+        Assert.Null(await WithAsync(s => s.GetLocationByCodeAsync("NOPE", "A", Ct)));
+    }
+
+    private static async Task<T> WithSettingsAsync<T>(Func<ISettingsService, Task<T>> action)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        return await action(new SettingsService(db, TimeProvider.System));
+    }
+
+    private static async Task WithSettingsAsync(Func<ISettingsService, Task> action)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        await action(new SettingsService(db, TimeProvider.System));
     }
 
     private static string Code() => "T" + Guid.NewGuid().ToString("N")[..7].ToUpperInvariant();

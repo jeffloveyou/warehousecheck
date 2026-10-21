@@ -40,7 +40,8 @@ public static partial class ScanCodeParser
             return new ScanCode(ScanCodeKind.Location, original, location.Groups["wh"].Value, location.Groups["loc"].Value, null);
         }
         var item = ItemPattern().Match(text);
-        if (item.Success)
+        // 沒有 WH:ITEM: 前綴的 MR-000125 是申請單號，不是料號：交給搜尋處理（M3-01 審查 #8）
+        if (item.Success && !(item.Groups["code"].Value.StartsWith("MR-", StringComparison.Ordinal) && !text.StartsWith(ItemPrefix, StringComparison.Ordinal)))
         {
             return new ScanCode(ScanCodeKind.Item, original, null, null, item.Groups["code"].Value);
         }

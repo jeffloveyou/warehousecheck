@@ -47,8 +47,7 @@ public class LocationModel(
         {
             var original = await warehouses.GetLocationAsync(id, cancellationToken)
                 ?? throw new NotFoundException("location.not_found", "找不到儲位。");
-            var current = await settings.GetAsync(cancellationToken);
-            var details = Form.KeepHidden(original, current.LocationNotesEnabled, current.LocationAttributesEnabled).ToDetails();
+            var details = Form.KeepHidden(original).ToDetails();
             await warehouses.UpdateLocationAsync(id, Version, details, User.ToActor(), cancellationToken);
             return "已儲存。";
         }, cancellationToken);

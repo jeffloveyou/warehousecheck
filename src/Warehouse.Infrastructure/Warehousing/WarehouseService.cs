@@ -26,7 +26,8 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     public async Task<Guid> CreateWarehouseAsync(WarehouseInput input, Actor actor, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        var warehouse = new WarehouseSite(Guid.NewGuid(), input.Code, input.Name, now);
+        // 代碼先正規化（小寫、全形都接受），Domain 仍檢查嚴格格式（M3-01 審查 #7）
+        var warehouse = new WarehouseSite(Guid.NewGuid(), TextNormalizer.Normalize(input.Code), input.Name, now);
         db.Warehouses.Add(warehouse);
         AuditLog.Add(db, actor, now, "warehouse.create", "warehouse", warehouse.Id.ToString(), null,
             new { warehouse.Code, warehouse.Name });
@@ -105,6 +106,15 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         return new PagedResult<LocationRow>(rows, page, pageSize, total);
     }
 
+    public Task<LocationRow?> GetLocationByCodeAsync(string warehouseCode, string locationCode, CancellationToken cancellationToken)
+    {
+        var wc = TextNormalizer.Normalize(warehouseCode);
+        var lc = TextNormalizer.Normalize(locationCode);
+        var locations = db.Locations.AsNoTracking()
+            .Where(l => l.Code == lc && db.Warehouses.Any(w => w.Id == l.WarehouseId && w.Code == wc));
+        return ToRows(locations, ordered: false).SingleOrDefaultAsync(cancellationToken);
+    }
+
     public Task<LocationRow?> GetLocationAsync(Guid id, CancellationToken cancellationToken) =>
         ToRows(db.Locations.AsNoTracking().Where(l => l.Id == id), ordered: false).SingleOrDefaultAsync(cancellationToken);
 
@@ -118,7 +128,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
             throw new DomainRuleException("倉庫已停用，不能新增儲位。");
         }
         var now = clock.GetUtcNow();
-        var location = Location.Create(Guid.NewGuid(), warehouseId, input.Code, input.Details, now);
+        var location = Location.Create(Guid.NewGuid(), warehouseId, TextNormalizer.Normalize(input.Code), input.Details, now);
         db.Locations.Add(location);
         AuditLog.Add(db, actor, now, "location.create", "location", location.Id.ToString(), null,
             new { WarehouseCode = warehouse.Code, location.Code, input.Details });

@@ -37,6 +37,9 @@ public sealed partial class Location
     public const int NoteMaxLength = 500;
     public const int SegmentMaxLength = 10;
 
+    /// <summary>承重上限的最大值（資料庫 numeric(12,2)，留安全空間）。</summary>
+    public const decimal MaxLoadLimitKg = 9_999_999m;
+
     private Location()
     {
     }
@@ -104,9 +107,10 @@ public sealed partial class Location
         {
             throw new DomainRuleException("儲位類型不正確。");
         }
-        if (details.MaxLoadKg is < 0)
+        if (details.MaxLoadKg is { } load
+            && (load < 0 || load > MaxLoadLimitKg || decimal.Round(load, 2) != load))
         {
-            throw new DomainRuleException("承重上限不可小於 0。");
+            throw new DomainRuleException($"承重上限必須介於 0～{MaxLoadLimitKg:#,0} 公斤，最多 2 位小數。");
         }
         Name = Rules.Optional(details.Name, NameMaxLength, "儲位名稱");
         Note = Rules.Optional(details.Note, NoteMaxLength, "備註");

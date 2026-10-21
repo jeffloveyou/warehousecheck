@@ -36,12 +36,12 @@
 {
     <form method="post" asp-page-handler="Update" class="panel" id="location-edit-form">
         <h2>修改</h2>
-        <input type="hidden" asp-for="Version" />
+        <input type="hidden" name="Version" id="edit-version" value="@Model.Version" />
         <partial name="_LocationFields" model="(Model.Form, Model.Settings, false)" />
         <div class="actions"><button type="submit" id="location-save">儲存</button></div>
     </form>
     <form method="post" asp-page-handler="Status" class="panel filters" id="location-status-form">
-        <input type="hidden" asp-for="Version" />
+        <input type="hidden" name="Version" id="status-version" value="@Model.Version" />
         <label for="NewStatus">變更狀態</label>
         <select id="NewStatus" name="NewStatus">
             @foreach (var status in Enum.GetValues<LocationStatus>().Where(s => s != l.Status))

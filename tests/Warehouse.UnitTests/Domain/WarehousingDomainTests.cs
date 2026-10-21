@@ -57,6 +57,8 @@ public class WarehousingDomainTests
 
         Assert.Throws<DomainRuleException>(() =>
             location.Update(Empty with { MaxLoadKg = -1 }, Now));
+        Assert.Throws<DomainRuleException>(() => location.Update(Empty with { MaxLoadKg = 100_000_000_000m }, Now));
+        Assert.Throws<DomainRuleException>(() => location.Update(Empty with { MaxLoadKg = 1.005m }, Now));
         location.Update(Empty with { Zone = " A ", Note = "  ", LocationType = LocationType.Cold, Hazardous = true }, Now);
         location.ChangeStatus(LocationStatus.Inspection, Now);
 
@@ -73,6 +75,7 @@ public class WarehousingDomainTests
     [InlineData("ＷＨ：ＬＯＣ：Ｗ１：Ａ０１", ScanCodeKind.Location, "W1", "A01", null)]      // 全形
     [InlineData("WH:ITEM:EL-000125", ScanCodeKind.Item, null, null, "EL-000125")]
     [InlineData("el-000125", ScanCodeKind.Item, null, null, "EL-000125")]
+    [InlineData("MR-000125", ScanCodeKind.Text, null, null, null)]                         // 申請單號不是料號
     [InlineData("WH:LOC:W1", ScanCodeKind.Text, null, null, null)]                         // 缺儲位碼
     [InlineData("伺服放大器", ScanCodeKind.Text, null, null, null)]
     [InlineData("", ScanCodeKind.Text, null, null, null)]

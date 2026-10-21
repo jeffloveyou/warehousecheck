@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Warehouse.Application.Abstractions;
+using Warehouse.Application.Errors;
 using Warehouse.Application.Settings;
 using Warehouse.Infrastructure.Persistence;
 
@@ -20,6 +22,58 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
     public async Task<SystemSettings> GetAsync(CancellationToken cancellationToken)
     {
         var values = await db.SystemSettings.AsNoTracking().ToDictionaryAsync(s => s.Key, s => s.Value, cancellationToken);
+        return From(values);
+    }
+
+    public async Task UpdateAsync(
+        SystemSettings original, SystemSettings updated, Actor actor, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // 鎖住設定表的所有列：同時儲存的兩個請求排隊執行，後到的一方看得到先到的結果
+        await db.Database.ExecuteSqlAsync($"SELECT 1 FROM system_settings FOR UPDATE", cancellationToken);
+        var now = clock.GetUtcNow();
+        var existing = await db.SystemSettings.ToDictionaryAsync(s => s.Key, cancellationToken);
+        var current = From(existing.ToDictionary(e => e.Key, e => e.Value.Value));
+
+        foreach (var (key, before, after, inDatabase) in Pairs(original, updated, current))
+        {
+            if (before == after)
+            {
+                continue; // 使用者沒有改這一項：不動它（避免把別人剛改的值蓋回去）
+            }
+            if (inDatabase != before)
+            {
+                throw new ConcurrencyConflictException(
+                    "setting.concurrency_conflict", "設定已被他人修改，請重新載入後再儲存。");
+            }
+            var text = after ? "true" : "false";
+            if (existing.TryGetValue(key, out var row))
+            {
+                AuditLog.Add(db, actor, now, "setting.update", "setting", key, new { value = row.Value }, new { value = text });
+                row.Set(text, actor.Name, now);
+            }
+            else
+            {
+                // 舊資料庫還沒有這個鍵：新增一列並記錄（變更前為空）
+                row = SystemSetting.Seed(key, text);
+                row.Set(text, actor.Name, now);
+                db.SystemSettings.Add(row);
+                AuditLog.Add(db, actor, now, "setting.update", "setting", key, null, new { value = text });
+            }
+        }
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new ConcurrencyConflictException("setting.concurrency_conflict", "設定已被他人修改，請重新載入後再儲存。");
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static SystemSettings From(IReadOnlyDictionary<string, string> values)
+    {
         bool Flag(string key, bool fallback) => values.TryGetValue(key, out var v) ? v == "true" : fallback;
         return new SystemSettings(
             Flag(SettingKeys.AllowSelfApproveOpening, Defaults.AllowSelfApproveOpening),
@@ -28,37 +82,13 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             Flag(SettingKeys.LocationImagesEnabled, Defaults.LocationImagesEnabled));
     }
 
-    public async Task UpdateAsync(SystemSettings settings, Actor actor, CancellationToken cancellationToken)
-    {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var now = clock.GetUtcNow();
-        var existing = await db.SystemSettings.ToDictionaryAsync(s => s.Key, cancellationToken);
-        foreach (var (key, value) in new[]
-        {
-            (SettingKeys.AllowSelfApproveOpening, settings.AllowSelfApproveOpening),
-            (SettingKeys.LocationNotesEnabled, settings.LocationNotesEnabled),
-            (SettingKeys.LocationAttributesEnabled, settings.LocationAttributesEnabled),
-            (SettingKeys.LocationImagesEnabled, settings.LocationImagesEnabled),
-        })
-        {
-            var text = value ? "true" : "false";
-            if (!existing.TryGetValue(key, out var row))
-            {
-                // 舊資料庫還沒有這個鍵：新增一列並記錄（變更前為空）
-                row = SystemSetting.Seed(key, text);
-                row.Set(text, actor.Name, now);
-                db.SystemSettings.Add(row);
-                AuditLog.Add(db, actor, now, "setting.update", "setting", key, null, new { value = text });
-                continue;
-            }
-            if (row.Value == text)
-            {
-                continue;
-            }
-            AuditLog.Add(db, actor, now, "setting.update", "setting", key, new { value = row.Value }, new { value = text });
-            row.Set(text, actor.Name, now);
-        }
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
+    /// <summary>每個鍵的（開表單時的值、送出的值、資料庫目前的值）。</summary>
+    private static IEnumerable<(string Key, bool Before, bool After, bool Current)> Pairs(
+        SystemSettings original, SystemSettings updated, SystemSettings current) =>
+    [
+        (SettingKeys.AllowSelfApproveOpening, original.AllowSelfApproveOpening, updated.AllowSelfApproveOpening, current.AllowSelfApproveOpening),
+        (SettingKeys.LocationNotesEnabled, original.LocationNotesEnabled, updated.LocationNotesEnabled, current.LocationNotesEnabled),
+        (SettingKeys.LocationAttributesEnabled, original.LocationAttributesEnabled, updated.LocationAttributesEnabled, current.LocationAttributesEnabled),
+        (SettingKeys.LocationImagesEnabled, original.LocationImagesEnabled, updated.LocationImagesEnabled, current.LocationImagesEnabled),
+    ];
 }

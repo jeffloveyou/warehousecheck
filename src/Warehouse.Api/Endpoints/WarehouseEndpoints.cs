@@ -37,8 +37,7 @@ public static class WarehouseEndpoints
             LocationRow? location = null;
             if (scan.Kind == ScanCodeKind.Location)
             {
-                var found = await warehouses.SearchLocationsAsync(new LocationSearch(null, scan.LocationCode, null, 1, 50), ct);
-                location = found.Items.FirstOrDefault(l => l.WarehouseCode == scan.WarehouseCode && l.Code == scan.LocationCode);
+                location = await warehouses.GetLocationByCodeAsync(scan.WarehouseCode!, scan.LocationCode!, ct);
             }
             return TypedResults.Ok(new { scan.Kind, scan.WarehouseCode, scan.LocationCode, scan.ItemCode, Location = location });
         });

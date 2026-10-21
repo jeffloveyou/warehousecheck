@@ -38,6 +38,12 @@ public sealed class LocationForm
 
     public bool Hazardous { get; set; }
 
+    /// <summary>開表單時是否顯示了備註欄（隱藏欄位帶回）；送出時依此決定要不要沿用原值。</summary>
+    public bool NotesShown { get; set; }
+
+    /// <summary>開表單時是否顯示了結構化屬性欄位。</summary>
+    public bool AttributesShown { get; set; }
+
     public LocationDetails ToDetails() =>
         new(Name, Note, Zone, Rack, Level, Bin, LocationType, MaxLoadKg, TemperatureControlled, Hazardous);
 
@@ -49,10 +55,13 @@ public sealed class LocationForm
     };
 
     /// <summary>
-    /// 設定關閉的欄位，表單不會顯示也不會送出；修改時沿用原本的值，資料不會因為關閉功能而被清掉（M6-05 原則）。
+    /// 開表單時沒顯示的欄位不會送出；修改時沿用原本的值，資料不會因為關閉功能而被清掉（M6-05 原則）。
+    /// 依「開表單當時」是否顯示判斷（隱藏欄位帶回），送出前設定被切換也不會清掉資料（M3-01 審查 #5）。
     /// </summary>
-    public LocationForm KeepHidden(LocationRow original, bool notesEnabled, bool attributesEnabled)
+    public LocationForm KeepHidden(LocationRow original)
     {
+        var notesEnabled = NotesShown;
+        var attributesEnabled = AttributesShown;
         if (!notesEnabled)
         {
             Note = original.Note;

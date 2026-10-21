@@ -1,6 +1,8 @@
 @using Warehouse.Domain.Warehousing
 @model (Warehouse.Web.Pages.Warehouses.LocationForm Form, Warehouse.Application.Settings.SystemSettings Settings, bool IsNew)
 @* 儲位欄位；備註與結構化屬性依系統設定開關顯示（M3-06）。欄位名稱為 Form.xxx。 *@
+<input type="hidden" name="Form.NotesShown" value="@Model.Settings.LocationNotesEnabled.ToString().ToLowerInvariant()" />
+<input type="hidden" name="Form.AttributesShown" value="@Model.Settings.LocationAttributesEnabled.ToString().ToLowerInvariant()" />
 <div class="form-grid">
     <label for="Form_Code">儲位碼 *</label>
     <div>
