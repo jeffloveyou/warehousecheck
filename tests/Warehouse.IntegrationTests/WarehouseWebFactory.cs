@@ -10,12 +10,12 @@ namespace Warehouse.IntegrationTests;
 /// </summary>
 public sealed class WarehouseWebFactory : WebApplicationFactory<Program>
 {
-    private readonly string _connectionString;
+    private readonly string? _connectionString;
     private readonly string _environment;
     private readonly IReadOnlyDictionary<string, string> _settings;
 
     public WarehouseWebFactory(
-        string connectionString,
+        string? connectionString,
         string environment = "Testing",
         IReadOnlyDictionary<string, string>? settings = null)
     {
@@ -27,7 +27,10 @@ public sealed class WarehouseWebFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(_environment);
-        builder.UseSetting("ConnectionStrings:Warehouse", _connectionString);
+        if (_connectionString is not null)
+        {
+            builder.UseSetting("ConnectionStrings:Warehouse", _connectionString);
+        }
         foreach (var (key, value) in _settings)
         {
             builder.UseSetting(key, value);
