@@ -18,3 +18,6 @@ public sealed class ConcurrencyConflictException(string errorCode, string messag
 
 /// <summary>登入者沒有執行此操作的權限（資源層級，例如只能撤回自己提出的物料）。</summary>
 public sealed class PermissionDeniedException(string errorCode, string message) : AppException(errorCode, message);
+
+/// <summary>業務衝突（例如別名已被其他物料使用、索引重複），HTTP 409。</summary>
+public class ConflictException(string errorCode, string message) : AppException(errorCode, message);

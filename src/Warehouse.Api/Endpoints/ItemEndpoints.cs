@@ -28,6 +28,10 @@ public sealed record RejectItemRequest(uint Version, string Comment, Guid? Dupli
 
 public sealed record ApproveItemResponse(string ItemCode);
 
+public sealed record AddIndexRequest(string Text);
+
+public sealed record AddIndexResponse(Guid EntryId);
+
 /// <summary>
 /// /api/items：給手機／PDA 等程式呼叫。網頁畫面直接呼叫同一組 Application 服務，不經過這些端點。
 /// 錯誤由 <see cref="Errors.ApiExceptionHandler"/> 轉成 ProblemDetails。
@@ -46,8 +50,37 @@ public static class ItemEndpoints
         items.MapPost("/{id:guid}/approve", ApproveAsync).RequireAuthorization(Policies.ItemsReview);
         items.MapPost("/{id:guid}/return", ReturnAsync).RequireAuthorization(Policies.ItemsReview);
         items.MapPost("/{id:guid}/reject", RejectAsync).RequireAuthorization(Policies.ItemsReview);
+
+        // 搜尋索引（M2）：kind 為 aliases（專屬別名）或 keywords（共用關鍵字）
+        items.MapGet("/{id:guid}/index", (IItemIndexService index, Guid id, CancellationToken ct) => index.ListAsync(id, ct));
+        // 兩組固定路由各自帶入種類（路由比對不分大小寫，不能靠解析網址字串判斷種類，M2 審查 R2）
+        foreach (var (segment, kind) in new[] { ("aliases", ItemIndexKind.Alias), ("keywords", ItemIndexKind.Keyword) })
+        {
+            items.MapPost($"/{{id:guid}}/{segment}",
+                    (IItemIndexService index, Guid id, AddIndexRequest request, HttpContext context, CancellationToken ct) =>
+                        AddIndexAsync(index, id, kind, request, context, ct))
+                .RequireAuthorization(Policies.ItemsIndex);
+            items.MapPost($"/{{id:guid}}/{segment}/{{entryId:guid}}/deactivate",
+                    (IItemIndexService index, Guid id, Guid entryId, HttpContext context, CancellationToken ct) =>
+                        DeactivateIndexAsync(index, id, kind, entryId, context, ct))
+                .RequireAuthorization(Policies.ItemsIndex);
+        }
     }
 
+    private static async Task<Created<AddIndexResponse>> AddIndexAsync(
+        IItemIndexService index, Guid id, ItemIndexKind kind, AddIndexRequest request, HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var entryId = await index.AddAsync(id, kind, request.Text, context.User.ToActor(), cancellationToken);
+        return TypedResults.Created($"/api/items/{id}/index", new AddIndexResponse(entryId));
+    }
+
+    private static async Task<NoContent> DeactivateIndexAsync(
+        IItemIndexService index, Guid id, ItemIndexKind kind, Guid entryId, HttpContext context, CancellationToken cancellationToken)
+    {
+        await index.DeactivateAsync(id, kind, entryId, context.User.ToActor(), cancellationToken);
+        return TypedResults.NoContent();
+    }
     private static Task<PagedResult<ItemListRow>> SearchAsync(
         IItemQueryService queries, string? keyword, ItemStatus? status, Guid? categoryId, int? page, int? pageSize,
         CancellationToken cancellationToken) =>

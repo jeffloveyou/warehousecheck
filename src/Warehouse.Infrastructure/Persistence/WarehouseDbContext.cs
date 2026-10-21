@@ -24,6 +24,10 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<ItemCodeCounter> ItemCodeCounters => Set<ItemCodeCounter>();
 
+    public DbSet<ItemAlias> ItemAliases => Set<ItemAlias>();
+
+    public DbSet<ItemKeyword> ItemKeywords => Set<ItemKeyword>();
+
     /// <summary>申請單號 MR-000125 的流水號來源（PostgreSQL sequence，併發安全；交易失敗會跳號，可接受）。</summary>
     public const string RequestNoSequence = "item_request_no_seq";
 

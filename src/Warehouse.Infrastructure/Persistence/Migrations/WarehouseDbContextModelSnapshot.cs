@@ -359,6 +359,85 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemAlias", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by_name");
+
+                    b.Property<DateTimeOffset?>("DeactivatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deactivated_at");
+
+                    b.Property<Guid?>("DeactivatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deactivated_by_id");
+
+                    b.Property<string>("DeactivatedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("deactivated_by_name");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("normalized_text");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("text");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_item_aliases");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_item_aliases_item_id");
+
+                    b.HasIndex("NormalizedText")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_aliases_active_normalized_text")
+                        .HasFilter("is_active");
+
+                    b.ToTable("item_aliases", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_aliases_deactivation", "is_active = (deactivated_at IS NULL) AND (deactivated_at IS NULL) = (deactivated_by_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_item_aliases_text_not_blank", "btrim(text) <> '' AND normalized_text <> ''");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.ItemCategory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -482,6 +561,85 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             ItemCodePrefix = "CS",
                             Name = "耗材",
                             SortOrder = 60
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemKeyword", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by_name");
+
+                    b.Property<DateTimeOffset?>("DeactivatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deactivated_at");
+
+                    b.Property<Guid?>("DeactivatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deactivated_by_id");
+
+                    b.Property<string>("DeactivatedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("deactivated_by_name");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("normalized_text");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("text");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_item_keywords");
+
+                    b.HasIndex("NormalizedText")
+                        .HasDatabaseName("ix_item_keywords_normalized_text");
+
+                    b.HasIndex("ItemId", "NormalizedText")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_keywords_active_item_text")
+                        .HasFilter("is_active");
+
+                    b.ToTable("item_keywords", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_keywords_deactivation", "is_active = (deactivated_at IS NULL) AND (deactivated_at IS NULL) = (deactivated_by_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_item_keywords_text_not_blank", "btrim(text) <> '' AND normalized_text <> ''");
                         });
                 });
 
@@ -872,6 +1030,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_items_item_categories_category_id");
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemAlias", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_aliases_items_item_id");
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.ItemCategory", b =>
                 {
                     b.HasOne("Warehouse.Domain.Items.ItemCategory", null)
@@ -879,6 +1047,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_item_categories_item_categories_parent_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemKeyword", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_keywords_items_item_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Items.ItemReview", b =>

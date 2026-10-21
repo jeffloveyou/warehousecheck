@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Warehouse.Api.Authorization;
@@ -13,7 +14,9 @@ namespace Warehouse.Web.Pages.Items;
 /// 物料明細、審核紀錄與審核動作。按鈕依角色與狀態顯示，但權限一律由 <see cref="IItemWorkflowService"/> 再檢查
 /// （只隱藏按鈕擋不住直接送出的請求）。每個動作都帶回讀取時的版本（xmin），別人先改過會顯示衝突。
 /// </summary>
-public class DetailsModel(IItemQueryService queries, IItemWorkflowService workflow) : PageModel
+public class DetailsModel(
+    IItemQueryService queries, IItemWorkflowService workflow, IItemIndexService index, IAuthorizationService authorization)
+    : PageModel
 {
     public ItemDetails Item { get; private set; } = null!;
 
@@ -33,7 +36,21 @@ public class DetailsModel(IItemQueryService queries, IItemWorkflowService workfl
     [BindProperty]
     public Guid? DuplicateOfItemId { get; set; }
 
+    public IReadOnlyList<ItemIndexRow> Indexes { get; private set; } = [];
+
+    /// <summary>新增索引的文字；從搜尋頁「把搜尋文字加到物料」過來時以 ?indexText= 預先填入（M2-04）。</summary>
+    [BindProperty(SupportsGet = true)]
+    public string? IndexText { get; set; }
+
+    [BindProperty]
+    public ItemIndexKind IndexKind { get; set; } = ItemIndexKind.Keyword;
+
+    /// <summary>別名被其他物料占用時，畫面提供「改加為共用關鍵字」。</summary>
+    public string? SuggestKeyword { get; private set; }
+
     public bool IsManager => User.IsInRole(Roles.ItemManager);
+
+    public bool CanAddIndex => Item.Status == ItemStatus.Active && (IsManager || User.IsInRole(Roles.Operator));
 
     public bool IsSubmitter => Item.CreatedById is { } id && id == User.ToActor().Id;
 
@@ -82,6 +99,35 @@ public class DetailsModel(IItemQueryService queries, IItemWorkflowService workfl
             return "已重新啟用。";
         }, cancellationToken);
 
+    public async Task<IActionResult> OnPostAddIndexAsync(Guid id, CancellationToken cancellationToken) =>
+        !await CanMaintainIndexAsync() ? Forbid() : await RunAsync(id, async actor =>
+        {
+            try
+            {
+                await index.AddAsync(id, IndexKind, IndexText ?? string.Empty, actor, cancellationToken);
+            }
+            catch (AliasTakenException)
+            {
+                SuggestKeyword = IndexText;
+                throw;
+            }
+            return $"已新增{(IndexKind == ItemIndexKind.Alias ? "專屬別名" : "共用關鍵字")}「{IndexText?.Trim()}」。";
+        }, cancellationToken);
+
+    public async Task<IActionResult> OnPostDeactivateIndexAsync(Guid id, Guid entryId, ItemIndexKind kind, CancellationToken cancellationToken) =>
+        !await CanMaintainIndexAsync() ? Forbid() : await RunAsync(id, async actor =>
+        {
+            await index.DeactivateAsync(id, kind, entryId, actor, cancellationToken);
+            return "已停用這筆搜尋索引。";
+        }, cancellationToken);
+
+    /// <summary>
+    /// 頁面資料夾只要求登入（Items.Read）；新增、停用索引在伺服器端另外檢查 Items.Index 政策，
+    /// 與 API 相同（M2 審查 R1：只隱藏表單擋不住直接送出的請求）。
+    /// </summary>
+    private async Task<bool> CanMaintainIndexAsync() =>
+        (await authorization.AuthorizeAsync(User, Policies.ItemsIndex)).Succeeded;
+
     /// <summary>執行動作：成功時轉址（PRG，重新整理不會重送）；已知錯誤時重新載入並顯示訊息。</summary>
     private async Task<IActionResult> RunAsync(Guid id, Func<Actor, Task<string>> action, CancellationToken cancellationToken)
     {
@@ -109,6 +155,7 @@ public class DetailsModel(IItemQueryService queries, IItemWorkflowService workfl
         }
         Item = item;
         Version = item.Version;
+        Indexes = await index.ListAsync(id, cancellationToken);
         // 待核准時列出重複候選，供管理員核准前確認、或拒絕時選擇「重複於」
         if (item.Status == ItemStatus.PendingApproval && IsManager)
         {

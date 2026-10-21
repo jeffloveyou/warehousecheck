@@ -26,6 +26,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetails) :
             PermissionDeniedException e => (StatusCodes.Status403Forbidden, e.ErrorCode),
             ConcurrencyConflictException e => (StatusCodes.Status409Conflict, e.ErrorCode),
             DuplicateCandidatesUnconfirmedException e => (StatusCodes.Status409Conflict, e.ErrorCode),
+            ConflictException e => (StatusCodes.Status409Conflict, e.ErrorCode),
             DomainRuleException => (StatusCodes.Status400BadRequest, "domain_rule"),
             _ => (0, null),
         };
@@ -39,6 +40,11 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetails) :
         if (exception is DuplicateCandidatesUnconfirmedException duplicate)
         {
             problem.Extensions["candidates"] = duplicate.Candidates;
+        }
+        if (exception is AliasTakenException taken)
+        {
+            problem.Extensions["holderItemId"] = taken.HolderItemId;
+            problem.Extensions["holderLabel"] = taken.HolderLabel;
         }
         context.Response.StatusCode = status;
         return await problemDetails.TryWriteAsync(new ProblemDetailsContext
