@@ -37,6 +37,8 @@
 | `docs/adr/0004-負庫存與預留庫存.md` | 負庫存例外與預留庫存的規則、併發與測試 |
 | `docs/adr/0005-開發環境M0範圍與AI角色.md` | 開發工具、規模基線、M0 範圍、更新策略、AI 角色 |
 | `docs/adr/0006-M0開工決策與Win7相容.md` | 必填欄位、料號前綴、儲位與單位、專案結構、備份、更新相容期、Win7 支援 |
+| `docs/adr/0007-前端技術選型.md` | M0-08 Razor Pages vs Blazor SSR 量測結果與建議（提案） |
+| `poc/` | M0-08 前端比較 PoC 與 Playwright 量測工具（不屬於正式程式） |
 | `scripts/check-env.ps1` | M0-01 開發環境檢查（唯讀） |
 | `scripts/bootstrap-solution.ps1` | M0-02 建立 solution 與分層專案（執行一次） |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |

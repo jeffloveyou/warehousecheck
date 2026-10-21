@@ -1,0 +1,38 @@
+@page "/receipt"
+@model ReceiptModel
+@{
+    ViewData["Title"] = "入庫";
+}
+<h1>入庫</h1>
+@if (Model.DoneItemCode is not null)
+{
+    <p id="receipt-success">入庫成功：@Model.DoneItemCode，數量 @Model.DoneQuantity</p>
+}
+<form method="post" id="receipt-form">
+    <input type="hidden" name="idempotencyKey" value="@Model.IdempotencyKey" />
+    <div class="field">
+        <label for="itemCode">料號</label>
+        <input id="itemCode" name="itemCode" type="text" value="@Model.ItemCode" autocomplete="off" />
+        @if (Model.ErrorFor("itemCode") is { } e1)
+        {
+            <div class="field-error">@e1</div>
+        }
+    </div>
+    <div class="field">
+        <label for="quantity">數量</label>
+        <input id="quantity" name="quantity" type="number" value="@Model.Quantity" />
+        @if (Model.ErrorFor("quantity") is { } e2)
+        {
+            <div class="field-error">@e2</div>
+        }
+    </div>
+    <div class="field">
+        <label for="location">儲位</label>
+        <input id="location" name="location" type="text" value="@Model.Location" autocomplete="off" />
+        @if (Model.ErrorFor("location") is { } e3)
+        {
+            <div class="field-error">@e3</div>
+        }
+    </div>
+    <button id="receipt-submit" type="submit">送出</button>
+</form>

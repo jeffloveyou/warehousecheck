@@ -34,3 +34,7 @@ logs/
 .idea/
 Thumbs.db
 .DS_Store
+
+# M0-08 量測用瀏覽器（下載檔，不提交）
+poc/.browsers/
+poc/.publish/

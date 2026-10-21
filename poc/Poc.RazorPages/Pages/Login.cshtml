@@ -1,0 +1,17 @@
+@page "/login"
+@model LoginModel
+@{
+    ViewData["Title"] = "登入";
+}
+<h1>登入</h1>
+<form method="post" id="login-form">
+    <div class="field">
+        <label for="username">帳號</label>
+        <input id="username" name="username" type="text" value="@Model.Username" autocomplete="off" />
+        @if (Model.Error is not null)
+        {
+            <div class="field-error">@Model.Error</div>
+        }
+    </div>
+    <button id="login-submit" type="submit">登入</button>
+</form>

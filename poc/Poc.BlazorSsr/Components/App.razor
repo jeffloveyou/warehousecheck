@@ -1,0 +1,32 @@
+﻿@* 兩種執行變體：
+   預設（Poc:Enhanced 未設或為 true）輸出 blazor.web.js，啟用 enhanced navigation / enhanced form。
+   環境變數 Poc__Enhanced=false 時不輸出該 script，變成純伺服器表單＋整頁導覽。 *@
+@inject IConfiguration Configuration
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <link rel="icon" href="data:," />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <ImportMap />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    @if (EnhancedEnabled)
+    {
+        <script src="@Assets["_framework/blazor.web.js"]"></script>
+    }
+</body>
+
+</html>
+
+@code {
+    private bool EnhancedEnabled =>
+        !bool.TryParse(Configuration["Poc:Enhanced"], out var enabled) || enabled;
+}

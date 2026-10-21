@@ -1,0 +1,27 @@
+﻿@page "/"
+@inject NavigationManager Navigation
+
+<PageTitle>首頁</PageTitle>
+
+<h1>首頁</h1>
+@if (user is not null)
+{
+    <p id="welcome">歡迎，@user</p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? user;
+
+    protected override void OnInitialized()
+    {
+        // 靜態 SSR 下 NavigateTo 會轉成 302；BlazorDisableThrowNavigationException=true，呼叫後要自行 return。
+        user = PocAuth.GetUser(HttpContext);
+        if (user is null)
+        {
+            Navigation.NavigateTo("/login");
+        }
+    }
+}

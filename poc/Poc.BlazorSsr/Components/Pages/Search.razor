@@ -1,0 +1,84 @@
+@page "/search"
+@inject NavigationManager Navigation
+
+<PageTitle>查料</PageTitle>
+
+<h1>查料</h1>
+<form id="search-form" method="get" action="/search">
+    <div class="field">
+        <label for="q">關鍵字</label>
+        <input type="text" id="q" name="q" value="@Q" autocomplete="off" />
+    </div>
+    <button type="submit">查詢</button>
+</form>
+
+@if (hint)
+{
+    <p id="search-hint">請輸入 1～@FakeItemCatalog.MaxQueryLength 字的料號或品名關鍵字。</p>
+}
+else if (result is not null)
+{
+    <p>共 <span id="total-count">@result.TotalCount</span> 筆</p>
+    <table id="results">
+        <thead>
+            <tr><th>料號</th><th>品名</th><th>儲位</th><th>命中原因</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var hit in result.Hits)
+            {
+                <tr class="result-row">
+                    <td class="item-code">@hit.Item.ItemCode</td>
+                    <td class="item-name">@hit.Item.Name</td>
+                    <td class="location">@hit.Item.Location</td>
+                    <td class="hit-reason">@hit.HitReason</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="pager">
+        @if (result.Page > 1)
+        {
+            <a id="prev-page" href="@PageUrl(result.Page - 1)">上一頁</a>
+        }
+        @if (result.Page < result.TotalPages)
+        {
+            <a id="next-page" href="@PageUrl(result.Page + 1)">下一頁</a>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    private string? Q { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    private int? PageNumber { get; set; }
+
+    private bool hint;
+    private PocSearchPage? result;
+
+    protected override void OnInitialized()
+    {
+        if (PocAuth.GetUser(HttpContext) is null)
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        var q = (Q ?? string.Empty).Trim();
+        if (q.Length == 0 || q.Length > FakeItemCatalog.MaxQueryLength)
+        {
+            hint = true;
+            return;
+        }
+
+        // 搜尋與分頁都在伺服器端完成，每頁 20 筆。
+        result = FakeItemCatalog.Search(q, PageNumber ?? 1);
+    }
+
+    private string PageUrl(int page)
+        => $"/search?q={Uri.EscapeDataString((Q ?? string.Empty).Trim())}&page={page}";
+}

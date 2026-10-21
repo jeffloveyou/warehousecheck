@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <link rel="icon" href="data:," />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] - 倉庫 PoC (Razor Pages)</title>
+    <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+    <nav id="nav">
+        <a id="nav-home" href="/">首頁</a>
+        <a id="nav-search" href="/search">查料</a>
+        <a id="nav-receipt" href="/receipt">入庫</a>
+        <a id="nav-scan" href="/scan">掃碼</a>
+    </nav>
+    <main>
+        @RenderBody()
+    </main>
+</body>
+</html>

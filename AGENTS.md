@@ -15,7 +15,7 @@
 ## 二、技術基線（部分待 M0 PoC）
 - C# / .NET 10 LTS、ASP.NET Core Web API、PostgreSQL、EF Core/Npgsql、單體模組化。
 - 專案分層可包含 `Domain`、`Application`、`Infrastructure`、`Api`、`Web`、`Tests`。
-- 前端技術**尚未決定**：M0 比較 Razor Pages 與 Blazor 靜態 SSR（WASM 僅作載入量參考，見 ADR-0005）。優先低 CPU、低 RAM、低傳輸與舊電腦相容性；不預設使用 WASM。
+- 前端技術：**Razor Pages＋少量原生 JS**（ADR-0007，2026-10-21 核准）。需要即時互動處（如掃碼）用原生 JS 模組；不使用 Blazor 互動模式或 WASM。優先低 CPU、低 RAM、低傳輸與舊電腦相容性。
 - **前端最低相容基準為 Chrome 109／Edge 109**（長期支援 Windows 7，見 ADR-0006）；不得使用其不支援的 CSS／JS 功能，UI 交付須在 Chrome 109 實測。
 - 已核准的業務與環境決策見 `docs/adr/0003`～`0005`；待決事項見 `docs/08-待決事項.md`。
 - 保留手機 PWA 與相機掃碼功能，但 PWA 不等於支援離線庫存交易。
