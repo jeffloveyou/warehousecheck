@@ -18,25 +18,38 @@ public sealed partial class ItemCategory
 
     public ItemCategory(Guid id, Guid? parentId, string code, string name, string? itemCodePrefix, int sortOrder = 0)
     {
-        if (parentId == id)
+        Id = id;
+        Code = Rules.Matches(code, CodePattern(), "分類代碼", "2～20 碼大寫英數或連字號");
+        Apply(parentId, name, itemCodePrefix, sortOrder);
+    }
+
+    /// <summary>
+    /// 修改名稱、上層、前綴、排序。代碼不可改。
+    /// 需要查資料庫的規則（多層循環、已發號的前綴不可改）由 MasterDataService 在同一交易內檢查。
+    /// </summary>
+    public void Update(Guid? parentId, string name, string? itemCodePrefix, int sortOrder) =>
+        Apply(parentId, name, itemCodePrefix, sortOrder);
+
+    /// <summary>停用後不能再被新物料選用；既有物料與子分類不受影響。</summary>
+    public void Deactivate() => IsActive = false;
+
+    public void Reactivate() => IsActive = true;
+
+    private void Apply(Guid? parentId, string name, string? itemCodePrefix, int sortOrder)
+    {
+        if (parentId == Id)
         {
             throw new DomainRuleException("分類不可以把自己設為上層分類。");
         }
-        Id = id;
+        var prefix = string.IsNullOrWhiteSpace(itemCodePrefix) ? null : itemCodePrefix.Trim();
+        if (prefix is null && parentId is null)
+        {
+            throw new DomainRuleException("頂層分類必須設定料號前綴。");
+        }
+        var validName = Rules.Required(name, NameMaxLength, "分類名稱");
+        ItemCodePrefix = prefix is null ? null : Rules.Matches(prefix, PrefixPattern(), "料號前綴", "2～4 碼大寫英數");
         ParentId = parentId;
-        Code = Rules.Matches(code, CodePattern(), "分類代碼", "2～20 碼大寫英數或連字號");
-        Name = Rules.Required(name, NameMaxLength, "分類名稱");
-        if (itemCodePrefix is null)
-        {
-            if (parentId is null)
-            {
-                throw new DomainRuleException("頂層分類必須設定料號前綴。");
-            }
-        }
-        else
-        {
-            ItemCodePrefix = Rules.Matches(itemCodePrefix, PrefixPattern(), "料號前綴", "2～4 碼大寫英數");
-        }
+        Name = validName;
         SortOrder = sortOrder;
     }
 

@@ -19,6 +19,8 @@ public class UnitConfiguration : IEntityTypeConfiguration<Unit>
         builder.Property(u => u.Code).HasMaxLength(Unit.CodeMaxLength);
         builder.Property(u => u.Name).HasMaxLength(Unit.NameMaxLength);
         builder.Property(u => u.IsActive).HasDefaultValue(true).ValueGeneratedNever();
+        // 樂觀併發（M1-03 維護畫面）：PostgreSQL 系統欄位 xmin，不需要實際欄位
+        builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(u => u.Code).IsUnique();
 
         builder.HasData(SeedData.Units.Select(u => new Unit(u.Id, u.Code, u.Name, u.DecimalPlaces)));

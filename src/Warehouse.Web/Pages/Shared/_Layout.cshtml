@@ -1,3 +1,5 @@
+@using Warehouse.Application.Abstractions
+@using Warehouse.Api.Authorization
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -10,6 +12,26 @@
 <body>
     <nav id="nav">
         <a id="nav-home" href="/">系統狀態</a>
+        @if (User.Identity?.IsAuthenticated == true)
+        {
+            <a id="nav-items" href="/Items">物料</a>
+            @if (User.IsInRole(Roles.ItemManager))
+            {
+                <a id="nav-categories" href="/MasterData/Categories">分類</a>
+                <a id="nav-units" href="/MasterData/Units">單位</a>
+            }
+            <span class="nav-user">
+                @(User.FindFirst(ActorClaims.DisplayName)?.Value ?? User.Identity.Name)
+                <a href="/Account/ChangePassword">改密碼</a>
+                <form method="post" asp-page="/Account/Logout" class="inline" id="logout-form">
+                    <button type="submit" class="link">登出</button>
+                </form>
+            </span>
+        }
+        else
+        {
+            <a id="nav-login" href="/Account/Login">登入</a>
+        }
     </nav>
     <main>
         @RenderBody()

@@ -1,0 +1,27 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Items.EditModel
+@{
+    ViewData["Title"] = "修改物料";
+}
+<h1>修改物料 <span class="muted">@(Model.Item.ItemCode ?? Model.Item.RequestNo)</span></h1>
+<form method="post" id="item-edit-form">
+    <div asp-validation-summary="ModelOnly" class="message error"></div>
+    <input type="hidden" asp-for="Version" />
+    <partial name="_ItemFields" model="(Model.Input, Model.Options)" />
+    @if (Model.Candidates.Count > 0)
+    {
+        <div class="panel"><partial name="_DuplicateCandidates" model="(Model.Candidates, true)" /></div>
+    }
+    <div class="actions">
+        @if (Model.Item.Status == ItemStatus.Returned)
+        {
+            <button type="submit" asp-page-handler="Resubmit" id="item-resubmit">修改並重新送審</button>
+            <button type="submit" class="secondary" id="item-save">只儲存</button>
+        }
+        else
+        {
+            <button type="submit" id="item-save">儲存</button>
+        }
+        <a href="/Items/Details/@Model.Item.Id">取消</a>
+    </div>
+</form>

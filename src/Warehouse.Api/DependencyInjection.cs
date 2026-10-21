@@ -1,11 +1,14 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Warehouse.Api.Authorization;
 using Warehouse.Api.Endpoints;
+using Warehouse.Api.Errors;
 using Warehouse.Api.HealthChecks;
 
 namespace Warehouse.Api;
@@ -17,28 +20,33 @@ public static class DependencyInjection
     {
         services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
+        services.AddWarehouseAuthorization();
+        services.AddExceptionHandler<ApiExceptionHandler>();
+        // 列舉以文字傳遞（"PendingApproval"），與資料庫一致、容易閱讀
+        services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         return services;
     }
 
-    /// <summary>對應 /api 端點與 /health/live、/health/ready。</summary>
+    /// <summary>對應 /api 端點與 /health/live、/health/ready（健康檢查與系統資訊不需登入，供代理與監控使用）。</summary>
     public static IEndpointRouteBuilder MapWarehouseApi(this IEndpointRouteBuilder endpoints)
     {
         var api = endpoints.MapGroup("/api");
-        api.MapSystemEndpoints();
+        api.MapGroup("").AllowAnonymous().MapSystemEndpoints();
+        api.MapItemEndpoints();
 
         // live：不執行任何檢查，只代表處理程序可回應
         endpoints.MapHealthChecks("/health/live", new HealthCheckOptions
         {
             Predicate = _ => false,
             ResponseWriter = WriteHealthResponseAsync
-        });
+        }).AllowAnonymous();
 
         // ready：執行帶 ready 標籤的檢查（資料庫）；Unhealthy 預設回 503
         endpoints.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
             Predicate = check => check.Tags.Contains("ready"),
             ResponseWriter = WriteHealthResponseAsync
-        });
+        }).AllowAnonymous();
 
         return endpoints;
     }

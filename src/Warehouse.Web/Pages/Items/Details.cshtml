@@ -1,0 +1,119 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Items.DetailsModel
+@{
+    var item = Model.Item;
+    ViewData["Title"] = item.ItemCode ?? item.RequestNo;
+    var pending = item.Status == ItemStatus.PendingApproval;
+    var canEdit = item.Status != ItemStatus.Rejected
+        && (Model.IsManager || (Model.IsSubmitter && item.Status is ItemStatus.PendingApproval or ItemStatus.Returned));
+}
+<h1>@(item.ItemCode ?? "（尚無料號）") <span class="status-@item.Status">@Display.Of(item.Status)</span></h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+
+<dl class="status">
+    <dt>申請單號</dt><dd id="request-no">@item.RequestNo</dd>
+    <dt>正式料號</dt><dd id="item-code">@(item.ItemCode ?? "核准後產生")</dd>
+    <dt>品名</dt><dd>@item.Name</dd>
+    <dt>分類</dt><dd>@item.CategoryName</dd>
+    <dt>基本單位</dt><dd>@item.UnitCode</dd>
+    <dt>追蹤模式</dt><dd>@Display.Of(item.TrackingMode)</dd>
+    <dt>品牌</dt><dd>@item.Brand</dd>
+    <dt>原廠型號</dt><dd>@item.ManufacturerPartNo</dd>
+    <dt>規格</dt><dd style="white-space: pre-line">@item.Specification</dd>
+    <dt>負庫存</dt><dd>@(item.AllowNegativeStock ? $"允許，下限 -{item.NegativeStockLimit:0.####}" : "不允許")</dd>
+    <dt>建立／更新</dt><dd>@Display.Time(item.CreatedAt) ／ @Display.Time(item.UpdatedAt)</dd>
+</dl>
+
+<div class="actions">
+    @if (canEdit)
+    {
+        <a href="/Items/Edit/@item.Id" id="item-edit-link">@(item.Status == ItemStatus.Returned ? "修改並重新送審" : "修改")</a>
+    }
+    <a href="/Items">回清單</a>
+</div>
+
+@if (pending && Model.IsManager)
+{
+    <form method="post" class="panel" id="review-form">
+        <h2>審核</h2>
+        <input type="hidden" asp-for="Version" />
+        @if (Model.Candidates.Count > 0)
+        {
+            <div class="message warn">有 @Model.Candidates.Count 筆可能重複的物料。核准前請逐筆勾選「確認不同」；若確實重複，請選擇後按「判定重複並拒絕」。</div>
+            <partial name="_DuplicateCandidates" model="(Model.Candidates, true)" />
+            <p>
+                <label for="DuplicateOfItemId">重複於</label>
+                <select id="DuplicateOfItemId" name="DuplicateOfItemId">
+                    <option value="">（不是重複）</option>
+                    @foreach (var c in Model.Candidates)
+                    {
+                        <option value="@c.ItemId">@(c.ItemCode ?? c.RequestNo) @c.Name</option>
+                    }
+                </select>
+            </p>
+        }
+        else
+        {
+            <p class="muted">沒有找到可能重複的物料。</p>
+        }
+        <p><label for="Comment">意見（退回、拒絕必填）</label><textarea id="Comment" name="Comment" maxlength="@ItemReview.CommentMaxLength"></textarea></p>
+        <div class="actions">
+            <button type="submit" asp-page-handler="Approve" id="approve-button">核准並發料號</button>
+            <button type="submit" asp-page-handler="Return" class="secondary" id="return-button">退回修改</button>
+            <button type="submit" asp-page-handler="Reject" class="danger" id="reject-button">@(Model.Candidates.Count > 0 ? "判定重複並拒絕" : "拒絕")</button>
+        </div>
+    </form>
+}
+
+@if (Model.IsSubmitter && item.Status is ItemStatus.PendingApproval or ItemStatus.Returned)
+{
+    <form method="post" asp-page-handler="Withdraw" class="panel" id="withdraw-form">
+        <input type="hidden" asp-for="Version" />
+        <label for="WithdrawComment">撤回原因（選填）</label>
+        <input type="text" id="WithdrawComment" name="Comment" maxlength="@ItemReview.CommentMaxLength" />
+        <div class="actions"><button type="submit" class="secondary" id="withdraw-button">撤回申請</button></div>
+    </form>
+}
+
+@if (Model.IsManager && item.Status is ItemStatus.Active or ItemStatus.Inactive)
+{
+    var active = item.Status == ItemStatus.Active;
+    <form method="post" asp-page-handler="@(active ? "Deactivate" : "Reactivate")" class="panel" id="active-form">
+        <input type="hidden" asp-for="Version" />
+        <label for="ActiveComment">原因（選填）</label>
+        <input type="text" id="ActiveComment" name="Comment" maxlength="@ItemReview.CommentMaxLength" />
+        <div class="actions"><button type="submit" class="@(active ? "danger" : "")" id="active-button">@(active ? "停用（料號保留）" : "重新啟用")</button></div>
+    </form>
+}
+
+<h2>審核紀錄</h2>
+<div class="table-wrap">
+    <table id="review-history">
+        <thead><tr><th>時間</th><th>動作</th><th>狀態</th><th>操作者</th><th>意見</th></tr></thead>
+        <tbody>
+            @foreach (var r in item.Reviews)
+            {
+                <tr>
+                    <td>@Display.Time(r.OccurredAt)</td>
+                    <td>@Display.Of(r.Action)@(r.ItemCode is null ? "" : $"（{r.ItemCode}）")</td>
+                    <td>@Display.Of(r.FromStatus) → @Display.Of(r.ToStatus)</td>
+                    <td>@r.ActorName</td>
+                    <td>
+                        @r.Comment
+                        @if (r.DuplicateOfItemId is { } dup)
+                        {
+                            <div>重複於 <a href="/Items/Details/@dup">@r.DuplicateOfLabel</a></div>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

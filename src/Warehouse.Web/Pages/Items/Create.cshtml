@@ -1,0 +1,25 @@
+@page
+@model Warehouse.Web.Pages.Items.CreateModel
+@{
+    ViewData["Title"] = "提出新物料";
+}
+<h1>提出新物料</h1>
+<p class="muted">提出後會產生申請單號；物料管理員核准時才會發正式料號。</p>
+<form method="post" id="item-create-form">
+    <div asp-validation-summary="ModelOnly" class="message error"></div>
+    <input type="hidden" asp-for="RequestId" />
+    <partial name="_ItemFields" model="(Model.Input, Model.Options)" />
+
+    @if (Model.Candidates.Count > 0)
+    {
+        <div class="panel" id="duplicate-warning">
+            <div class="message warn">找到 @Model.Candidates.Count 筆可能重複的物料，請先確認不是同一個東西。</div>
+            <partial name="_DuplicateCandidates" model="(Model.Candidates, false)" />
+            <p><label><input type="checkbox" name="ConfirmSubmit" value="true" id="confirm-submit" /> 我已確認，仍要提出</label></p>
+        </div>
+    }
+    <div class="actions">
+        <button type="submit" id="item-create-submit">提出</button>
+        <a href="/Items">取消</a>
+    </div>
+</form>

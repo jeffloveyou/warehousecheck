@@ -1,0 +1,115 @@
+using Microsoft.EntityFrameworkCore;
+using Warehouse.Application.Abstractions;
+using Warehouse.Application.Items;
+using Warehouse.Domain.Items;
+using Warehouse.Domain.Text;
+using Warehouse.Infrastructure.Persistence;
+
+namespace Warehouse.Infrastructure.Items;
+
+/// <summary>
+/// 物料清單與明細查詢：AsNoTracking＋只投影需要的欄位，篩選、排序、分頁都在資料庫執行（warehouse-performance Skill）。
+/// </summary>
+public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
+{
+    public async Task<PagedResult<ItemListRow>> SearchAsync(ItemSearchQuery query, CancellationToken cancellationToken)
+    {
+        var page = Paging.ClampPage(query.Page);
+        var pageSize = Paging.ClampPageSize(query.PageSize);
+        var items = db.Items.AsNoTracking();
+
+        if (query.Status is { } status)
+        {
+            items = items.Where(i => i.Status == status);
+        }
+        if (query.CategoryId is { } categoryId)
+        {
+            items = items.Where(i => i.CategoryId == categoryId);
+        }
+        var keyword = query.Keyword?.Trim();
+        if (keyword?.Length > Paging.MaxKeywordLength)
+        {
+            keyword = keyword[..Paging.MaxKeywordLength];
+        }
+        if (!string.IsNullOrEmpty(keyword))
+        {
+            // 申請單號、料號完全相符（不分大小寫）；品名、型號部分相符。
+            // ILIKE '%…%' 無法用一般索引，資料量大時的搜尋改由 M2 的搜尋索引負責（docs/03）。
+            var upper = keyword.ToUpperInvariant();
+            var pattern = "%" + EscapeLike(keyword) + "%";
+            var partNo = TextNormalizer.NormalizePartNo(keyword);
+            items = items.Where(i =>
+                i.RequestNo == upper
+                || i.ItemCode == upper
+                || EF.Functions.ILike(i.Name, pattern, "\\")
+                || (i.ManufacturerPartNo != null && EF.Functions.ILike(i.ManufacturerPartNo, pattern, "\\"))
+                || (partNo != null && i.NormalizedPartNo == partNo));
+        }
+
+        var total = await items.CountAsync(cancellationToken);
+        var rows = await items
+            .OrderByDescending(i => i.UpdatedAt).ThenBy(i => i.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(i => new ItemListRow(
+                i.Id,
+                i.RequestNo,
+                i.ItemCode,
+                i.Name,
+                i.Brand,
+                i.ManufacturerPartNo,
+                i.Status,
+                db.ItemCategories.Where(c => c.Id == i.CategoryId).Select(c => c.Name).First(),
+                db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
+                i.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<ItemListRow>(rows, page, pageSize, total);
+    }
+
+    public async Task<ItemDetails?> GetAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var item = await db.Items.AsNoTracking()
+            .Where(i => i.Id == id)
+            .Select(i => new
+            {
+                Item = i,
+                Version = EF.Property<uint>(i, "Version"),
+                CategoryName = db.ItemCategories.Where(c => c.Id == i.CategoryId).Select(c => c.Name).First(),
+                UnitCode = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (item is null)
+        {
+            return null;
+        }
+
+        var reviews = await db.ItemReviews.AsNoTracking()
+            .Where(r => r.ItemId == id)
+            .OrderBy(r => r.OccurredAt)
+            .Select(r => new ItemReviewRow(
+                r.Action,
+                r.FromStatus,
+                r.ToStatus,
+                r.ItemCode,
+                r.DuplicateOfItemId,
+                r.DuplicateOfItemId == null
+                    ? null
+                    : db.Items.Where(d => d.Id == r.DuplicateOfItemId)
+                        .Select(d => (d.ItemCode ?? d.RequestNo) + " " + d.Name).FirstOrDefault(),
+                r.Comment,
+                r.ActorName,
+                r.OccurredAt))
+            .ToListAsync(cancellationToken);
+
+        var i = item.Item;
+        return new ItemDetails(
+            i.Id, i.RequestNo, i.ItemCode, i.Status, i.Name, i.CategoryId, item.CategoryName, i.BaseUnitId, item.UnitCode,
+            i.TrackingMode, i.Brand, i.ManufacturerPartNo, i.Specification, i.AllowNegativeStock, i.NegativeStockLimit,
+            i.CreatedById, i.CreatedAt, i.UpdatedAt, item.Version, reviews);
+    }
+
+    /// <summary>LIKE 的 % _ \ 是萬用字元，使用者輸入要先跳脫，避免「100%」被當成任意字串。</summary>
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+}

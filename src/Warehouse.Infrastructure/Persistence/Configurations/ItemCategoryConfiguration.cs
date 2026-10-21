@@ -23,6 +23,8 @@ public class ItemCategoryConfiguration : IEntityTypeConfiguration<ItemCategory>
         builder.Property(c => c.ItemCodePrefix).HasMaxLength(ItemCategory.PrefixMaxLength);
         builder.Property(c => c.IsActive).HasDefaultValue(true).ValueGeneratedNever();
         builder.Property(c => c.SortOrder).HasDefaultValue(0).ValueGeneratedNever();
+        // 樂觀併發（M1-03 維護畫面）：PostgreSQL 系統欄位 xmin，不需要實際欄位
+        builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(c => c.Code).IsUnique();
         // 一個料號前綴只屬於一個分類（ADR-0006）；子分類以 NULL 沿用上層，不受限制
         builder.HasIndex(c => c.ItemCodePrefix).IsUnique().HasFilter("item_code_prefix IS NOT NULL");

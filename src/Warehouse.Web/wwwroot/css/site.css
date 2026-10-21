@@ -12,3 +12,39 @@ dl.status dt { font-weight: bold; }
 dl.status dd { margin: 0; }
 .ok { color: #137333; }
 .bad { color: #b3261e; }
+
+/* M1-03：登入、物料、分類與單位 */
+nav { flex-wrap: wrap; align-items: center; }
+.nav-user { margin-left: auto; color: #fff; display: flex; gap: 12px; align-items: center; }
+form.inline { display: inline; margin: 0; }
+button.link { background: none; border: none; color: inherit; padding: 0; text-decoration: underline; font: inherit; }
+button.secondary { background: #fff; color: #243447; }
+button.danger { background: #b3261e; border-color: #b3261e; }
+h2 { font-size: 17px; margin: 20px 0 8px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: #f3f5f7; white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+.form-grid { display: grid; grid-template-columns: max-content minmax(0, 420px); gap: 8px 12px; align-items: center; }
+.form-grid label { font-weight: bold; }
+input[type=text], input[type=password], input[type=number], select, textarea { width: 100%; padding: 5px 6px; border: 1px solid #999; border-radius: 3px; font: inherit; }
+textarea { min-height: 60px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.filters input[type=text], .filters select { width: auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.panel { border: 1px solid #ccd; border-radius: 4px; padding: 10px 12px; margin: 12px 0; }
+.message { padding: 8px 12px; border-radius: 3px; margin: 8px 0; }
+.message.error { background: #fde8e7; color: #8c1d18; }
+.message.info { background: #e6f4ea; color: #0d652d; }
+.message.warn { background: #fef7e0; color: #7a5900; }
+.field-error { color: #b3261e; font-size: 13px; }
+.muted { color: #666; }
+.pager { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+.status-PendingApproval { color: #7a5900; }
+.status-Returned, .status-Rejected { color: #b3261e; }
+.status-Active { color: #137333; }
+.status-Inactive { color: #666; }
+@media (max-width: 600px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .nav-user { margin-left: 0; }
+}

@@ -1,0 +1,25 @@
+@page
+@model Warehouse.Web.Pages.Account.LoginModel
+@{
+    ViewData["Title"] = "登入";
+}
+<h1>登入</h1>
+<form method="post" id="login-form">
+    <div asp-validation-summary="ModelOnly" class="field-error"></div>
+    <div class="form-grid">
+        <label asp-for="Input.UserName"></label>
+        <div>
+            <input asp-for="Input.UserName" type="text" autocomplete="username" autofocus />
+            <span asp-validation-for="Input.UserName" class="field-error"></span>
+        </div>
+        <label asp-for="Input.Password"></label>
+        <div>
+            <input asp-for="Input.Password" autocomplete="current-password" />
+            <span asp-validation-for="Input.Password" class="field-error"></span>
+        </div>
+        <span></span>
+        <div><button type="submit" id="login-submit">登入</button></div>
+    </div>
+    <input type="hidden" asp-for="ReturnUrl" />
+</form>
+<p class="muted">沒有帳號或忘記密碼，請洽系統管理員。</p>
