@@ -42,6 +42,19 @@ public static class Display
     {
         DuplicateMatchReason.SamePartNo => "型號相同",
         DuplicateMatchReason.SameName => "品名相同",
+        DuplicateMatchReason.SameAlias => "別名相同",
+        _ => reason.ToString(),
+    };
+
+    public static string Of(Warehouse.Application.Search.HitReason reason) => reason switch
+    {
+        Warehouse.Application.Search.HitReason.ItemCode => "料號",
+        Warehouse.Application.Search.HitReason.RequestNo => "申請單號",
+        Warehouse.Application.Search.HitReason.Alias => "專屬別名",
+        Warehouse.Application.Search.HitReason.PartNo => "型號",
+        Warehouse.Application.Search.HitReason.Name => "品名",
+        Warehouse.Application.Search.HitReason.Keyword => "共用關鍵字",
+        Warehouse.Application.Search.HitReason.Partial => "部分符合",
         _ => reason.ToString(),
     };
 

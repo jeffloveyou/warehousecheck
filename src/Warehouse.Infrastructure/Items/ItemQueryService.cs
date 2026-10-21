@@ -36,13 +36,13 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
             // 申請單號、料號完全相符（不分大小寫）；品名、型號部分相符。
             // ILIKE '%…%' 無法用一般索引，資料量大時的搜尋改由 M2 的搜尋索引負責（docs/03）。
             var upper = keyword.ToUpperInvariant();
-            var pattern = "%" + EscapeLike(keyword) + "%";
+            var pattern = LikePattern.Contains(keyword);
             var partNo = TextNormalizer.NormalizePartNo(keyword);
             items = items.Where(i =>
                 i.RequestNo == upper
                 || i.ItemCode == upper
-                || EF.Functions.ILike(i.Name, pattern, "\\")
-                || (i.ManufacturerPartNo != null && EF.Functions.ILike(i.ManufacturerPartNo, pattern, "\\"))
+                || EF.Functions.ILike(i.Name, pattern, LikePattern.Escape)
+                || (i.ManufacturerPartNo != null && EF.Functions.ILike(i.ManufacturerPartNo, pattern, LikePattern.Escape))
                 || (partNo != null && i.NormalizedPartNo == partNo));
         }
 
@@ -108,8 +108,4 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
             i.TrackingMode, i.Brand, i.ManufacturerPartNo, i.Specification, i.AllowNegativeStock, i.NegativeStockLimit,
             i.CreatedById, i.CreatedAt, i.UpdatedAt, item.Version, reviews);
     }
-
-    /// <summary>LIKE 的 % _ \ 是萬用字元，使用者輸入要先跳脫，避免「100%」被當成任意字串。</summary>
-    private static string EscapeLike(string value) =>
-        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 }

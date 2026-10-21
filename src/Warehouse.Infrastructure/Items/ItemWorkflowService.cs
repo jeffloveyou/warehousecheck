@@ -37,21 +37,23 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
 
         // 在資料庫先把型號相同的排前面再截斷，避免大量同名物料把型號相同的候選擠出前 50 筆
         var rows = await CandidateQuery(normalizedName, normalizedPartNo, excludeItemId)
-            .OrderBy(i => normalizedPartNo != null && i.NormalizedPartNo == normalizedPartNo ? 0 : 1)
+            .OrderBy(i => normalizedPartNo != null && i.NormalizedPartNo == normalizedPartNo ? 0
+                : i.NormalizedName == normalizedName ? 1 : 2)
             .ThenBy(i => i.RequestNo)
             .Take(MaxDuplicateCandidates)
             .Select(i => new
             {
                 i.Id, i.RequestNo, i.ItemCode, i.Name, i.Brand, i.ManufacturerPartNo, i.Status, i.NormalizedPartNo,
+                i.NormalizedName,
             })
             .ToListAsync(cancellationToken);
 
         return rows
             .Select(r => new DuplicateCandidate(
                 r.Id, r.RequestNo, r.ItemCode, r.Name, r.Brand, r.ManufacturerPartNo, r.Status,
-                normalizedPartNo is not null && r.NormalizedPartNo == normalizedPartNo
-                    ? DuplicateMatchReason.SamePartNo
-                    : DuplicateMatchReason.SameName))
+                normalizedPartNo is not null && r.NormalizedPartNo == normalizedPartNo ? DuplicateMatchReason.SamePartNo
+                : r.NormalizedName == normalizedName ? DuplicateMatchReason.SameName
+                : DuplicateMatchReason.SameAlias))
             .ToList();
     }
 
@@ -269,7 +271,9 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             .Where(i => i.Status != ItemStatus.Rejected
                 && (excludeItemId == null || i.Id != excludeItemId)
                 && ((normalizedPartNo != null && i.NormalizedPartNo == normalizedPartNo)
-                    || (normalizedName != "" && i.NormalizedName == normalizedName)));
+                    || (normalizedName != "" && i.NormalizedName == normalizedName)
+                    // 新物料的品名等於某物料的有效專屬別名（ADR-0013 決策 8；共用關鍵字不比對）
+                    || (normalizedName != "" && db.ItemAliases.Any(a => a.ItemId == i.Id && a.IsActive && a.NormalizedText == normalizedName))));
 
     /// <summary>
     /// 有任何未確認的候選就擋下。判斷用不限筆數的 EXISTS（不受顯示上限 50 筆影響），

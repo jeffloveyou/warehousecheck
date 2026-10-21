@@ -179,6 +179,9 @@ public sealed partial class Item
         }
         NormalizedName = normalizedName;
         NormalizedPartNo = normalizedPartNo;
+        // 搜尋部分比對用（M2 審查 R1）：全形「ＤＣ２４Ｖ」也能用「24V」找到；只做 LIKE，不建索引
+        NormalizedBrand = Brand is null ? null : TextNormalizer.Normalize(Brand);
+        NormalizedSpecification = Specification is null ? null : TextNormalizer.Normalize(Specification);
         UpdatedAt = now.ToUniversalTime();
     }
 
@@ -216,6 +219,12 @@ public sealed partial class Item
 
     /// <summary>重複候選比對用的型號（<see cref="TextNormalizer.NormalizePartNo"/>）；沒有型號時為 null。</summary>
     public string? NormalizedPartNo { get; private set; }
+
+    /// <summary>搜尋用的品牌（<see cref="TextNormalizer.Normalize"/>）；沒有品牌時為 null。</summary>
+    public string? NormalizedBrand { get; private set; }
+
+    /// <summary>搜尋用的規格（<see cref="TextNormalizer.Normalize"/>）；沒有規格時為 null。</summary>
+    public string? NormalizedSpecification { get; private set; }
 
     /// <summary>提出人（使用者 ID）；用來判斷誰可以修改、撤回。M1-02 之前建立的資料為 null。</summary>
     public Guid? CreatedById { get; private set; }

@@ -22,6 +22,9 @@ public enum DuplicateMatchReason
 
     /// <summary>品名正規化後相同。</summary>
     SameName,
+
+    /// <summary>新物料的品名等於這個物料的有效專屬別名（M2，ADR-0013）。</summary>
+    SameAlias,
 }
 
 /// <summary>可能與新物料重複的既有物料（含待核准、退回、有效、停用；不含已拒絕）。</summary>

@@ -1,0 +1,42 @@
+@page
+@model Warehouse.Web.Pages.Search.AddIndexModel
+@using Warehouse.Application.Search
+@{
+    ViewData["Title"] = "加入搜尋索引";
+}
+<h1>把「@Model.Text」加到既有物料</h1>
+<p class="muted">先找出這個說法指的是哪一個物料（例如用料號、品名或型號），點選後在物料頁確認規格再新增。這裡不能建立新物料。</p>
+<form method="get" class="filters" id="target-form">
+    <input type="hidden" name="Text" value="@Model.Text" />
+    <input type="text" name="Target" value="@Model.Target" maxlength="@ItemSearch.MaxTextLength" placeholder="用料號、品名、型號找目標物料" aria-label="目標物料" autofocus />
+    <button type="submit" id="target-submit">找物料</button>
+</form>
+@if (Model.Result is { } result)
+{
+    <div class="table-wrap">
+        <table id="target-results">
+            <thead><tr><th></th><th>料號</th><th>品名</th><th>品牌</th><th>型號</th><th>規格</th></tr></thead>
+            <tbody>
+                @foreach (var hit in result.Items)
+                {
+                    <tr>
+                        <td><a href="@Model.DetailsUrl(hit.Id)">選這個</a></td>
+                        <td>@hit.ItemCode</td>
+                        <td>@hit.Name</td>
+                        <td>@hit.Brand</td>
+                        <td>@hit.ManufacturerPartNo</td>
+                        <td>@hit.SpecificationSummary</td>
+                    </tr>
+                }
+                @if (result.Items.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">找不到有效物料。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (result.TotalCount > result.Items.Count)
+    {
+        <p class="muted">只顯示前 @result.Items.Count 筆，請輸入更精確的條件。</p>
+    }
+}

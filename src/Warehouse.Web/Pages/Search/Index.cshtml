@@ -1,0 +1,68 @@
+@page
+@model Warehouse.Web.Pages.Search.IndexModel
+@using Warehouse.Application.Search
+@{
+    ViewData["Title"] = "搜尋";
+}
+<h1>搜尋物料</h1>
+<form method="get" class="filters" id="search-form">
+    <input type="text" name="Q" value="@Model.Q" maxlength="@ItemSearch.MaxTextLength" placeholder="料號、品名、型號、俗稱、用途…" aria-label="搜尋文字" autofocus />
+    <label><input type="checkbox" name="IncludeInactive" value="true" checked="@Model.IncludeInactive" /> 包含停用</label>
+    <button type="submit" id="search-submit">搜尋</button>
+</form>
+<p class="muted">可用空白分隔多個詞（最多 @ItemSearch.MaxTerms 個），每個詞都要符合。結果依「料號 → 專屬別名 → 型號／品名 → 共用關鍵字 → 部分符合」排序；請確認料號與規格再使用。</p>
+
+@if (Model.Result is { } result)
+{
+    @if (Model.IgnoredTerms.Count > 0)
+    {
+        <div class="message warn" id="ignored-terms">以下詞沒有用來做部分比對（單一英數或符號、或超過 @ItemSearch.MaxTerms 個詞）：@string.Join("、", Model.IgnoredTerms)</div>
+    }
+    <p class="muted">共 @result.TotalCount 筆</p>
+    <div class="table-wrap">
+        <table id="search-results">
+            <thead>
+                <tr><th>命中原因</th><th>料號</th><th>品名</th><th>品牌</th><th>型號</th><th>規格</th><th>分類</th><th>單位</th><th>狀態</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var hit in result.Items)
+                {
+                    <tr>
+                        <td><strong>@Display.Of(hit.Reason)</strong><div class="muted">@hit.HitText</div></td>
+                        <td><a href="/Items/Details/@hit.Id">@(hit.ItemCode ?? hit.RequestNo)</a></td>
+                        <td>@hit.Name</td>
+                        <td>@hit.Brand</td>
+                        <td>@hit.ManufacturerPartNo</td>
+                        <td>@hit.SpecificationSummary</td>
+                        <td>@hit.CategoryName</td>
+                        <td>@hit.UnitCode</td>
+                        <td class="status-@hit.Status">@Display.Of(hit.Status)</td>
+                    </tr>
+                }
+                @if (result.Items.Count == 0)
+                {
+                    <tr><td colspan="9" class="muted" id="no-result">找不到符合「@Model.Q」的物料。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        @if (result.Page > 1)
+        {
+            <a href="@Model.PageUrl(result.Page - 1)">上一頁</a>
+        }
+        <span>第 @result.Page / @result.TotalPages 頁</span>
+        @if (result.Page < result.TotalPages)
+        {
+            <a href="@Model.PageUrl(result.Page + 1)">下一頁</a>
+        }
+    </div>
+    @if (Model.CanAddIndex)
+    {
+        <div class="panel">
+            找不到想要的？
+            <a href="/Search/AddIndex?text=@Uri.EscapeDataString(Model.Q ?? "")" id="add-index-link">把「@Model.Q」加為既有物料的搜尋索引</a>，
+            下次就能直接查到。真的是新物料，請到 <a href="/Items/Create">提出新物料</a>（需經核准）。
+        </div>
+    }
+}

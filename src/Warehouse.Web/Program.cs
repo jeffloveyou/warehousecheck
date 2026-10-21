@@ -43,6 +43,8 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizePage("/Items/Create", Policies.ItemsSubmit);
     options.Conventions.AuthorizePage("/Items/Edit", Policies.ItemsSubmit);
     options.Conventions.AuthorizeFolder("/MasterData", Policies.MasterDataManage);
+    options.Conventions.AuthorizeFolder("/Search", Policies.ItemsRead);
+    options.Conventions.AuthorizePage("/Search/AddIndex", Policies.ItemsIndex);
 });
 // Razor 預設把中文等非 ASCII 字元輸出成 &#x....; 實體；允許全部 Unicode 範圍可直接輸出 UTF-8，頁面較小、原始碼可讀。
 // 仍會編碼 < > & " 等 HTML 特殊字元，不影響 XSS 防護。
@@ -68,6 +70,7 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseMustChangePassword();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapWarehouseApi();
 app.MapRazorPages();
