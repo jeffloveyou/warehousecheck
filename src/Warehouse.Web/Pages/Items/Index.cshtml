@@ -1,0 +1,72 @@
+@page
+@model Warehouse.Web.Pages.Items.IndexModel
+@{
+    ViewData["Title"] = "物料";
+}
+<h1>物料</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info">@message</div>
+}
+<form method="get" class="filters" id="item-filters">
+    <input type="text" name="q" value="@Model.Keyword" placeholder="申請單號、料號、品名、型號" aria-label="關鍵字" />
+    <select name="Status" aria-label="狀態">
+        <option value="">全部狀態</option>
+        @foreach (var status in Enum.GetValues<ItemStatus>())
+        {
+            <option value="@status" selected="@(Model.Status == status)">@Display.Of(status)</option>
+        }
+    </select>
+    <select name="CategoryId" aria-label="分類">
+        <option value="">全部分類</option>
+        @foreach (var category in Model.Categories)
+        {
+            <option value="@category.Id" selected="@(Model.CategoryId == category.Id)">@category.Path</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+    @if (User.IsInRole(Roles.Operator) || User.IsInRole(Roles.ItemManager))
+    {
+        <a href="/Items/Create" id="item-create-link">＋ 提出新物料</a>
+    }
+</form>
+
+<p class="muted">共 @Model.Result.TotalCount 筆</p>
+<div class="table-wrap">
+    <table id="item-list">
+        <thead>
+            <tr><th>料號</th><th>申請單號</th><th>品名</th><th>品牌</th><th>原廠型號</th><th>分類</th><th>單位</th><th>狀態</th><th>更新時間</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model.Result.Items)
+            {
+                <tr>
+                    <td><a href="/Items/Details/@item.Id">@(item.ItemCode ?? "—")</a></td>
+                    <td><a href="/Items/Details/@item.Id">@item.RequestNo</a></td>
+                    <td>@item.Name</td>
+                    <td>@item.Brand</td>
+                    <td>@item.ManufacturerPartNo</td>
+                    <td>@item.CategoryName</td>
+                    <td>@item.UnitCode</td>
+                    <td class="status-@item.Status">@Display.Of(item.Status)</td>
+                    <td>@Display.Time(item.UpdatedAt)</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="9" class="muted">沒有符合條件的物料。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)" id="next-page">下一頁</a>
+    }
+</div>

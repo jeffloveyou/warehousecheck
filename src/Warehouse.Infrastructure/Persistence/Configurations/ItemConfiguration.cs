@@ -60,7 +60,9 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         builder.HasIndex(i => i.RequestNo).IsUnique();
         builder.HasIndex(i => i.ItemCode).IsUnique();
         builder.HasIndex(i => i.CategoryId);
-        builder.HasIndex(i => i.Status);
+        // 清單預設依最後更新時間排序；依狀態篩選（例如待核准清單）時用複合索引，不再單獨索引 status（選擇性低，M1-01 審查 #11）
+        builder.HasIndex(i => i.UpdatedAt).IsDescending();
+        builder.HasIndex(i => new { i.Status, i.UpdatedAt }).IsDescending(false, true);
         builder.HasIndex(i => i.NormalizedName);
         builder.HasIndex(i => i.NormalizedPartNo);
 

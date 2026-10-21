@@ -1,0 +1,75 @@
+@page
+@model Warehouse.Web.Pages.MasterData.CategoriesModel
+@{
+    ViewData["Title"] = "分類";
+    var editing = Model.EditId is not null;
+}
+<h1>分類</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+
+<form method="post" asp-page-handler="Save" asp-route-edit="@Model.EditId" class="panel" id="category-form">
+    <h2>@(editing ? "修改分類" : "新增分類")</h2>
+    <div asp-validation-summary="All" class="field-error"></div>
+    <input type="hidden" asp-for="Version" />
+    <div class="form-grid">
+        <label asp-for="Input.ParentId"></label>
+        <select asp-for="Input.ParentId">
+            <option value="">（頂層分類）</option>
+            @* 保留目前的上層（即使已停用），否則只改名稱也會被當成「移到頂層」（M1-03 審查 R5） *@
+            @foreach (var c in Model.Categories.Where(c => (c.IsActive || c.Id == Model.Input.ParentId) && c.Id != Model.EditId))
+            {
+                <option value="@c.Id">@c.Path@(c.IsActive ? "" : "（已停用）")</option>
+            }
+        </select>
+        <label asp-for="Input.Code"></label>
+        <input asp-for="Input.Code" type="text" readonly="@editing" maxlength="20" placeholder="例：EL-SERVO" />
+        <label asp-for="Input.Name"></label>
+        <input asp-for="Input.Name" type="text" maxlength="50" />
+        <label asp-for="Input.ItemCodePrefix"></label>
+        <input asp-for="Input.ItemCodePrefix" type="text" maxlength="4" placeholder="頂層必填；子分類留空沿用上層" />
+        <label asp-for="Input.SortOrder"></label>
+        <input asp-for="Input.SortOrder" type="number" />
+    </div>
+    <div class="actions">
+        <button type="submit" id="category-save">@(editing ? "儲存" : "新增")</button>
+        @if (editing)
+        {
+            <a href="/MasterData/Categories">取消</a>
+        }
+    </div>
+    <p class="muted">代碼建立後不可修改；已發過正式料號的前綴不可修改。</p>
+</form>
+
+<div class="table-wrap">
+    <table id="category-list">
+        <thead><tr><th>分類</th><th>代碼</th><th>前綴（實際使用）</th><th>排序</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var c in Model.Categories)
+            {
+                <tr>
+                    <td>@c.Path</td>
+                    <td>@c.Code</td>
+                    <td>@(c.ItemCodePrefix ?? "—")（@c.EffectivePrefix）</td>
+                    <td>@c.SortOrder</td>
+                    <td>@(c.IsActive ? "啟用" : "停用")</td>
+                    <td>
+                        <a href="/MasterData/Categories?edit=@c.Id">修改</a>
+                        <form method="post" asp-page-handler="Toggle" class="inline">
+                            <input type="hidden" name="id" value="@c.Id" />
+                            <input type="hidden" name="version" value="@c.Version" />
+                            <input type="hidden" name="isActive" value="@((!c.IsActive).ToString().ToLowerInvariant())" />
+                            <button type="submit" class="link">@(c.IsActive ? "停用" : "啟用")</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.WebEncoders;
 using Warehouse.Api;
+using Warehouse.Api.Authorization;
 using Warehouse.Infrastructure;
 using Warehouse.Web;
+using Warehouse.Web.Security;
 
 // 以 Windows 服務執行時，目前目錄是 C:\Windows\System32，必須把內容根目錄設為程式所在目錄才找得到 wwwroot
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -29,7 +31,19 @@ if (string.IsNullOrWhiteSpace(connectionString))
 builder.Services.AddProblemDetails();
 builder.Services.AddWarehouseInfrastructure(connectionString);
 builder.Services.AddWarehouseApi();
-builder.Services.AddRazorPages();
+builder.Services.AddWarehouseIdentity();
+builder.Services.AddRazorPages(options =>
+{
+    // 預設全部頁面要登入（FallbackPolicy）；以下明確開放或要求特定權限（ADR-0012）
+    options.Conventions.AllowAnonymousToPage("/Index");
+    options.Conventions.AllowAnonymousToFolder("/Dev");
+    options.Conventions.AllowAnonymousToPage("/Account/Login");
+    options.Conventions.AllowAnonymousToPage("/Account/AccessDenied");
+    options.Conventions.AuthorizeFolder("/Items", Policies.ItemsRead);
+    options.Conventions.AuthorizePage("/Items/Create", Policies.ItemsSubmit);
+    options.Conventions.AuthorizePage("/Items/Edit", Policies.ItemsSubmit);
+    options.Conventions.AuthorizeFolder("/MasterData", Policies.MasterDataManage);
+});
 // Razor 預設把中文等非 ASCII 字元輸出成 &#x....; 實體；允許全部 Unicode 範圍可直接輸出 UTF-8，頁面較小、原始碼可讀。
 // 仍會編碼 < > & " 等 HTML 特殊字元，不影響 XSS 防護。
 builder.Services.Configure<WebEncoderOptions>(options =>
@@ -41,10 +55,19 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
+// 帳號管理命令列（users create …），執行完就結束，不啟動網站
+if (await UserCommands.TryRunAsync(app, args))
+{
+    return;
+}
+
 app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseMustChangePassword();
+app.UseAuthorization();
 
 app.MapWarehouseApi();
 app.MapRazorPages();

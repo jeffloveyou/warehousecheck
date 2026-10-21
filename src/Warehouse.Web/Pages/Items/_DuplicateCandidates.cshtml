@@ -1,0 +1,35 @@
+@model (IReadOnlyList<DuplicateCandidate> Candidates, bool Selectable)
+@* 重複候選清單。Selectable 為 true 時每列有「確認不是同一物料」勾選框，送出 AcknowledgedIds。 *@
+@if (Model.Candidates.Count > 0)
+{
+    <div class="table-wrap">
+        <table id="duplicate-candidates">
+            <thead>
+                <tr>
+                    @if (Model.Selectable)
+                    {
+                        <th>確認不同</th>
+                    }
+                    <th>原因</th><th>料號／申請單號</th><th>品名</th><th>品牌</th><th>原廠型號</th><th>狀態</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in Model.Candidates)
+                {
+                    <tr>
+                        @if (Model.Selectable)
+                        {
+                            <td><input type="checkbox" name="AcknowledgedIds" value="@c.ItemId" aria-label="確認 @(c.ItemCode ?? c.RequestNo) 不是同一物料" /></td>
+                        }
+                        <td>@Display.Of(c.Reason)</td>
+                        <td><a href="/Items/Details/@c.ItemId" target="_blank" rel="noopener">@(c.ItemCode ?? c.RequestNo)</a></td>
+                        <td>@c.Name</td>
+                        <td>@c.Brand</td>
+                        <td>@c.ManufacturerPartNo</td>
+                        <td class="status-@c.Status">@Display.Of(c.Status)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

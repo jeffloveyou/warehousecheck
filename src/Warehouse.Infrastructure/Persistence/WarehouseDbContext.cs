@@ -1,13 +1,18 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Warehouse.Domain.Items;
+using Warehouse.Infrastructure.Identity;
 
 namespace Warehouse.Infrastructure.Persistence;
 
 /// <summary>
 /// 系統唯一的 DbContext。資料表結構只能經 Migration 變更（docs/04 §3、warehouse-db-migration Skill）；
 /// 程式啟動時不自動套用 Migration。
+/// 繼承 IdentityDbContext：帳號、角色表與業務資料在同一個資料庫、同一套 Migration（ADR-0012）。
 /// </summary>
-public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options) : DbContext(options)
+public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
+    : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Unit> Units => Set<Unit>();
 
@@ -28,6 +33,29 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options) : 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // 先讓 Identity 建立預設模型，再改成較好讀的表名（預設是 asp_net_users 等）
+        base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<AppUser>(b =>
+        {
+            b.ToTable("users");
+            b.Property(u => u.DisplayName).HasMaxLength(AppUser.DisplayNameMaxLength);
+            b.Property(u => u.IsActive).HasDefaultValue(true).ValueGeneratedNever();
+            // Identity 預設索引名稱是 PascalCase（UserNameIndex），改成與其他表一致的 snake_case
+            b.HasIndex(u => u.NormalizedUserName).HasDatabaseName("ix_users_normalized_user_name");
+            b.HasIndex(u => u.NormalizedEmail).HasDatabaseName("ix_users_normalized_email");
+        });
+        modelBuilder.Entity<IdentityRole<Guid>>(b =>
+        {
+            b.ToTable("roles");
+            b.HasIndex(r => r.NormalizedName).HasDatabaseName("ix_roles_normalized_name");
+            b.HasData(RoleSeed.All);
+        });
+        modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
+        modelBuilder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");
+        modelBuilder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
+        modelBuilder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
+        modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims");
+
         modelBuilder.HasSequence<long>(RequestNoSequence);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WarehouseDbContext).Assembly);
     }

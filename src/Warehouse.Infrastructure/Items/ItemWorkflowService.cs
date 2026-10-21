@@ -153,7 +153,9 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             await EnsureCategoryAndUnitUsableAsync(item.CategoryId, item.BaseUnitId, cancellationToken);
             await EnsureNoUnconfirmedCandidatesAsync(item, acknowledgedCandidateIds, cancellationToken);
 
-            // 2. 發號：依分類前綴遞增計數器（同交易，失敗會一起回滾、不占號）
+            // 2. 發號：依分類前綴遞增計數器（同交易，失敗會一起回滾、不占號）。
+            //    先取分類樹的共享鎖：正在修改前綴的交易完成後才讀前綴，前綴不會在發號途中被改掉
+            await AdvisoryLocks.LockCategoryTreeAsync(db, exclusive: false, cancellationToken);
             var prefix = await ResolveItemCodePrefixAsync(item.CategoryId, cancellationToken);
             itemCode = await _numbers.NextItemCodeAsync(prefix, cancellationToken);
             item.Approve(itemCode, now);

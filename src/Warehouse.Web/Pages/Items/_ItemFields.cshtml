@@ -1,0 +1,68 @@
+@model (Warehouse.Web.Pages.Items.ItemFormInput Input, Warehouse.Web.Pages.Items.ItemFormOptions Options)
+@* 提出與修改共用的欄位。欄位名稱固定為 Input.xxx，對應 PageModel 的 [BindProperty] Input。 *@
+<div class="form-grid">
+    <label for="Input_Name">品名 *</label>
+    <div>
+        <input type="text" id="Input_Name" name="Input.Name" value="@Model.Input.Name" maxlength="@Item.NameMaxLength" required />
+        <span class="field-error" data-valmsg-for="Input.Name">@ViewData.ModelState["Input.Name"]?.Errors.FirstOrDefault()?.ErrorMessage</span>
+    </div>
+
+    <label for="Input_CategoryId">分類 *</label>
+    <div>
+        @if (Model.Options.LockClassification)
+        {
+            <input type="hidden" name="Input.CategoryId" value="@Model.Input.CategoryId" />
+        }
+        <select id="Input_CategoryId" name="Input.CategoryId" required disabled="@Model.Options.LockClassification">
+            <option value="">（請選擇）</option>
+            @foreach (var option in Model.Options.Categories)
+            {
+                <option value="@option.Value" selected="@(option.Value == Model.Input.CategoryId?.ToString())">@option.Text</option>
+            }
+        </select>
+        <span class="field-error">@ViewData.ModelState["Input.CategoryId"]?.Errors.FirstOrDefault()?.ErrorMessage</span>
+    </div>
+
+    <label for="Input_BaseUnitId">基本單位 *</label>
+    <div>
+        @if (Model.Options.LockClassification)
+        {
+            <input type="hidden" name="Input.BaseUnitId" value="@Model.Input.BaseUnitId" />
+        }
+        <select id="Input_BaseUnitId" name="Input.BaseUnitId" required disabled="@Model.Options.LockClassification">
+            <option value="">（請選擇）</option>
+            @foreach (var option in Model.Options.Units)
+            {
+                <option value="@option.Value" selected="@(option.Value == Model.Input.BaseUnitId?.ToString())">@option.Text</option>
+            }
+        </select>
+        <span class="field-error">@ViewData.ModelState["Input.BaseUnitId"]?.Errors.FirstOrDefault()?.ErrorMessage</span>
+    </div>
+
+    <label for="Input_TrackingMode">追蹤模式 *</label>
+    <div>
+        @if (Model.Options.LockClassification)
+        {
+            <input type="hidden" name="Input.TrackingMode" value="@Model.Input.TrackingMode" />
+        }
+        <select id="Input_TrackingMode" name="Input.TrackingMode" disabled="@Model.Options.LockClassification">
+            @foreach (var option in Model.Options.TrackingModes)
+            {
+                <option value="@option.Value" selected="@(option.Value == Model.Input.TrackingMode.ToString())">@option.Text</option>
+            }
+        </select>
+    </div>
+
+    <label for="Input_Brand">品牌</label>
+    <div><input type="text" id="Input_Brand" name="Input.Brand" value="@Model.Input.Brand" maxlength="@Item.BrandMaxLength" /></div>
+
+    <label for="Input_ManufacturerPartNo">原廠型號</label>
+    <div><input type="text" id="Input_ManufacturerPartNo" name="Input.ManufacturerPartNo" value="@Model.Input.ManufacturerPartNo" maxlength="@Item.ManufacturerPartNoMaxLength" /></div>
+
+    <label for="Input_Specification">規格</label>
+    <div><textarea id="Input_Specification" name="Input.Specification" maxlength="@Item.SpecificationMaxLength">@Model.Input.Specification</textarea></div>
+</div>
+@if (Model.Options.LockClassification)
+{
+    <p class="muted">已核准的物料不可變更分類、基本單位、追蹤模式。</p>
+}
