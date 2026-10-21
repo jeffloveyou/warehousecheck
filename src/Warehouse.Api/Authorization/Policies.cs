@@ -73,6 +73,6 @@ public static class ActorClaims
         var id = user.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? throw new InvalidOperationException("登入身分缺少使用者 ID。");
         var name = user.FindFirstValue(DisplayName) ?? user.Identity?.Name ?? "（未知）";
-        return new Actor(Guid.Parse(id), name, user.IsInRole(Roles.ItemManager));
+        return new Actor(Guid.Parse(id), name, user.IsInRole(Roles.ItemManager), user.IsInRole(Roles.WarehouseManager));
     }
 }

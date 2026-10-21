@@ -67,6 +67,9 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
         return new PagedResult<ItemListRow>(rows, page, pageSize, total);
     }
 
+    public async Task<Guid?> FindIdByItemCodeAsync(string itemCode, CancellationToken cancellationToken) =>
+        await db.Items.AsNoTracking().Where(i => i.ItemCode == itemCode).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken);
+
     public async Task<ItemDetails?> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var item = await db.Items.AsNoTracking()

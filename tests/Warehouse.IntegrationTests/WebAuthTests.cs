@@ -468,6 +468,76 @@ public partial class WebAuthTests
         Assert.Contains("settings-form", await admin.GetStringAsync("/Settings"));
     }
 
+    // T-M3-03-11
+    [Fact]
+    public async Task 期初頁面流程_作業員建立送出_主管以API核准需冪等鍵_庫存頁看得到()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var operatorName = NewUserName();
+        var managerName = NewUserName();
+        var itemManagerName = NewUserName();
+        await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+        await WebSession.CreateUserAsync(factory, managerName, Password, Roles.WarehouseManager);
+        await WebSession.CreateUserAsync(factory, itemManagerName, Password, Roles.ItemManager);
+        var op = WebSession.Create(factory);
+        var manager = WebSession.Create(factory);
+        var itemManager = WebSession.Create(factory);
+        await op.LoginAsync(operatorName, Password);
+        await manager.LoginAsync(managerName, Password);
+        await itemManager.LoginAsync(itemManagerName, Password);
+        var code = "S" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+
+        // 主管建倉庫與儲位；物料管理員建一個有效物料
+        await manager.PostFormAsync("/Warehouses", "/Warehouses?handler=Save", new Dictionary<string, string> { ["Code"] = code, ["Name"] = "期初頁面" });
+        var warehouseId = (await op.Client.GetFromJsonAsync<JsonElement>("/api/warehouses", Ct)).EnumerateArray()
+            .Single(w => w.GetProperty("code").GetString() == code).GetProperty("id").GetGuid();
+        await manager.PostFormAsync($"/Warehouses/Locations?warehouseId={warehouseId}", $"/Warehouses/Locations?handler=Create&WarehouseId={warehouseId}",
+            new Dictionary<string, string> { ["Form.Code"] = "A-01" });
+        var created = await itemManager.Client.PostAsJsonAsync("/api/items", new
+        {
+            requestId = Guid.NewGuid(), name = "期初頁面物料 " + code, categoryId = El, baseUnitId = Pcs, trackingMode = "None",
+        }, Ct);
+        var itemId = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("itemId").GetGuid();
+        var itemVersion = (await itemManager.Client.GetFromJsonAsync<JsonElement>($"/api/items/{itemId}", Ct)).GetProperty("version").GetUInt32();
+        var itemCode = (await (await itemManager.Client.PostAsJsonAsync($"/api/items/{itemId}/approve", new { version = itemVersion }, Ct))
+            .Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("itemCode").GetString()!;
+
+        // 作業員：建立期初單 → 加明細 → 送出
+        var create = await op.PostFormAsync("/Opening", "/Opening?handler=Create", new Dictionary<string, string> { ["WarehouseId"] = warehouseId.ToString() });
+        var docUrl = create.Headers.Location!.OriginalString;
+        var docId = Guid.Parse(docUrl.Split('/').Last());
+        Assert.Equal(HttpStatusCode.Redirect, (await op.PostFormAsync(docUrl, docUrl + "?handler=AddLine", new Dictionary<string, string>
+        {
+            ["Line.LocationCode"] = "a-01", ["Line.ItemCode"] = itemCode.ToLowerInvariant(), ["Line.Quantity"] = "9",
+        })).StatusCode);
+        var version = VersionPattern().Match(await op.GetStringAsync(docUrl)).Groups[1].Value;
+        Assert.Equal(HttpStatusCode.Redirect, (await op.PostFormAsync(docUrl, docUrl + "?handler=Submit", new Dictionary<string, string> { ["Version"] = version })).StatusCode);
+
+        // 核准：作業員 403；缺冪等鍵 400；主管成功；同鍵重送 204
+        var docVersion = (await manager.Client.GetFromJsonAsync<JsonElement>($"/api/stock/opening/{docId}", Ct)).GetProperty("version").GetUInt32();
+        var approveUrl = $"/api/stock/opening/{docId}/approve";
+        HttpRequestMessage Approve(WebSession who, string? key)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, approveUrl) { Content = JsonContent.Create(new { version = docVersion }) };
+            if (key is not null)
+            {
+                request.Headers.Add("Idempotency-Key", key);
+            }
+            return request;
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.Client.SendAsync(Approve(op, "key-" + Guid.NewGuid()), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await manager.Client.SendAsync(Approve(manager, null), Ct)).StatusCode);
+        var key = "key-" + Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.NoContent, (await manager.Client.SendAsync(Approve(manager, key), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await manager.Client.SendAsync(Approve(manager, key), Ct)).StatusCode);
+
+        var balances = await op.Client.GetFromJsonAsync<JsonElement>($"/api/stock/balances?warehouseId={warehouseId}", Ct);
+        Assert.Equal(9m, balances.GetProperty("items")[0].GetProperty("quantity").GetDecimal());
+        var stockPage = await op.GetStringAsync($"/Stock?WarehouseId={warehouseId}&LocationCode=A-01");
+        Assert.Contains(itemCode, stockPage);
+        Assert.Contains("期初", stockPage);
+    }
+
     private static string NewUserName() => "u" + Guid.NewGuid().ToString("N")[..10];
 
     [GeneratedRegex("name=\"RequestId\" value=\"([0-9a-f-]+)\"")]

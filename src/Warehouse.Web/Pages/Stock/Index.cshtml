@@ -1,0 +1,92 @@
+@page
+@model Warehouse.Web.Pages.Stock.IndexModel
+@{
+    ViewData["Title"] = "庫存";
+}
+<h1>庫存查詢</h1>
+<form method="get" class="filters" id="stock-filters">
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">選擇倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <input type="text" name="LocationCode" value="@Model.LocationCode" placeholder="儲位碼" aria-label="儲位碼" />
+    <input type="text" name="ItemCode" value="@Model.ItemCode" placeholder="料號" aria-label="料號" />
+    <button type="submit" id="stock-submit">查詢</button>
+</form>
+@if (Model.Notice is not null)
+{
+    <div class="message warn">@Model.Notice</div>
+}
+@if (Model.Balances is { } balances)
+{
+    <h2>結存（共 @balances.TotalCount 筆）</h2>
+    <div class="table-wrap">
+        <table id="balance-list">
+            <thead><tr><th>倉庫</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>狀態</th><th>數量</th></tr></thead>
+            <tbody>
+                @foreach (var b in balances.Items)
+                {
+                    <tr>
+                        <td>@b.WarehouseCode</td>
+                        <td>@b.LocationCode</td>
+                        <td>@b.ItemCode</td>
+                        <td>@b.ItemName</td>
+                        <td>@b.LotNo</td>
+                        <td>@(b.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
+                        <td>@b.SerialNo</td>
+                        <td>@(b.LocationAvailable ? Display.Of(b.Status) : "儲位待驗／停用（不可用）")</td>
+                        <td>@Display.Qty(b.Quantity) @b.UnitCode</td>
+                    </tr>
+                }
+                @if (balances.Items.Count == 0)
+                {
+                    <tr><td colspan="9" class="muted">沒有結存。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        @if (balances.Page > 1)
+        {
+            <a href="@Model.PageUrl(balances.Page - 1)">上一頁</a>
+        }
+        <span>第 @balances.Page / @balances.TotalPages 頁</span>
+        @if (balances.Page < balances.TotalPages)
+        {
+            <a href="@Model.PageUrl(balances.Page + 1)">下一頁</a>
+        }
+    </div>
+}
+@if (Model.Movements is { } movements)
+{
+    <h2>最近異動（共 @movements.TotalCount 筆，顯示前 @movements.Items.Count 筆）</h2>
+    <div class="table-wrap">
+        <table id="movement-list">
+            <thead><tr><th>時間</th><th>單號</th><th>類型</th><th>儲位</th><th>料號</th><th>批號／序號</th><th>異動</th><th>異動後</th><th>操作者</th></tr></thead>
+            <tbody>
+                @foreach (var m in movements.Items)
+                {
+                    <tr>
+                        <td>@Display.Time(m.OccurredAt)</td>
+                        <td>@m.DocNo</td>
+                        <td>@Display.Of(m.DocType)</td>
+                        <td>@m.WarehouseCode／@m.LocationCode</td>
+                        <td>@m.ItemCode @m.ItemName</td>
+                        <td>@m.LotNo @m.SerialNo</td>
+                        <td>@(m.QuantityDelta > 0 ? "+" : "")@Display.Qty(m.QuantityDelta)</td>
+                        <td>@Display.Qty(m.BalanceAfter)</td>
+                        <td>@m.ActorName</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (Model.Uncounted is { } uncounted)
+{
+    <h2>尚未清點的儲位（@uncounted.TotalCount）</h2>
+    <p>@string.Join("、", uncounted.Items.Select(u => u.LocationCode))@(uncounted.TotalCount > uncounted.Items.Count ? "…" : "")</p>
+}

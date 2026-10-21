@@ -100,6 +100,9 @@ public sealed partial class Location
 
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    /// <summary>做過期初的單據；null = 尚未清點（FR-04）。由期初過帳在同一交易內寫入，之後不可再做期初。</summary>
+    public Guid? OpeningDocumentId { get; private set; }
+
     /// <summary>修改名稱、備註與結構化屬性（儲位碼、倉庫不可改）。</summary>
     public void Update(LocationDetails details, DateTimeOffset now)
     {

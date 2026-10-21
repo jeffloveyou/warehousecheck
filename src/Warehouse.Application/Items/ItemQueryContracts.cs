@@ -69,4 +69,7 @@ public interface IItemQueryService
 
     /// <summary>找不到時回傳 null。</summary>
     Task<ItemDetails?> GetAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>依正式料號（已正規化）精確查物料 ID；找不到回傳 null（使用 ix_items_item_code 唯一索引）。</summary>
+    Task<Guid?> FindIdByItemCodeAsync(string itemCode, CancellationToken cancellationToken);
 }

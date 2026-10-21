@@ -36,6 +36,7 @@ public static class DependencyInjection
         api.MapItemEndpoints();
         api.MapSearchEndpoints();
         api.MapWarehouseEndpoints();
+        api.MapStockEndpoints();
 
         // live：不執行任何檢查，只代表處理程序可回應
         endpoints.MapHealthChecks("/health/live", new HealthCheckOptions

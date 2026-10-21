@@ -2,11 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Warehouse.Application.Abstractions;
+using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
 using Warehouse.Application.MasterData;
 using Warehouse.Application.Search;
 using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
+using Warehouse.Infrastructure.Inventory;
 using Warehouse.Infrastructure.Items;
 using Warehouse.Infrastructure.MasterData;
 using Warehouse.Infrastructure.Search;
@@ -30,6 +32,9 @@ public static class DependencyInjection
         services.AddScoped<IItemSearchService, ItemSearchService>();
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IWarehouseService, WarehouseService>();
+        services.AddScoped<IInventoryPostingService, InventoryPostingService>();
+        services.AddScoped<IOpeningService, OpeningService>();
+        services.AddScoped<IStockQueryService, StockQueryService>();
         services.AddScoped<IMasterDataService, MasterDataService>();
         return services;
     }
