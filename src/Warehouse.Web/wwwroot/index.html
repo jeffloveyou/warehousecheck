@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>倉庫管理系統 – 系統狀態</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; color: #222; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; }
+    dt { font-weight: bold; }
+    dd { margin: 0; }
+    .ok { color: #137333; }
+    .bad { color: #b3261e; }
+    #error { color: #b3261e; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>倉庫管理系統 – 系統狀態</h1>
+  <dl>
+    <dt>系統版本</dt><dd id="version">-</dd>
+    <dt>資料庫連線</dt><dd id="dbConnected">-</dd>
+    <dt>資料庫版本</dt><dd id="dbVersion">-</dd>
+    <dt>伺服器時間 (UTC)</dt><dd id="serverTime">-</dd>
+  </dl>
+  <button id="refresh" type="button">重新整理</button>
+  <p id="error" role="alert"></p>
+  <script src="app.js"></script>
+</body>
+</html>
