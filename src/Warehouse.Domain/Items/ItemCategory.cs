@@ -18,6 +18,10 @@ public sealed partial class ItemCategory
 
     public ItemCategory(Guid id, Guid? parentId, string code, string name, string? itemCodePrefix, int sortOrder = 0)
     {
+        if (parentId == id)
+        {
+            throw new DomainRuleException("分類不可以把自己設為上層分類。");
+        }
         Id = id;
         ParentId = parentId;
         Code = Rules.Matches(code, CodePattern(), "分類代碼", "2～20 碼大寫英數或連字號");

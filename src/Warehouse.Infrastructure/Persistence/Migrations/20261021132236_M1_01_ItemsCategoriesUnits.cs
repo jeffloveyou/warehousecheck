@@ -172,7 +172,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                 unique: true);
         }
 
-        /// <inheritdoc />
+        /// <summary>
+        /// 僅供開發／測試：會刪除三張表與其中全部物料資料。
+        /// 正式環境回滾不要執行 Down——保留資料表（M1-01 之前的舊版不會讀取），只把流量切回舊版程式（docs/11 §10）。
+        /// </summary>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(

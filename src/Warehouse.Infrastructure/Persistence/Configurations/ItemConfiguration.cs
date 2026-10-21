@@ -10,6 +10,7 @@ namespace Warehouse.Infrastructure.Persistence.Configurations;
 /// - Active／Inactive 必有料號；PendingApproval／Returned／Rejected 一定沒有料號
 /// - 允許負庫存只限 tracking_mode = None，下限 ≥ 0（ADR-0004）
 /// - 分類、單位被物料使用時不可刪除（RESTRICT）
+/// - 已發放的料號不可變更、清除，物料不可刪除：trigger trg_items_protect_item_code（Migration M1_01b 以 SQL 建立，EF 模型不描述 trigger）
 /// </summary>
 public class ItemConfiguration : IEntityTypeConfiguration<Item>
 {
@@ -22,12 +23,18 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
             t.HasCheckConstraint("ck_items_status",
                 "status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
             t.HasCheckConstraint("ck_items_tracking_mode", "tracking_mode IN ('None', 'Lot', 'Serial')");
+            // 「有料號」⇔「Active／Inactive」；未定義的狀態值交給 ck_items_status 處理，兩條規則不重疊
             t.HasCheckConstraint("ck_items_code_matches_status",
-                "(status IN ('Active', 'Inactive') AND item_code IS NOT NULL) OR " +
-                "(status IN ('PendingApproval', 'Returned', 'Rejected') AND item_code IS NULL)");
+                "(status IN ('Active', 'Inactive')) = (item_code IS NOT NULL)");
             t.HasCheckConstraint("ck_items_negative_stock_limit", "negative_stock_limit >= 0");
             t.HasCheckConstraint("ck_items_negative_stock_tracking",
                 "NOT allow_negative_stock OR tracking_mode = 'None'");
+            t.HasCheckConstraint("ck_items_negative_stock_limit_when_disabled",
+                "allow_negative_stock OR negative_stock_limit = 0");
+            t.HasCheckConstraint("ck_items_name_not_blank", "btrim(name) <> ''");
+            // 格式依 ADR-0006：申請單號 MR-000125、料號 前綴-流水號（EL-000125）；流水號至少 6 碼，用完可再加長
+            t.HasCheckConstraint("ck_items_request_no_format", "request_no ~ '^MR-[0-9]{6,}$'");
+            t.HasCheckConstraint("ck_items_item_code_format", "item_code ~ '^[A-Z0-9]{2,4}-[0-9]{6,}$'");
         });
 
         builder.HasKey(i => i.Id);

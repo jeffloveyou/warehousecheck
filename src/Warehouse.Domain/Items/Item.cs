@@ -33,6 +33,10 @@ public sealed class Item
         string? specification,
         DateTimeOffset now)
     {
+        if (id == Guid.Empty)
+        {
+            throw new DomainRuleException("物料內部識別碼不可為空。");
+        }
         if (categoryId == Guid.Empty)
         {
             throw new DomainRuleException("分類為必填。");
@@ -58,8 +62,8 @@ public sealed class Item
             Brand = Rules.Optional(brand, BrandMaxLength, "品牌"),
             ManufacturerPartNo = Rules.Optional(manufacturerPartNo, ManufacturerPartNoMaxLength, "原廠型號"),
             Specification = Rules.Optional(specification, SpecificationMaxLength, "規格"),
-            CreatedAt = now,
-            UpdatedAt = now,
+            CreatedAt = now.ToUniversalTime(),
+            UpdatedAt = now.ToUniversalTime(),
         };
     }
 
@@ -92,6 +96,7 @@ public sealed class Item
     /// <summary>負庫存下限（≥ 0）：結存最低可到 -NegativeStockLimit。</summary>
     public decimal NegativeStockLimit { get; private set; }
 
+    /// <summary>建立時間（一律存 UTC；PostgreSQL timestamptz 只接受 UTC 偏移量，顯示時再轉當地時間）。</summary>
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -111,6 +116,6 @@ public sealed class Item
         }
         AllowNegativeStock = allow;
         NegativeStockLimit = allow ? limit : 0;
-        UpdatedAt = now;
+        UpdatedAt = now.ToUniversalTime();
     }
 }

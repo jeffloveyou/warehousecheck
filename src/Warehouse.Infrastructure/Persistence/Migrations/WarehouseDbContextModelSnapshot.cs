@@ -127,11 +127,19 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.ToTable("items", null, t =>
                         {
-                            t.HasCheckConstraint("ck_items_code_matches_status", "(status IN ('Active', 'Inactive') AND item_code IS NOT NULL) OR (status IN ('PendingApproval', 'Returned', 'Rejected') AND item_code IS NULL)");
+                            t.HasCheckConstraint("ck_items_code_matches_status", "(status IN ('Active', 'Inactive')) = (item_code IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_items_item_code_format", "item_code ~ '^[A-Z0-9]{2,4}-[0-9]{6,}$'");
+
+                            t.HasCheckConstraint("ck_items_name_not_blank", "btrim(name) <> ''");
 
                             t.HasCheckConstraint("ck_items_negative_stock_limit", "negative_stock_limit >= 0");
 
+                            t.HasCheckConstraint("ck_items_negative_stock_limit_when_disabled", "allow_negative_stock OR negative_stock_limit = 0");
+
                             t.HasCheckConstraint("ck_items_negative_stock_tracking", "NOT allow_negative_stock OR tracking_mode = 'None'");
+
+                            t.HasCheckConstraint("ck_items_request_no_format", "request_no ~ '^MR-[0-9]{6,}$'");
 
                             t.HasCheckConstraint("ck_items_status", "status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
 
@@ -183,12 +191,19 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_item_categories_code");
 
+                    b.HasIndex("ItemCodePrefix")
+                        .IsUnique()
+                        .HasDatabaseName("ix_item_categories_item_code_prefix")
+                        .HasFilter("item_code_prefix IS NOT NULL");
+
                     b.HasIndex("ParentId")
                         .HasDatabaseName("ix_item_categories_parent_id");
 
                     b.ToTable("item_categories", null, t =>
                         {
                             t.HasCheckConstraint("ck_item_categories_code_format", "code ~ '^[A-Z0-9][A-Z0-9-]{1,19}$'");
+
+                            t.HasCheckConstraint("ck_item_categories_not_self_parent", "parent_id IS NULL OR parent_id <> id");
 
                             t.HasCheckConstraint("ck_item_categories_prefix_format", "item_code_prefix ~ '^[A-Z0-9]{2,4}$'");
 

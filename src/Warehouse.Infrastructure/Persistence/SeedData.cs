@@ -3,6 +3,8 @@ namespace Warehouse.Infrastructure.Persistence;
 /// <summary>
 /// 內建計量單位與頂層分類（ADR-0006），以固定 GUID 寫進 Migration。
 /// 修改這裡會產生新的 Migration；已發布的 Migration 不可直接修改。
+/// **只能新增項目，不可刪除或修改既有項目**：EF 會產生 DeleteData／UpdateData，
+/// 刪除會被外鍵 RESTRICT 擋下而讓 Migration 失敗，修改則會覆蓋使用者在畫面上改過的名稱。
 /// </summary>
 public static class SeedData
 {

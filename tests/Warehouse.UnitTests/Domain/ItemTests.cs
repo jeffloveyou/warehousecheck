@@ -90,6 +90,31 @@ public class ItemTests
         Assert.Null(child.ItemCodePrefix);
     }
 
+    [Fact]
+    public void 內部識別碼為空_被拒()
+    {
+        Assert.Throws<DomainRuleException>(() =>
+            Item.Submit(Guid.Empty, "MR-000001", "品名", CategoryId, UnitId, TrackingMode.None, null, null, null, Now));
+    }
+
+    [Fact]
+    public void 傳入當地時間_一律存成UTC且為同一時間點()
+    {
+        var taipei = new DateTimeOffset(2026, 10, 21, 16, 0, 0, TimeSpan.FromHours(8));
+
+        var item = Item.Submit(Guid.NewGuid(), "MR-000001", "品名", CategoryId, UnitId, TrackingMode.None, null, null, null, taipei);
+
+        Assert.Equal(TimeSpan.Zero, item.CreatedAt.Offset);
+        Assert.Equal(taipei, item.CreatedAt);
+    }
+
+    [Fact]
+    public void 分類指向自己_被拒()
+    {
+        var id = Guid.NewGuid();
+        Assert.Throws<DomainRuleException>(() => new ItemCategory(id, id, "EL-SELF", "自己", null));
+    }
+
     [Theory]
     [InlineData("pcs", 0)]
     [InlineData("PCS", 5)]
