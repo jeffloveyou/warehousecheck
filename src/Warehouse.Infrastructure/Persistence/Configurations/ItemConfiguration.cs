@@ -47,6 +47,8 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         builder.Property(i => i.Brand).HasMaxLength(Item.BrandMaxLength);
         builder.Property(i => i.ManufacturerPartNo).HasMaxLength(Item.ManufacturerPartNoMaxLength);
         builder.Property(i => i.Specification).HasMaxLength(Item.SpecificationMaxLength);
+        // 重複候選比對欄位（M1-02）；Domain 隨品名／型號自動計算。預設值只為了 Migration 對既有資料的回填
+        builder.Property(i => i.NormalizedName).HasDefaultValue(string.Empty).ValueGeneratedNever();
         // 資料庫預設值只給手寫 SQL 用；ValueGeneratedNever 讓 EF 一律送出實際值。
         // 否則 EF 會把「等於 CLR 預設值」的欄位省略不送，例如 bool 預設 true 時，false 會被資料庫改成 true。
         builder.Property(i => i.AllowNegativeStock).HasDefaultValue(false).ValueGeneratedNever();
@@ -59,6 +61,8 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         builder.HasIndex(i => i.ItemCode).IsUnique();
         builder.HasIndex(i => i.CategoryId);
         builder.HasIndex(i => i.Status);
+        builder.HasIndex(i => i.NormalizedName);
+        builder.HasIndex(i => i.NormalizedPartNo);
 
         builder.HasOne<ItemCategory>().WithMany().HasForeignKey(i => i.CategoryId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Unit>().WithMany().HasForeignKey(i => i.BaseUnitId).OnDelete(DeleteBehavior.Restrict);
