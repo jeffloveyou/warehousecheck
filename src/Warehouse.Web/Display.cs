@@ -76,6 +76,31 @@ public static class Display
         _ => type.ToString(),
     };
 
+    public static string Of(Warehouse.Domain.Inventory.StockDocumentStatus status) => status switch
+    {
+        Warehouse.Domain.Inventory.StockDocumentStatus.Draft => "草稿",
+        Warehouse.Domain.Inventory.StockDocumentStatus.Submitted => "待核准",
+        Warehouse.Domain.Inventory.StockDocumentStatus.Posted => "已過帳",
+        Warehouse.Domain.Inventory.StockDocumentStatus.Cancelled => "已取消",
+        _ => status.ToString(),
+    };
+
+    public static string Of(Warehouse.Domain.Inventory.StockStatus status) => status switch
+    {
+        Warehouse.Domain.Inventory.StockStatus.Available => "可用",
+        Warehouse.Domain.Inventory.StockStatus.Quarantine => "待驗",
+        _ => status.ToString(),
+    };
+
+    public static string Of(Warehouse.Domain.Inventory.StockDocumentType type) => type switch
+    {
+        Warehouse.Domain.Inventory.StockDocumentType.Opening => "期初",
+        _ => type.ToString(),
+    };
+
+    /// <summary>數量：去掉多餘的 0（12.5000 → 12.5）。</summary>
+    public static string Qty(decimal value) => value.ToString("0.####");
+
     /// <summary>時間一律存 UTC，顯示時轉成伺服器當地時間（台灣 +08:00）。</summary>
     public static string Time(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }

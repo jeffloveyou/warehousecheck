@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
@@ -37,6 +38,21 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    public DbSet<InventoryLot> InventoryLots => Set<InventoryLot>();
+
+    public DbSet<ItemSerial> ItemSerials => Set<ItemSerial>();
+
+    public DbSet<StockDocument> StockDocuments => Set<StockDocument>();
+
+    public DbSet<StockBalance> StockBalances => Set<StockBalance>();
+
+    public DbSet<StockMovement> StockMovements => Set<StockMovement>();
+
+    public DbSet<ProcessedCommand> ProcessedCommands => Set<ProcessedCommand>();
+
+    /// <summary>期初單號 OB-000001 的流水號來源。</summary>
+    public const string OpeningDocNoSequence = "opening_doc_no_seq";
+
     /// <summary>申請單號 MR-000125 的流水號來源（PostgreSQL sequence，併發安全；交易失敗會跳號，可接受）。</summary>
     public const string RequestNoSequence = "item_request_no_seq";
 
@@ -70,6 +86,7 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
         modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims");
 
         modelBuilder.HasSequence<long>(RequestNoSequence);
+        modelBuilder.HasSequence<long>(OpeningDocNoSequence);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WarehouseDbContext).Assembly);
     }
 }

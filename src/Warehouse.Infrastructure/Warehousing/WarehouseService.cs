@@ -49,10 +49,18 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     public async Task SetWarehouseActiveAsync(
         Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken)
     {
+        // 先鎖倉庫列再查結存：正在過帳的交易（持有 FOR SHARE）commit 之後才檢查，看得到它寫入的結存（M3-03 審查 #2）
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await DbCommands.ExecuteAsync(db, "SELECT 1 FROM warehouses WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
         var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
         if (warehouse.IsActive == isActive)
         {
             throw new DomainRuleException(isActive ? "倉庫已經是啟用狀態。" : "倉庫已經停用。");
+        }
+        if (!isActive && await db.StockBalances.AnyAsync(
+                b => b.Quantity != 0 && db.Locations.Any(l => l.Id == b.LocationId && l.WarehouseId == id), cancellationToken))
+        {
+            throw new DomainRuleException("倉庫還有庫存，不能停用。");
         }
         if (isActive)
         {
@@ -65,6 +73,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         AuditLog.Add(db, actor, clock.GetUtcNow(), "warehouse.active", "warehouse", id.ToString(),
             new { IsActive = !isActive }, new { IsActive = isActive });
         await SaveAsync("warehouse", cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<PagedResult<LocationRow>> SearchLocationsAsync(LocationSearch search, CancellationToken cancellationToken)
@@ -150,13 +159,22 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     public async Task ChangeLocationStatusAsync(
         Guid id, uint expectedVersion, LocationStatus status, Actor actor, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await DbCommands.ExecuteAsync(db, "SELECT 1 FROM locations WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
         var location = await LoadAsync(db.Locations, id, expectedVersion, "location", "找不到儲位。", cancellationToken);
+        // 有庫存的儲位不能停用（停用後無法過帳，庫存會卡住）；改待驗可以，結存立即不算可用量（M3-01 審查 #3）
+        if (status == LocationStatus.Inactive
+            && await db.StockBalances.AnyAsync(b => b.LocationId == id && b.Quantity != 0, cancellationToken))
+        {
+            throw new DomainRuleException("儲位還有庫存，不能停用；請先移出（M4）或盤點調整（M6）。");
+        }
         var before = location.Status;
         var now = clock.GetUtcNow();
         location.ChangeStatus(status, now);
         AuditLog.Add(db, actor, now, "location.status", "location", id.ToString(),
             new { Status = before.ToString() }, new { Status = status.ToString() });
         await SaveAsync("location", cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>已篩選的儲位加上倉庫代碼，投影成畫面用的資料（排序在投影前完成）。</summary>

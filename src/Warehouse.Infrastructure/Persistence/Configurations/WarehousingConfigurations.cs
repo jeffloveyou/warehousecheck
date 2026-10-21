@@ -54,6 +54,8 @@ public class LocationConfiguration : IEntityTypeConfiguration<Location>
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(l => new { l.WarehouseId, l.Code }).IsUnique().HasDatabaseName("ux_locations_warehouse_code");
         builder.HasOne<WarehouseSite>().WithMany().HasForeignKey(l => l.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Warehouse.Domain.Inventory.StockDocument>().WithMany()
+            .HasForeignKey(l => l.OpeningDocumentId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

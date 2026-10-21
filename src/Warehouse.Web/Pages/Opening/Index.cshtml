@@ -1,0 +1,76 @@
+@page
+@model Warehouse.Web.Pages.Opening.IndexModel
+@using Warehouse.Domain.Inventory
+@{
+    ViewData["Title"] = "期初建帳";
+}
+<h1>期初建帳</h1>
+<p class="muted">新倉庫第一次啟用時，依實際清點建立期初單：每個儲位的物料、數量（基本單位）、批號／序號；沒有東西的儲位標記「確認為空」。核准即過帳，每個儲位只能做一次期初。</p>
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="get" class="filters">
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <select name="Status" aria-label="狀態">
+        <option value="">全部狀態</option>
+        @foreach (var s in Enum.GetValues<StockDocumentStatus>())
+        {
+            <option value="@s" selected="@(Model.Status == s)">@Display.Of(s)</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+</form>
+@if (Model.CanEdit)
+{
+    <form method="post" asp-page-handler="Create" class="panel filters" id="opening-create-form">
+        <select name="WarehouseId" aria-label="建立期初單的倉庫" required>
+            <option value="">選擇倉庫</option>
+            @foreach (var w in Model.Warehouses.Where(w => w.IsActive))
+            {
+                <option value="@w.Id">@w.Code @w.Name</option>
+            }
+        </select>
+        <input type="text" name="Note" maxlength="@StockDocument.NoteMaxLength" placeholder="備註（例：A 區第一次清點）" aria-label="備註" />
+        <button type="submit" id="opening-create">建立期初單</button>
+    </form>
+}
+<div class="table-wrap">
+    <table id="opening-list">
+        <thead><tr><th>單號</th><th>倉庫</th><th>狀態</th><th>明細</th><th>建立</th><th>核准</th></tr></thead>
+        <tbody>
+            @foreach (var d in Model.Result.Items)
+            {
+                <tr>
+                    <td><a href="/Opening/Details/@d.Id">@d.DocNo</a></td>
+                    <td>@d.WarehouseCode</td>
+                    <td>@Display.Of(d.Status)</td>
+                    <td>@d.LineCount</td>
+                    <td>@d.CreatedByName @Display.Time(d.CreatedAt)</td>
+                    <td>@d.ApprovedByName @(d.PostedAt is { } p ? Display.Time(p) : "")</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="6" class="muted">沒有期初單。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

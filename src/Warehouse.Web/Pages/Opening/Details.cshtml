@@ -1,0 +1,129 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Opening.DetailsModel
+@using Warehouse.Domain.Inventory
+@{
+    var d = Model.Doc;
+    ViewData["Title"] = d.DocNo;
+}
+<h1>@d.DocNo <span class="muted">@d.WarehouseCode</span> @Display.Of(d.Status)</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (d.ReturnComment is not null && d.Status == StockDocumentStatus.Draft)
+{
+    <div class="message warn">退回原因：@d.ReturnComment</div>
+}
+<dl class="status">
+    <dt>備註</dt><dd>@d.Note</dd>
+    <dt>建立</dt><dd>@d.CreatedByName @Display.Time(d.CreatedAt)</dd>
+    <dt>送出</dt><dd>@(d.SubmittedAt is { } s ? Display.Time(s) : "")</dd>
+    <dt>核准過帳</dt><dd>@d.ApprovedByName @(d.PostedAt is { } p ? Display.Time(p) : "")</dd>
+</dl>
+
+<h2>明細（@d.Lines.Count 行）</h2>
+<div class="table-wrap">
+    <table id="opening-lines">
+        <thead><tr><th>#</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>數量</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var l in d.Lines)
+            {
+                <tr>
+                    <td>@l.LineNo</td>
+                    <td>@l.LocationCode</td>
+                    @if (l.ItemId is null)
+                    {
+                        <td colspan="6" class="muted">整個儲位確認為空</td>
+                    }
+                    else
+                    {
+                        <td>@l.ItemCode</td>
+                        <td>@l.ItemName</td>
+                        <td>@l.LotNo</td>
+                        <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
+                        <td>@l.SerialNo</td>
+                        <td>@Display.Qty(l.Quantity) @l.UnitCode</td>
+                    }
+                    <td>
+                        @if (Model.CanEdit)
+                        {
+                            <form method="post" asp-page-handler="RemoveLine" class="inline">
+                                <input type="hidden" name="lineId" value="@l.Id" />
+                                <button type="submit" class="link">刪除</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (d.Lines.Count == 0)
+            {
+                <tr><td colspan="9" class="muted">尚無明細。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.CanEdit)
+{
+    <form method="post" asp-page-handler="AddLine" class="panel" id="opening-line-form">
+        <h2>新增明細</h2>
+        <div class="form-grid">
+            <label for="Line_LocationCode">儲位碼 *</label>
+            <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="40" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
+            <label for="Line_ItemCode">料號</label>
+            <div>
+                <input type="text" id="Line_ItemCode" name="Line.ItemCode" value="@Model.Line.ItemCode" maxlength="20" placeholder="例 EL-000125" />
+                <a href="/Search" target="_blank" rel="noopener">查料號</a>
+            </div>
+            <label for="Line_Quantity">數量（基本單位）</label>
+            <input type="number" id="Line_Quantity" name="Line.Quantity" value="@Model.Line.Quantity" min="0" step="any" />
+            <label for="Line_LotNo">批號</label>
+            <input type="text" id="Line_LotNo" name="Line.LotNo" value="@Model.Line.LotNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="批號管理的物料必填" />
+            <label for="Line_ExpiryDate">有效期限</label>
+            <input type="date" id="Line_ExpiryDate" name="Line.ExpiryDate" value="@(Model.Line.ExpiryDate?.ToString("yyyy-MM-dd"))" />
+            <label for="Line_SerialNo">序號</label>
+            <input type="text" id="Line_SerialNo" name="Line.SerialNo" value="@Model.Line.SerialNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="序號管理的物料：每個序號一行、數量 1" />
+            <span></span>
+            <label><input type="checkbox" name="Line.EmptyLocation" value="true" checked="@Model.Line.EmptyLocation" /> 這個儲位確認為空（不填物料）</label>
+        </div>
+        <div class="actions"><button type="submit" id="opening-add-line">加入</button></div>
+    </form>
+    @if (Model.Uncounted.Count > 0)
+    {
+        <p class="muted">尚未清點的儲位（前 @Model.Uncounted.Count 個）：@string.Join("、", Model.Uncounted.Select(u => u.LocationCode))</p>
+    }
+    <div class="actions">
+        <form method="post" asp-page-handler="Submit" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <button type="submit" id="opening-submit">送出核准</button>
+        </form>
+        <form method="post" asp-page-handler="Cancel" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <button type="submit" class="secondary" id="opening-cancel">取消這張單</button>
+        </form>
+    </div>
+}
+
+@if (Model.CanApprove)
+{
+    <form method="post" class="panel" id="opening-review-form">
+        <h2>核准</h2>
+        <p class="muted">核准後立即過帳：產生結存與異動紀錄，這些儲位標記為已清點，之後不能再做期初。</p>
+        <input type="hidden" name="Version" value="@Model.Version" />
+        <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+        <p><label for="Comment">退回原因</label><textarea id="Comment" name="Comment" maxlength="@StockDocument.NoteMaxLength"></textarea></p>
+        <div class="actions">
+            <button type="submit" asp-page-handler="Approve" id="opening-approve">核准並過帳</button>
+            <button type="submit" asp-page-handler="Return" class="secondary" id="opening-return">退回修改</button>
+        </div>
+    </form>
+}
+@if (d.Status == StockDocumentStatus.Posted)
+{
+    <p><a href="/Stock?documentId=@d.Id">查看這張單產生的異動</a></p>
+}
+<p><a href="/Opening">回期初單清單</a></p>
