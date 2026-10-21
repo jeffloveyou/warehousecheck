@@ -1,0 +1,10 @@
+* text=auto
+
+# Windows 腳本與方案檔
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.sln text eol=crlf
+
+# Linux／NAS 執行的腳本需 LF
+*.sh text eol=lf
+Dockerfile text eol=lf

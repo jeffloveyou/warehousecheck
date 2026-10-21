@@ -1,0 +1,36 @@
+# .NET 建置產物
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.nupkg
+
+# 發布產物（AGENTS.md 四：發布產物不提交 Git）
+publish/
+artifacts/
+
+# 秘密與本機設定（AGENTS.md 四：設定、憑證、秘密與發布目錄分離）
+appsettings.*.local.json
+*.pfx
+*.key
+.env
+.env.*
+secrets/
+
+# 本機資料、附件、備份與日誌
+*.db
+uploads/
+backups/
+logs/
+
+# Claude Code 個人設定（.claude/skills/ 需提交）
+.claude/settings.local.json
+
+# 編輯器與作業系統
+.vscode/*
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+.DS_Store
