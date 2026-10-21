@@ -20,7 +20,8 @@ description: 庫存交易正確性與資料保護規則。凡涉及入庫、出�
    - 同鍵＋不同 payload → 拒絕（明確錯誤碼）。
    - 去重由 DB 唯一約束保證，不能只靠「先查再寫」。
 4. **防超賣**：可用量檢查與扣減必須在同一交易中以條件式更新（如 `WHERE Quantity >= @qty`）或列鎖／`Version` 樂觀併發完成；「先查到有 10 件」不足以防止兩人同時出庫。
-5. **預設不得負庫存**；例外須獨立 ADR 並經使用者批准。
+5. **預設不得負庫存**。例外依 `docs/adr/0004-負庫存與預留庫存.md`：只限 `TrackingMode=None` 且 `AllowNegativeStock=true` 的料號，結存不得低於 `-NegativeStockLimit`，下限檢查以條件式更新在交易內完成；變負時寫稽核並列入待補帳。`Lot`／`Serial` 料號一律禁止。
+5a. **預留**（料號＋倉庫）：可用量 = 該倉 AVAILABLE 結存 − 未清除預留。非預留出庫不得吃掉已預留量；依預留出庫要在同一交易中沖銷預留。預留的建立、取消、沖銷都需 `Idempotency-Key`。
 6. **移庫數量守恆**：來源負向 Movement＋目的正向 Movement 在同一交易；跨倉在途為 V2 雙階段流程，不以單次移庫假裝已送達。
 7. **Movement 不可任意刪改**：更正用反向／調整單據，保留稽核軌跡。
 8. **結存維度**：`ItemId + LocationId + LotId + SerialId + StockStatus`；NULL 維度的唯一性需以適當 DB 約束（例如部分索引或 `NULLS NOT DISTINCT`）處理。

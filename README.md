@@ -33,6 +33,9 @@
 | `docs/11-線上更新與回滾.md` | Blue-Green、反向代理、DB 相容與回滾設計 |
 | `docs/adr/0001-技術基線.md` | 暫定技術選型與 M0 決策門檻 |
 | `docs/adr/0002-效能與部署策略.md` | 效能／雙平台／不中斷更新的架構決策提案 |
+| `docs/adr/0003-V1業務規則與範圍.md` | 料號、建檔核准、別名、追蹤模式、條碼選配、V1 範圍 |
+| `docs/adr/0004-負庫存與預留庫存.md` | 負庫存例外與預留庫存的規則、併發與測試 |
+| `docs/adr/0005-開發環境M0範圍與AI角色.md` | 開發工具、規模基線、M0 範圍、更新策略、AI 角色 |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |
 | `templates/feature-handoff.md` | 每項功能的修改與驗證交接卡 |
 
@@ -50,6 +53,18 @@ Skill 只放流程、檢查清單與「該讀哪份文件」，詳細規格仍�
 | `warehouse-scanner` | 手機相機、USB HID 條碼槍、PDA Keyboard Wedge 掃描 |
 | `warehouse-deployment` | Windows／NAS 發布、Blue-Green 更新與回滾 |
 | `warehouse-code-review` | 程式碼、安全性及效能審查清單 |
+
+## AI 角色（`.claude/agents/`）
+依任務選用模型以節省 token；分派規則見 `AGENTS.md` 第十節。
+
+| 角色 | 模型 | 用途 |
+|---|---|---|
+| `warehouse-architect` | Opus | 方案比較、ADR 草稿、架構風險（唯讀） |
+| `warehouse-reviewer` | Opus | 庫存／併發／安全／Migration 審查（唯讀） |
+| `warehouse-implementer` | Sonnet | 依已批准計畫實作 |
+| `warehouse-test-writer` | Sonnet | 單元、整合、併發測試 |
+| `warehouse-doc-writer` | Haiku | 開發手冊、日誌、驗收文件同步 |
+| `warehouse-explorer` | Haiku | 檔案、符號、文件段落搜尋 |
 
 ## 邊界與警語
 - NAS 支援必須依實際品牌、型號、CPU 架構、RAM、OS、容器執行環境驗證；並非所有 NAS 都能執行容器或 PostgreSQL。
