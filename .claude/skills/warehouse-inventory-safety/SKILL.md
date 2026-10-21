@@ -51,7 +51,7 @@ description: 庫存交易正確性與資料保護規則。凡涉及入庫、出�
 - 已有交易的物料嘗試刪除／改基本單位 → 拒絕。
 - API 成功但客戶端逾時重試 → 不重複過帳（亦屬 T-UPDATE-04）。
 
-> 併發測試需真實 PostgreSQL（如測試用資料庫或容器）；EF Core InMemory 無法驗證交易與鎖行為。測試由使用者執行，未取得輸出前標記「待驗證」。
+> 併發測試需真實 PostgreSQL（如測試用資料庫或容器）；EF Core InMemory 無法驗證交易與鎖行為。測試由主對話在開發機執行（使用 `warehouse_test`），未取得輸出前標記「待驗證」。
 
 ## 常見陷阱
 - 在 Controller 或 Razor Page 直接改 `StockBalance.Quantity`。

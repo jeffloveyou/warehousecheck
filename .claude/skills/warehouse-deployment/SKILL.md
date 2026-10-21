@@ -14,7 +14,7 @@ description: Windows PC 與 Linux NAS 發布、部署、線上更新與回滾規
 - Schema 變更交給 `warehouse-db-migration`。
 
 ## 硬性規則
-1. Agent **不執行**發布、部署、服務啟停、容器操作；提供 PowerShell／shell 指令與預期結果，由使用者執行。
+1. **開發機**（含 WSL）的發布、服務安裝與啟停、容器操作由主對話執行，並在 `docs/07` 記錄指令、實際結果與學習重點；**正式環境**部署、正式資料庫 Migration 必須先經使用者核准（AGENTS.md 第一節）。子角色不執行任何指令。
 2. 不得宣稱所有 NAS 皆可執行；NAS 品牌、型號、CPU 架構、RAM、OS、容器能力須實機確認。M0 前 Linux x64 PoC 只證明 Linux 相容性。
 3. 核心業務不得依賴 Windows-only API、寫死路徑或主機名稱；路徑用設定與 `Path.Combine`，注意 Linux 大小寫敏感。
 4. 設定、憑證、秘密、資料庫檔案、上傳附件**與發布目錄分離**；秘密不提交 Git。
