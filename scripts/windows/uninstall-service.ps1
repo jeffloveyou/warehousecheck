@@ -7,6 +7,7 @@
 .EXAMPLE
     .\scripts\windows\uninstall-service.ps1
     .\scripts\windows\uninstall-service.ps1 -ServiceName WarehouseB -RemoveData
+    .\scripts\windows\uninstall-service.ps1 -ServiceName WarehouseProxy
 #>
 param(
     [string]$ServiceName = 'WarehouseA',
@@ -16,18 +17,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)
+Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
-if (-not $isAdmin) {
-    $LogFile = Join-Path $env:TEMP "warehouse-uninstall-$ServiceName.log"
-    Remove-Item $LogFile -ErrorAction SilentlyContinue
-    $argList = @('-NoProfile', '-File', "`"$PSCommandPath`"", '-ServiceName', $ServiceName, '-Root', "`"$Root`"", '-LogFile', "`"$LogFile`"")
-    if ($RemoveData) { $argList += '-RemoveData' }
-    Write-Host '需要系統管理員權限，請在 UAC 視窗按「是」。' -ForegroundColor Yellow
-    $process = Start-Process pwsh -Verb RunAs -ArgumentList $argList -Wait -PassThru
-    if (Test-Path $LogFile) { Get-Content $LogFile | Where-Object { $_ -notmatch '^\*{10}|^(開始|結束|Windows PowerShell|PowerShell) ' } }
-    exit $process.ExitCode
+if (-not (Test-Administrator)) {
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }

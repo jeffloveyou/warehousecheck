@@ -50,6 +50,10 @@
 | `deploy/docker/Dockerfile` | M0-11 容器映像（直接使用 publish 輸出，x64／arm64） |
 | `docs/adr/0008-Windows部署與設定分離.md` | 部署目錄、外部設定、服務帳號、FDD／SC 決策 |
 | `docs/adr/0009-Linux部署與容器.md` | systemd 服務、容器、NAS 部署方式選擇順序 |
+| `src/Warehouse.Proxy/` | M0-12 反向代理（YARP），固定 HTTPS 網址並轉給 A 或 B 槽位 |
+| `scripts/windows/install-proxy.ps1`、`switch-release.ps1` | M0-12 安裝代理；A/B 切換更新與 `-Rollback`（Linux：`scripts/linux/switch-release.sh`） |
+| `poc/switch-load.ps1` | M0-12 切換期間負載測試 |
+| `docs/adr/0010-反向代理與AB切換.md` | YARP 選型、切換流程、金鑰共用 |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |
 | `templates/feature-handoff.md` | 每項功能的修改與驗證交接卡 |
 

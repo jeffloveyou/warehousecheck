@@ -6,9 +6,10 @@
     需要系統管理員：不是以系統管理員執行時，會以 UAC 重新啟動自己，輸出記錄在暫存檔並在結束後顯示。
       <Root>\releases\<版本>\           發布檔（已存在則不覆寫）
       <Root>\config\appsettings.Production.json  連線字串等（只給 Administrators、SYSTEM、服務帳號讀）
-      <Root>\data\、<Root>\logs\          服務帳號可寫
+      <Root>\data\、<Root>\logs\          服務帳號可寫；data\keys 為 A/B 共用的 Data Protection 金鑰（M0-12）
     服務帳號使用虛擬帳號 NT SERVICE\<ServiceName>（不是 LocalSystem，權限最小）。
-    服務專屬環境變數：ASPNETCORE_ENVIRONMENT=Production、ASPNETCORE_URLS、WAREHOUSE_CONFIG_DIR。
+    服務專屬環境變數：ASPNETCORE_ENVIRONMENT=Production、ASPNETCORE_URLS、WAREHOUSE_CONFIG_DIR、DataProtection__KeysDirectory。
+    A/B 兩個實例：-ServiceName WarehouseA -Port 5080、-ServiceName WarehouseB -Port 5081（M0-12，通常由 switch-release.ps1 呼叫）。
 .PARAMETER ConnectionStringFile
     第一次安裝、config 檔尚不存在時使用：內含連線字串的文字檔，讀取後立即刪除（避免密碼出現在命令列）。
     未提供時會建立範本並停止，請手動編輯後重跑。
@@ -28,49 +29,31 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)
+Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
-if (-not $isAdmin) {
-    # 以 UAC 重新啟動；路徑先轉成絕對路徑，因為提升權限後的工作目錄不同
-    $LogFile = Join-Path $env:TEMP "warehouse-install-$ServiceName.log"
-    Remove-Item $LogFile -ErrorAction SilentlyContinue
-    $argList = @('-NoProfile', '-File', "`"$PSCommandPath`"",
-        '-ReleasePath', "`"$((Resolve-Path $ReleasePath).Path)`"",
-        '-ServiceName', $ServiceName, '-Port', $Port, '-Root', "`"$Root`"", '-LogFile', "`"$LogFile`"")
-    if ($ConnectionStringFile) { $argList += @('-ConnectionStringFile', "`"$((Resolve-Path $ConnectionStringFile).Path)`"") }
-    if ($VerifyRestart) { $argList += '-VerifyRestart' }
-    Write-Host '需要系統管理員權限，請在 UAC 視窗按「是」。' -ForegroundColor Yellow
-    $process = Start-Process pwsh -Verb RunAs -ArgumentList $argList -Wait -PassThru
-    if (Test-Path $LogFile) { Get-Content $LogFile | Where-Object { $_ -notmatch '^\*{10}|^(開始|結束|Windows PowerShell|PowerShell) ' } }
-    exit $process.ExitCode
+if (-not (Test-Administrator)) {
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'ConnectionStringFile', 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
 try {
-    function Wait-Ready([int]$Seconds = 30) {
-        $deadline = (Get-Date).AddSeconds($Seconds)
-        while ((Get-Date) -lt $deadline) {
-            try {
-                $response = Invoke-WebRequest "http://localhost:$Port/health/ready" -TimeoutSec 3 -SkipHttpErrorCheck
-                if ($response.StatusCode -eq 200) { return $true }
-            } catch { }
-            Start-Sleep -Milliseconds 500
-        }
-        return $false
-    }
-
-    $release = Get-Content (Join-Path $ReleasePath 'release.json') -Raw | ConvertFrom-Json
+    $readyUrl = "http://localhost:$Port/health/ready"
+    $release = Get-ReleaseInfo $ReleasePath
+    if ($release.entry -ne 'Warehouse.Web') { throw "$($release.name) 不是主程式版本（entry=$($release.entry)）；反向代理請用 install-proxy.ps1。" }
     $releaseDir = Join-Path $Root "releases\$($release.name)"
     $configDir = Join-Path $Root 'config'
     $configFile = Join-Path $configDir 'appsettings.Production.json'
+    $keysDir = Join-Path $Root 'data\keys'
     $account = "NT SERVICE\$ServiceName"
 
     if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
         throw "服務 $ServiceName 已存在，請先執行 uninstall-service.ps1。"
     }
 
-    foreach ($dir in 'releases', 'config', 'certs', 'data\attachments', 'logs') {
+    # 0. 先收緊權限再寫入任何檔案（含連線字串、金鑰）
+    Set-RootAcl $Root
+    Protect-SecretDirectory $configDir
+    foreach ($dir in 'releases', 'certs', 'data\attachments', 'data\keys', 'logs') {
         New-Item -ItemType Directory -Force -Path (Join-Path $Root $dir) | Out-Null
     }
 
@@ -104,24 +87,26 @@ try {
     Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name Environment -Type MultiString -Value @(
         'ASPNETCORE_ENVIRONMENT=Production',
         "ASPNETCORE_URLS=http://localhost:$Port",
-        "WAREHOUSE_CONFIG_DIR=$configDir")
+        "WAREHOUSE_CONFIG_DIR=$configDir",
+        "DataProtection__KeysDirectory=$keysDir")
     Write-Host "已建立服務 $ServiceName（帳號 $account，埠 $Port）"
 
-    # 4. 權限：config 只給管理員與服務帳號讀；data、logs 可寫；releases 可讀與執行
-    icacls $configDir /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' "${account}:(OI)(CI)R" | Out-Null
+    # 4. 服務帳號權限（虛擬帳號要等服務建立後才存在）：config 讀；data（含 keys）、logs 可寫；releases 可讀與執行
+    #    根目錄已不繼承 C:\ 的 Users 權限，一般使用者讀不到金鑰、也改不了發布檔
+    icacls $configDir /grant "${account}:(OI)(CI)R" | Out-Null
     icacls (Join-Path $Root 'data') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'logs') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'releases') /grant "${account}:(OI)(CI)RX" | Out-Null
 
     # 5. 啟動並等待 readiness
     Start-Service $ServiceName
-    if (-not (Wait-Ready)) { throw "服務已啟動但 /health/ready 未在 30 秒內回 200，請查看事件檢視器。" }
-    Write-Host "服務已就緒：http://localhost:$Port/health/ready = 200" -ForegroundColor Green
+    if (-not (Wait-HttpReady $readyUrl)) { throw "服務已啟動但 /health/ready 未在 30 秒內回 200，請查看事件檢視器。" }
+    Write-Host "服務已就緒：$readyUrl = 200" -ForegroundColor Green
 
     if ($VerifyRestart) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         Restart-Service $ServiceName
-        if (-not (Wait-Ready)) { throw '重新啟動後未就緒。' }
+        if (-not (Wait-HttpReady $readyUrl)) { throw '重新啟動後未就緒。' }
         Write-Host "重新啟動驗證：$([math]::Round($sw.Elapsed.TotalSeconds, 1)) 秒後恢復就緒" -ForegroundColor Green
     }
 

@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Unicode;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.WebEncoders;
 using Warehouse.Api;
@@ -33,9 +34,14 @@ builder.Services.AddRazorPages();
 // 仍會編碼 < > & " 等 HTML 特殊字元，不影響 XSS 防護。
 builder.Services.Configure<WebEncoderOptions>(options =>
     options.TextEncoderSettings = new TextEncoderSettings(UnicodeRanges.All));
+builder.AddSharedDataProtection();
+// 反向代理（Warehouse.Proxy）轉送時帶 X-Forwarded-For／Proto；預設只信任 loopback 來源的代理
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto);
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseStaticFiles();
