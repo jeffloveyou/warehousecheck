@@ -1,0 +1,55 @@
+@page "/dev/camera"
+@model Warehouse.Web.Pages.Dev.CameraModel
+@{
+    ViewData["Title"] = "相機掃碼測試";
+}
+<h1>相機掃碼測試（M0-05）</h1>
+<dl class="status">
+    <dt>安全內容（HTTPS）</dt><dd id="secure-context">-</dd>
+    <dt>瀏覽器內建解碼</dt><dd id="barcode-detector">-</dd>
+    <dt>使用的解碼器</dt><dd id="decoder">（尚未開始）</dd>
+    <dt>相機狀態</dt><dd id="camera-state">停止</dd>
+    <dt>掃描結果</dt><dd id="scan-result">-</dd>
+</dl>
+<p>
+    <button id="camera-start" type="button">開始相機掃碼</button>
+    <button id="camera-stop" type="button">停止</button>
+</p>
+<p id="camera-error" class="bad" role="alert"></p>
+<video id="camera-video" playsinline muted style="width:100%;max-width:480px;background:#000"></video>
+
+@section Scripts {
+    <script>
+        // 頁面載入時只做診斷；相機程式在按下「開始」才以 import() 載入，平時不佔頻寬與 CPU。
+        (function () {
+            'use strict';
+            var secure = document.getElementById('secure-context');
+            secure.textContent = window.isSecureContext ? '是' : '否（相機無法使用，請改用 https）';
+            secure.className = window.isSecureContext ? 'ok' : 'bad';
+            document.getElementById('barcode-detector').textContent =
+                'BarcodeDetector' in window ? '支援（將檢查是否含 QR Code）' : '不支援（改用 jsQR）';
+
+            var scanner = null;
+            document.getElementById('camera-start').addEventListener('click', function () {
+                document.getElementById('camera-error').textContent = '';
+                var loading = scanner ? Promise.resolve(scanner) : import('/js/camera-scan.js');
+                loading.then(function (module) {
+                    scanner = module;
+                    return module.start(document.getElementById('camera-video'), {
+                        onDecoder: function (name) { document.getElementById('decoder').textContent = name; },
+                        onState: function (state) { document.getElementById('camera-state').textContent = state; },
+                        onResult: function (text, ms) {
+                            document.getElementById('scan-result').textContent = text + '（' + ms + ' ms）';
+                        },
+                        onError: function (message) { document.getElementById('camera-error').textContent = message; }
+                    });
+                }).catch(function (error) {
+                    document.getElementById('camera-error').textContent = '無法載入相機模組：' + error.message;
+                });
+            });
+            document.getElementById('camera-stop').addEventListener('click', function () {
+                if (scanner) { scanner.stop(); }
+            });
+        })();
+    </script>
+}

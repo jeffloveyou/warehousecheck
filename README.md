@@ -41,6 +41,9 @@
 | `poc/` | M0-08 前端比較 PoC 與 Playwright 量測工具（不屬於正式程式） |
 | `scripts/check-env.ps1` | M0-01 開發環境檢查（唯讀） |
 | `scripts/bootstrap-solution.ps1` | M0-02 建立 solution 與分層專案（執行一次） |
+| `scripts/init-dev-db.ps1` | M0-04 建立開發／測試資料庫與 `warehouse_app` 帳號 |
+| `scripts/new-dev-certs.ps1` | M0-05 開發用內部 CA 與 HTTPS 憑證（`-Remove` 移除） |
+| `scripts/open-dev-firewall.ps1` | M0-05 開放手機連線用的防火牆連接埠 5443（`-Remove` 移除） |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |
 | `templates/feature-handoff.md` | 每項功能的修改與驗證交接卡 |
 

@@ -12,6 +12,13 @@ using Microsoft.Playwright;
 using Poc.Shared;
 
 var pocRoot = FindPocRoot();
+
+// M0-05：--camera <網址>，以 Chromium 假相機驗證正式程式的 /dev/camera（不屬於前端比較）
+if (ArgValue(args, "--camera") is { } cameraBaseUrl)
+{
+    return await CameraCheck.RunAsync(cameraBaseUrl.TrimEnd('/'), Path.Combine(pocRoot, ".browsers", "chromium-109", "chrome-win", "chrome.exe"));
+}
+
 var quick = args.Contains("--quick");
 var onlyBrowser = ArgValue(args, "--browser");
 var onlyTarget = ArgValue(args, "--target");
@@ -577,4 +584,73 @@ sealed class Scenarios(IBrowser browser, string baseUrl, BenchSettings settings)
 
     private static double Percentile(List<double> sorted, double p)
         => sorted.Count == 0 ? double.NaN : sorted[(int)Math.Min(sorted.Count - 1, Math.Ceiling(p * sorted.Count) - 1)];
+}
+
+/// <summary>
+/// M0-05 相機頁檢查：Chromium 以假相機（綠色測試畫面）與自動允許權限執行，
+/// 驗證安全內容、延遲載入、解碼器選擇、啟動與停止後釋放相機。假畫面沒有 QR，所以不驗證解碼結果（由手機實測）。
+/// </summary>
+static class CameraCheck
+{
+    public static async Task<int> RunAsync(string baseUrl, string chromium109Path)
+    {
+        using var playwright = await Playwright.CreateAsync();
+        var allOk = true;
+        foreach (var (name, path) in new[] { ("chromium-new", (string?)null), ("chromium-109", chromium109Path) })
+        {
+            var options = new BrowserTypeLaunchOptions
+            {
+                Headless = true,
+                Args = ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+            };
+            if (path is not null) options.ExecutablePath = path;
+            await using var browser = await playwright.Chromium.LaunchAsync(options);
+            var context = await browser.NewContextAsync();
+            await context.GrantPermissionsAsync(["camera"], new() { Origin = baseUrl });
+            var page = await context.NewPageAsync();
+            var errors = new List<string>();
+            page.PageError += (_, e) => errors.Add(e);
+            var loaded = new List<string>();
+            page.Request += (_, r) => loaded.Add(new Uri(r.Url).AbsolutePath);
+
+            await page.GotoAsync(baseUrl + "/");
+            var homeLoadsCamera = loaded.Any(p => p.Contains("camera-scan") || p.Contains("jsQR"));
+
+            loaded.Clear();
+            await page.GotoAsync(baseUrl + "/dev/camera");
+            var secure = await page.TextContentAsync("#secure-context");
+            var preloaded = loaded.Any(p => p.Contains("camera-scan") || p.Contains("jsQR"));
+
+            await page.ClickAsync("#camera-start");
+            var started = true;
+            try { await page.WaitForSelectorAsync("body[data-camera-state='掃描中']", new() { Timeout = 15000 }); }
+            catch (TimeoutException) { started = false; }
+            var decoder = await page.TextContentAsync("#decoder");
+            var cameraError = await page.TextContentAsync("#camera-error");
+            await page.WaitForTimeoutAsync(1000);
+
+            await page.ClickAsync("#camera-stop");
+            var trackState = await page.EvaluateAsync<string?>("() => document.body.dataset.trackState || null");
+            var loadedAfterClick = loaded.Where(p => p.Contains("camera-scan") || p.Contains("jsQR")).Distinct().ToList();
+
+            var ok = !homeLoadsCamera && secure == "是" && !preloaded && started && trackState == "ended" && errors.Count == 0;
+            allOk &= ok;
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                browser = name,
+                version = browser.Version,
+                ok,
+                homeLoadsCamera,
+                secureContext = secure,
+                preloadedBeforeClick = preloaded,
+                started,
+                decoder,
+                cameraError,
+                trackStateAfterStop = trackState,
+                loadedAfterClick,
+                pageErrors = errors,
+            }, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        }
+        return allOk ? 0 : 1;
+    }
 }
