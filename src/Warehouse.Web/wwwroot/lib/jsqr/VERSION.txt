@@ -1,0 +1,4 @@
+jsQR 1.4.0
+來源：https://registry.npmjs.org/jsqr/-/jsqr-1.4.0.tgz（SHA-1 8efb8d0a7cc6863cb6d95116b9069123ce9eb2d1）
+授權：Apache-2.0（見 LICENSE）
+用途：BarcodeDetector 不可用時（iPhone、Windows）解碼 QR Code；只在相機掃碼頁按下開始後才載入。

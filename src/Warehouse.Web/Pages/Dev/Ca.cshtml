@@ -1,0 +1,27 @@
+@page "/dev/ca"
+@model Warehouse.Web.Pages.Dev.CaModel
+@{
+    ViewData["Title"] = "安裝開發用憑證";
+}
+<h1>安裝開發用根憑證（只限開發測試）</h1>
+@if (!Model.RootCaExists)
+{
+    <p class="bad">找不到根憑證，請先在開發機執行 <code>.\scripts\new-dev-certs.ps1</code>。</p>
+}
+else
+{
+    <p><a id="download-ca" href="/dev/ca?handler=download">下載 Warehouse Dev Root CA</a></p>
+}
+<h2>iPhone（Safari）</h2>
+<ol>
+    <li>點上方連結 →「允許」下載描述檔。</li>
+    <li>設定 → 已下載描述檔 → 安裝（輸入手機密碼）。</li>
+    <li>設定 → 一般 → 關於本機 → 憑證信任設定 → 開啟「Warehouse Dev Root CA」完全信任。</li>
+</ol>
+<h2>Android（Chrome）</h2>
+<ol>
+    <li>點上方連結下載檔案。</li>
+    <li>設定 → 安全性（或「安全性與隱私權」）→ 加密與憑證 → 安裝憑證 → CA 憑證 → 選擇剛下載的檔案。</li>
+</ol>
+<p>完成後重新開啟 <a href="/dev/camera">/dev/camera</a>，網址列不應再出現警告。</p>
+<p>移除：iPhone 到「設定 → 一般 → VPN 與裝置管理」刪除描述檔；Android 到「加密與憑證 → 使用者憑證」移除。</p>
