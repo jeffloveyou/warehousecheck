@@ -10,7 +10,7 @@ description: 資料庫結構更新與版本相容規則：EF Core Migration、Po
 - `docs/11-線上更新與回滾.md`：§3 發布流程、§4 API 與資料庫相容策略、§7 回滾限制。
 
 ## 硬性規則
-1. **Agent 不執行 Migration**。`dotnet ef migrations add`、`dotnet ef database update`、產生 SQL script 都由使用者在 PowerShell 執行。
+1. **開發／測試資料庫**（`warehouse_dev`、`warehouse_test`）的 `dotnet ef migrations add`、`database update`、產生 SQL script 由主對話執行，並在 `docs/07` 留歷程（AGENTS.md 第一節）；**正式資料庫**一律見第 2 條。子角色不執行。
 2. **正式資料庫 Migration 獨立執行並經使用者審核**；新版 App 啟動時**不得**自動套用（不在 `Program.cs` 呼叫 `Database.Migrate()` 對正式環境）。
 3. 執行前先完成並驗證備份。
 4. 部署及回滾過程不允許直接清除資料。
@@ -42,15 +42,15 @@ description: 資料庫結構更新與版本相容規則：EF Core Migration、Po
 ## 提供給使用者的指令範本（實際專案路徑於 M0 後確認，未執行前標記待驗證）
 ```powershell
 # 新增 Migration（開發環境）
-dotnet ef migrations add <MigrationName> --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Api
+dotnet ef migrations add <MigrationName> --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Web
 
 # 產生可審核的冪等 SQL（正式環境用此 SQL 經審核後執行）
-dotnet ef migrations script <FromMigration> <ToMigration> --idempotent --output .\artifacts\migrations\<name>.sql --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Api
+dotnet ef migrations script <FromMigration> <ToMigration> --idempotent --output .\artifacts\migrations\<name>.sql --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Web
 
 # 開發資料庫套用
-dotnet ef database update --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Api
+dotnet ef database update --project .\src\Warehouse.Infrastructure --startup-project .\src\Warehouse.Web
 ```
-說明每個指令預期輸出與常見錯誤（如找不到 DbContext、連線字串、`dotnet-ef` 工具未安裝）。安裝 `dotnet-ef` 工具也需使用者核准與執行。
+說明每個指令預期輸出與常見錯誤（如找不到 DbContext、連線字串、`dotnet-ef` 工具未安裝）。`--startup-project` 用 `Warehouse.Web`（實際啟動的主程式；`Warehouse.Api` 是類別庫）。安裝 `dotnet-ef` 工具屬於新增工具，需先經使用者核准，核准後由主對話安裝。
 
 ## 必要測試
 - 對空資料庫從頭套用所有 Migration 成功。
