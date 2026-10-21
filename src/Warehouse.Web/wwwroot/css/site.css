@@ -1,0 +1,14 @@
+/* 全站樣式：相容 Chrome 109（Win7 長期支援），不使用 CSS nesting，不引用任何 CSS 框架。 */
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; font-size: 15px; color: #222; background: #fff; }
+nav { display: flex; gap: 16px; padding: 10px 16px; background: #243447; }
+nav a { color: #fff; text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+main { padding: 16px; max-width: 960px; }
+h1 { font-size: 20px; margin: 0 0 12px; }
+button { padding: 6px 16px; border: 1px solid #243447; background: #243447; color: #fff; border-radius: 3px; cursor: pointer; }
+dl.status { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+dl.status dt { font-weight: bold; }
+dl.status dd { margin: 0; }
+.ok { color: #137333; }
+.bad { color: #b3261e; }
