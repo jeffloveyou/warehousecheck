@@ -13,8 +13,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
 });
 builder.AddExternalConfigDirectory();
-// 不是以 Windows 服務啟動時（開發、測試、Linux）不會有任何作用
+// 不是以 Windows 服務／systemd 服務啟動時（開發、測試）不會有任何作用
 builder.Services.AddWindowsService(options => options.ServiceName = "Warehouse");
+builder.Services.AddSystemd();
 
 var connectionString = builder.Configuration.GetConnectionString("Warehouse");
 if (string.IsNullOrWhiteSpace(connectionString))
