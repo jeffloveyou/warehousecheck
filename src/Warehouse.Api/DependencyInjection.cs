@@ -22,6 +22,7 @@ public static class DependencyInjection
             .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
         services.AddWarehouseAuthorization();
         services.AddExceptionHandler<ApiExceptionHandler>();
+        services.AddSearchRateLimiting();
         // 列舉以文字傳遞（"PendingApproval"），與資料庫一致、容易閱讀
         services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         return services;
@@ -33,6 +34,7 @@ public static class DependencyInjection
         var api = endpoints.MapGroup("/api");
         api.MapGroup("").AllowAnonymous().MapSystemEndpoints();
         api.MapItemEndpoints();
+        api.MapSearchEndpoints();
 
         // live：不執行任何檢查，只代表處理程序可回應
         endpoints.MapHealthChecks("/health/live", new HealthCheckOptions

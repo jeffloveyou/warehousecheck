@@ -350,6 +350,77 @@ public partial class WebAuthTests
         Assert.StartsWith("/Account/AccessDenied", denied.Headers.Location!.OriginalString);
     }
 
+    // T-M2-04-01（docs/03 情境 F、H）
+    [Fact]
+    public async Task 搜尋頁顯示命中原因_搜不到時可加索引但不能建立物料_SystemAdmin不能進加索引頁()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var operatorName = NewUserName();
+        var managerName = NewUserName();
+        var adminName = NewUserName();
+        await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+        await WebSession.CreateUserAsync(factory, managerName, Password, Roles.ItemManager);
+        await WebSession.CreateUserAsync(factory, adminName, Password, Roles.SystemAdmin);
+        var op = WebSession.Create(factory);
+        var manager = WebSession.Create(factory);
+        var admin = WebSession.Create(factory);
+        await op.LoginAsync(operatorName, Password);
+        await manager.LoginAsync(managerName, Password);
+        await admin.LoginAsync(adminName, Password);
+        var tag = "W" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        var created = await op.Client.PostAsJsonAsync("/api/items", new
+        {
+            requestId = Guid.NewGuid(), name = $"伺服放大器 {tag}", categoryId = El, baseUnitId = Pcs, trackingMode = "None",
+        }, Ct);
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("itemId").GetGuid();
+        var version = (await manager.Client.GetFromJsonAsync<JsonElement>($"/api/items/{id}", Ct)).GetProperty("version").GetUInt32();
+        (await manager.Client.PostAsJsonAsync($"/api/items/{id}/approve", new { version }, Ct)).EnsureSuccessStatusCode();
+
+        // 搜不到「維修用放大器」→ 頁面提供加索引的連結
+        var miss = await op.GetStringAsync("/Search?Q=" + Uri.EscapeDataString($"維修用放大器{tag}"));
+        Assert.Contains("id=\"no-result\"", miss);
+        Assert.Contains("/Search/AddIndex?text=", miss);
+
+        // 加索引頁：找目標物料 → 連到明細頁並預填文字（不提供建立物料）
+        var add = await op.GetStringAsync("/Search/AddIndex?text=" + Uri.EscapeDataString($"維修用放大器{tag}") + "&Target=" + tag);
+        Assert.Contains($"/Items/Details/{id}?indexText=", add);
+        Assert.DoesNotContain("/Items/Create", add);
+        var denied = await admin.Client.GetAsync("/Search/AddIndex?text=x", Ct);
+        Assert.StartsWith("/Account/AccessDenied", denied.Headers.Location!.OriginalString);
+
+        await op.Client.PostAsJsonAsync($"/api/items/{id}/keywords", new { text = $"維修用放大器{tag}" }, Ct);
+        var hit = await op.GetStringAsync("/Search?Q=" + Uri.EscapeDataString($"維修用放大器{tag}"));
+        Assert.Contains("共用關鍵字", hit);
+        Assert.Contains($"/Items/Details/{id}", hit);
+
+        var api = await op.Client.GetFromJsonAsync<JsonElement>($"/api/search?q={tag}", Ct);
+        Assert.Equal("Partial", api.GetProperty("items")[0].GetProperty("reason").GetString());
+    }
+
+    // T-M2-03-08（docs/03 §8 rate limit）
+    [Fact]
+    public async Task 搜尋超過每分鐘上限_回429()
+    {
+        await using var factory = new WarehouseWebFactory(
+            TestDatabase.ConnectionString, settings: new Dictionary<string, string> { ["Search:RateLimitPerMinute"] = "3" });
+        var user = NewUserName();
+        await WebSession.CreateUserAsync(factory, user, Password, Roles.Operator);
+        var web = WebSession.Create(factory);
+        await web.LoginAsync(user, Password);
+
+        for (var n = 0; n < 3; n++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await web.Client.GetAsync("/api/search?q=x", Ct)).StatusCode);
+        }
+        var limited = await web.Client.GetAsync("/api/search?q=x", Ct);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.Equal("search.rate_limited", (await limited.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("errorCode").GetString());
+        Assert.InRange(int.Parse(limited.Headers.GetValues("Retry-After").Single()), 1, 60);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await web.Client.GetAsync("/Search?Q=x", Ct)).StatusCode); // 網頁共用額度
+        Assert.Equal(HttpStatusCode.OK, (await web.Client.GetAsync("/Items", Ct)).StatusCode);                   // 其他頁面不受影響
+    }
+
     private static string NewUserName() => "u" + Guid.NewGuid().ToString("N")[..10];
 
     [GeneratedRegex("name=\"RequestId\" value=\"([0-9a-f-]+)\"")]

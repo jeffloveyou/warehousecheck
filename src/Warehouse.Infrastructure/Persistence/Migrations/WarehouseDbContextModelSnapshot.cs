@@ -263,6 +263,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(0m)
                         .HasColumnName("negative_stock_limit");
 
+                    b.Property<string>("NormalizedBrand")
+                        .HasColumnType("text")
+                        .HasColumnName("normalized_brand");
+
                     b.Property<string>("NormalizedName")
                         .IsRequired()
                         .HasColumnType("text")
@@ -272,6 +276,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.Property<string>("NormalizedPartNo")
                         .HasColumnType("text")
                         .HasColumnName("normalized_part_no");
+
+                    b.Property<string>("NormalizedSpecification")
+                        .HasColumnType("text")
+                        .HasColumnName("normalized_specification");
 
                     b.Property<string>("RequestNo")
                         .IsRequired()
