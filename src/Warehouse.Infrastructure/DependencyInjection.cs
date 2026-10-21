@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<IItemWorkflowService, ItemWorkflowService>();
         services.AddScoped<IItemQueryService, ItemQueryService>();
+        services.AddScoped<IItemIndexService, ItemIndexService>();
         services.AddScoped<IMasterDataService, MasterDataService>();
         return services;
     }

@@ -274,6 +274,82 @@ public partial class WebAuthTests
         Assert.Contains("帳號或密碼錯誤", await blocked.Content.ReadAsStringAsync(Ct));
     }
 
+    // T-M2-02-06
+    [Fact]
+    public async Task 索引API與明細頁_新增別名_占用時409附占用者_明細頁顯示索引()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var operatorName = NewUserName();
+        var managerName = NewUserName();
+        await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+        await WebSession.CreateUserAsync(factory, managerName, Password, Roles.ItemManager);
+        var op = WebSession.Create(factory);
+        var manager = WebSession.Create(factory);
+        await op.LoginAsync(operatorName, Password);
+        await manager.LoginAsync(managerName, Password);
+
+        async Task<Guid> ActiveItemAsync()
+        {
+            var created = await op.Client.PostAsJsonAsync("/api/items", new
+            {
+                requestId = Guid.NewGuid(), name = "索引頁 " + Guid.NewGuid().ToString("N")[..8], categoryId = El, baseUnitId = Pcs, trackingMode = "None",
+            }, Ct);
+            var id = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("itemId").GetGuid();
+            var version = (await manager.Client.GetFromJsonAsync<JsonElement>($"/api/items/{id}", Ct)).GetProperty("version").GetUInt32();
+            (await manager.Client.PostAsJsonAsync($"/api/items/{id}/approve", new { version }, Ct)).EnsureSuccessStatusCode();
+            return id;
+        }
+
+        var a = await ActiveItemAsync();
+        var b = await ActiveItemAsync();
+        var alias = "頁面別名 " + Guid.NewGuid().ToString("N")[..6];
+        Assert.Equal(HttpStatusCode.Created, (await op.Client.PostAsJsonAsync($"/api/items/{a}/aliases", new { text = alias }, Ct)).StatusCode);
+        var taken = await op.Client.PostAsJsonAsync($"/api/items/{b}/aliases", new { text = alias }, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, taken.StatusCode);
+        var problem = await taken.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("index.alias_taken", problem.GetProperty("errorCode").GetString());
+        Assert.Equal(a, problem.GetProperty("holderItemId").GetGuid());
+
+        var keyword = await op.Client.PostAsJsonAsync($"/api/items/{b}/keywords", new { text = "頁面關鍵字" }, Ct);
+        var keywordId = (await keyword.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("entryId").GetGuid();
+        var other = WebSession.Create(factory);
+        var otherName = NewUserName();
+        await WebSession.CreateUserAsync(factory, otherName, Password, Roles.Operator);
+        await other.LoginAsync(otherName, Password);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await other.Client.PostAsJsonAsync($"/api/items/{b}/keywords/{keywordId}/deactivate", new { }, Ct)).StatusCode);
+
+        var html = await op.GetStringAsync($"/Items/Details/{a}?indexText=" + Uri.EscapeDataString("預填文字"));
+        Assert.Contains(alias, html);
+        Assert.Contains("value=\"預填文字\"", html);
+
+        // 審查 R2：路由大小寫不同仍要建立「別名」，不能變成關鍵字
+        var upper = "大寫路由 " + Guid.NewGuid().ToString("N")[..6];
+        Assert.Equal(HttpStatusCode.Created, (await op.Client.PostAsJsonAsync($"/api/items/{b}/ALIASES", new { text = upper }, Ct)).StatusCode);
+        var list = await op.Client.GetFromJsonAsync<JsonElement>($"/api/items/{b}/index", Ct);
+        Assert.Contains(list.EnumerateArray(), e => e.GetProperty("text").GetString() == upper && e.GetProperty("kind").GetString() == "Alias");
+        Assert.Equal(HttpStatusCode.NotFound, (await op.Client.GetAsync($"/api/items/{Guid.NewGuid()}/index", Ct)).StatusCode);
+
+        // 審查 S9：索引文字含 HTML 時頁面要編碼輸出
+        await op.Client.PostAsJsonAsync($"/api/items/{b}/keywords", new { text = "<script>x</script>" }, Ct);
+        var detailsB = await op.GetStringAsync($"/Items/Details/{b}");
+        Assert.DoesNotContain("<script>x</script>", detailsB);
+        Assert.Contains("&lt;script&gt;x&lt;/script&gt;", detailsB);
+
+        // 審查 R1：沒有 Items.Index 權限的角色（SystemAdmin）直接送出網頁表單也會被擋
+        var adminName = NewUserName();
+        await WebSession.CreateUserAsync(factory, adminName, Password, Roles.SystemAdmin);
+        var admin = WebSession.Create(factory);
+        await admin.LoginAsync(adminName, Password);
+        var denied = await admin.PostFormAsync($"/Items/Details/{a}", $"/Items/Details/{a}?handler=AddIndex", new Dictionary<string, string>
+        {
+            ["IndexText"] = "管理者偷加",
+            ["IndexKind"] = "Alias",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
+        Assert.StartsWith("/Account/AccessDenied", denied.Headers.Location!.OriginalString);
+    }
+
     private static string NewUserName() => "u" + Guid.NewGuid().ToString("N")[..10];
 
     [GeneratedRegex("name=\"RequestId\" value=\"([0-9a-f-]+)\"")]

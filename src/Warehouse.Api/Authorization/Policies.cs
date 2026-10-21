@@ -20,6 +20,9 @@ public static class Policies
     /// <summary>核准、退回、拒絕、停用物料：物料管理員。</summary>
     public const string ItemsReview = "Items.Review";
 
+    /// <summary>新增物料的專屬別名、共用關鍵字：作業員、物料管理員（ADR-0013）。</summary>
+    public const string ItemsIndex = "Items.Index";
+
     /// <summary>維護分類與單位：物料管理員。</summary>
     public const string MasterDataManage = "MasterData.Manage";
 
@@ -30,6 +33,7 @@ public static class Policies
             .AddPolicy(ItemsRead, p => p.RequireAuthenticatedUser())
             .AddPolicy(ItemsSubmit, p => p.RequireRole(Roles.Operator, Roles.ItemManager))
             .AddPolicy(ItemsReview, p => p.RequireRole(Roles.ItemManager))
+            .AddPolicy(ItemsIndex, p => p.RequireRole(Roles.Operator, Roles.ItemManager))
             .AddPolicy(MasterDataManage, p => p.RequireRole(Roles.ItemManager));
         return services;
     }
