@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
 if (-not (Test-Administrator)) {
-    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters)
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }

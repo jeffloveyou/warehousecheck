@@ -30,7 +30,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
 if (-not (Test-Administrator)) {
-    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath')
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
@@ -101,8 +101,9 @@ try {
         }
 
         # 3. 冒煙測試
-        $info = Invoke-RestMethod "http://localhost:$($target.Port)/api/system/info" -TimeoutSec 5
-        if ($info.version -ne $targetVersion -or -not $info.databaseConnected) {
+        # 逾時或錯誤也要停止目標槽位，所以例外在這裡接住
+        try { $info = Invoke-RestMethod "http://localhost:$($target.Port)/api/system/info" -TimeoutSec 5 } catch { $info = $null }
+        if (-not $info -or $info.version -ne $targetVersion -or -not $info.databaseConnected) {
             Stop-Service $target.Service
             throw "冒煙測試失敗：版本 $($info.version)、資料庫連線 $($info.databaseConnected)；流量維持 $($current.Name)。"
         }

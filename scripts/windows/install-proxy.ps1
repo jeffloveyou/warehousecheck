@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
 if (-not (Test-Administrator)) {
-    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'PfxPath', 'PfxPasswordFile')
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'PfxPath', 'PfxPasswordFile', 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
@@ -51,9 +51,11 @@ try {
     if (Get-Service $ServiceName -ErrorAction SilentlyContinue) {
         throw "服務 $ServiceName 已存在，請先執行 uninstall-service.ps1 -ServiceName $ServiceName。"
     }
-    foreach ($dir in 'releases', 'proxy-config', 'certs') {
-        New-Item -ItemType Directory -Force -Path (Join-Path $Root $dir) | Out-Null
-    }
+    # 先收緊權限再寫入憑證與密碼（服務帳號的讀取權在服務建立後才加）
+    Set-RootAcl $Root
+    Protect-SecretDirectory $configDir
+    Protect-SecretDirectory $certDir
+    New-Item -ItemType Directory -Force -Path (Join-Path $Root 'releases') | Out-Null
 
     # 1. 發布檔
     if (Test-Path $releaseDir) {
@@ -99,9 +101,9 @@ try {
         'ASPNETCORE_ENVIRONMENT=Production',
         "WAREHOUSE_CONFIG_DIR=$configDir")
 
-    # 5. 權限：設定與憑證只給管理員、SYSTEM 與代理帳號（讀）；不繼承 C:\ 的 Users 權限
+    # 5. 代理帳號權限：設定與憑證可讀（目錄已在步驟 0 改為只給 Administrators、SYSTEM）
     foreach ($dir in $configDir, $certDir) {
-        icacls $dir /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' "${account}:(OI)(CI)R" | Out-Null
+        icacls $dir /grant "${account}:(OI)(CI)R" | Out-Null
     }
     icacls (Join-Path $Root 'releases') /grant "${account}:(OI)(CI)RX" | Out-Null
 

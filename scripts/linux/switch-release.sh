@@ -28,6 +28,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ $EUID -eq 0 ]] || { echo "請以 root 執行（sudo）。" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "需要 python3（讀寫 JSON 設定）。" >&2; exit 1; }
 [[ "$ROLLBACK" == "true" || -n "$RELEASE" ]] || { echo "請指定 --release 或 --rollback。" >&2; exit 2; }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -36,7 +37,11 @@ LOG=/var/log/warehouse-deploy.log
 log() { echo "$(date -Iseconds) $*" | tee -a "$LOG"; }
 port_of() { [[ "$1" == "A" ]] && echo "$PORT_A" || echo "$PORT_B"; }
 service_of() { echo "warehouse-${1,,}"; }
-json_field() { python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$1"; }
+# 讀不到或不是 JSON 時輸出空字串（輪詢期間服務尚未回應是正常情況，不印 Traceback）
+json_field() { python3 -c '
+import json,sys
+try: print(json.load(sys.stdin).get(sys.argv[1], ""))
+except Exception: print("")' "$1"; }
 version_at() { curl -sf --max-time 3 "$1/health/ready" | json_field version || true; }
 
 wait_version() {  # $1=URL $2=期望版本（空字串＝只要 200）$3=秒數
@@ -52,7 +57,7 @@ wait_version() {  # $1=URL $2=期望版本（空字串＝只要 200）$3=秒數
 write_upstream() {  # 暫存檔＋mv（同一檔案系統內為原子置換），代理不會讀到寫一半的內容
   python3 -c 'import json,sys; print(json.dumps({"ActiveSlot": sys.argv[1], "ReverseProxy": {"Clusters": {"app": {"Destinations": {"active": {"Address": f"http://localhost:{sys.argv[2]}/"}}}}}}, indent=2))' \
     "$1" "$(port_of "$1")" > "$UPSTREAM.tmp"
-  chown root:warehouse "$UPSTREAM.tmp"; chmod 0640 "$UPSTREAM.tmp"
+  chown --reference="$UPSTREAM" "$UPSTREAM.tmp"; chmod 0640 "$UPSTREAM.tmp"   # 沿用原檔擁有者（root:warehouse-proxy）
   mv -f "$UPSTREAM.tmp" "$UPSTREAM"
 }
 
@@ -64,11 +69,14 @@ target_url="http://localhost:$(port_of "$target")"
 current_version=$(version_at "$current_url")
 
 if [[ "$ROLLBACK" == "true" ]]; then
+  systemctl cat "$(service_of "$target")" >/dev/null 2>&1 || { log "失敗：待命槽位 $target 沒有安裝服務，無法回滾"; exit 1; }
   log "開始回滾：$current（$current_version）→ $target"
-  systemctl start "$(service_of "$target")"
+  systemctl start "$(service_of "$target")" || { log "失敗：槽位 $target 無法啟動，流量維持 $current"; exit 1; }
   wait_version "$target_url" "" 30 || { systemctl stop "$(service_of "$target")"; log "失敗：槽位 $target 未就緒，流量維持 $current"; exit 1; }
   target_version=$(version_at "$target_url")
 else
+  entry=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("entry", "Warehouse.Web"))' "$RELEASE/release.json")
+  [[ "$entry" == "Warehouse.Web" ]] || { echo "$RELEASE 不是主程式版本（entry=$entry）。" >&2; exit 1; }
   target_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$RELEASE/release.json")
   log "開始更新：$current（$current_version）→ $target（$target_version）"
   "$SCRIPT_DIR/uninstall-service.sh" --name "$(service_of "$target")" >/dev/null
@@ -76,7 +84,8 @@ else
     systemctl stop "$(service_of "$target")" 2>/dev/null || true
     log "失敗：槽位 $target 新版未就緒，流量維持 $current"; exit 1
   fi
-  connected=$(curl -sf --max-time 5 "$target_url/api/system/info" | json_field databaseConnected)
+  # curl 失敗（逾時、500）時不能讓 set -e 直接結束，要走下面的「停止目標槽位＋記錄」
+  connected=$(curl -sf --max-time 5 "$target_url/api/system/info" | json_field databaseConnected || true)
   [[ "$connected" == "True" ]] || { systemctl stop "$(service_of "$target")"; log "失敗：冒煙測試資料庫未連線，流量維持 $current"; exit 1; }
 fi
 
@@ -91,5 +100,5 @@ echo "排空 $DRAIN 秒…"
 sleep "$DRAIN"
 systemctl stop "$(service_of "$current")" 2>/dev/null || true
 systemctl disable "$(service_of "$current")" 2>/dev/null || true
-systemctl enable "$(service_of "$target")" 2>/dev/null
+systemctl enable "$(service_of "$target")" 2>/dev/null || log "警告：無法設定 $(service_of "$target") 開機啟動"
 log "完成：目前槽位 $target，版本 $target_version（$(service_of "$current") 已停止，保留供回滾）"

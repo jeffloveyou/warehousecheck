@@ -32,7 +32,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 
 if (-not (Test-Administrator)) {
-    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'ConnectionStringFile')
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'ConnectionStringFile', 'Root')
 }
 
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
@@ -50,7 +50,10 @@ try {
         throw "服務 $ServiceName 已存在，請先執行 uninstall-service.ps1。"
     }
 
-    foreach ($dir in 'releases', 'config', 'certs', 'data\attachments', 'data\keys', 'logs') {
+    # 0. 先收緊權限再寫入任何檔案（含連線字串、金鑰）
+    Set-RootAcl $Root
+    Protect-SecretDirectory $configDir
+    foreach ($dir in 'releases', 'certs', 'data\attachments', 'data\keys', 'logs') {
         New-Item -ItemType Directory -Force -Path (Join-Path $Root $dir) | Out-Null
     }
 
@@ -88,8 +91,9 @@ try {
         "DataProtection__KeysDirectory=$keysDir")
     Write-Host "已建立服務 $ServiceName（帳號 $account，埠 $Port）"
 
-    # 4. 權限：config 只給管理員與服務帳號讀；data（含 keys）、logs 可寫；releases 可讀與執行
-    icacls $configDir /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' "${account}:(OI)(CI)R" | Out-Null
+    # 4. 服務帳號權限（虛擬帳號要等服務建立後才存在）：config 讀；data（含 keys）、logs 可寫；releases 可讀與執行
+    #    根目錄已不繼承 C:\ 的 Users 權限，一般使用者讀不到金鑰、也改不了發布檔
+    icacls $configDir /grant "${account}:(OI)(CI)R" | Out-Null
     icacls (Join-Path $Root 'data') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'logs') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'releases') /grant "${account}:(OI)(CI)RX" | Out-Null

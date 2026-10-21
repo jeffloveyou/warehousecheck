@@ -18,9 +18,10 @@ $deadline = (Get-Date).AddSeconds($Seconds)
 Write-Host "持續 $Seconds 秒、$Concurrency 個並行迴圈：$Url"
 
 $results = 1..$Concurrency | ForEach-Object -ThrottleLimit $Concurrency -Parallel {
-    $handler = [Net.Http.SocketsHttpHandler]::new()
+    $handler = [Net.Http.HttpClientHandler]::new()
     if ($using:SkipCertificateCheck) {
-        $handler.SslOptions.RemoteCertificateValidationCallback = { $true }
+        # 用框架內建的委派，不用 PowerShell scriptblock（TLS 回呼在沒有 Runspace 的執行緒上執行會失敗）
+        $handler.ServerCertificateCustomValidationCallback = [Net.Http.HttpClientHandler]::DangerousAcceptAnyServerCertificateValidator
     }
     $client = [Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(10)

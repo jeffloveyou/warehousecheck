@@ -13,6 +13,7 @@ function Test-Administrator {
     需要先轉成絕對路徑的參數名稱（提升權限後工作目錄不同）。
 #>
 function Invoke-ElevatedSelf {
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][hashtable]$BoundParameters,
@@ -22,19 +23,29 @@ function Invoke-ElevatedSelf {
     Remove-Item $logFile -ErrorAction SilentlyContinue
     $argList = @('-NoProfile', '-File', "`"$ScriptPath`"", '-LogFile', "`"$logFile`"")
     foreach ($key in $BoundParameters.Keys) {
+        if ($key -eq 'LogFile') { continue }
         $value = $BoundParameters[$key]
         if ($value -is [switch]) {
             if ($value.IsPresent) { $argList += "-$key" }
             continue
         }
-        if ($key -in $PathParameters) { $value = (Resolve-Path $value).Path }
+        # 轉成絕對路徑（路徑可能還不存在，例如第一次安裝的 Root），提升權限後工作目錄不同
+        # 以 PowerShell 目前位置解析（[IO.Path]::GetFullPath 用的是 .NET 工作目錄，兩者可能不同）
+        if ($key -in $PathParameters) { $value = $PSCmdlet.SessionState.Path.GetUnresolvedProviderPathFromPSPath($value) }
+        $value = "$value"
+        # 結尾的 \ 會和引號組成 \"（被當成字面引號），要多補一個 \ 讓命令列解析成單一個 \
+        if ($value.EndsWith('\')) { $value += '\' }
         $argList += @("-$key", "`"$value`"")
     }
     Write-Host '需要系統管理員權限，請在 UAC 視窗按「是」。' -ForegroundColor Yellow
     $process = Start-Process pwsh -Verb RunAs -ArgumentList $argList -Wait -PassThru
-    # 用 Write-Host 顯示記錄，避免記錄內容混進函式的回傳值
+    # 用 Write-Host 顯示記錄（避免混進函式的回傳值）；略過 transcript 的開頭／結尾資訊區塊（以 ***** 包住）
     if (Test-Path $logFile) {
-        Get-Content $logFile | Where-Object { $_ -notmatch '^\*{10}|^(開始|結束|Windows PowerShell|PowerShell) ' } | ForEach-Object { Write-Host $_ }
+        $inHeader = $false
+        foreach ($line in Get-Content $logFile) {
+            if ($line -match '^\*{10}') { $inHeader = -not $inHeader; continue }
+            if (-not $inHeader) { Write-Host $line }
+        }
     }
     return $process.ExitCode
 }
@@ -92,6 +103,33 @@ function Set-FileAtomically {
 
 <#
 .SYNOPSIS
+    部署根目錄權限：擁有者改為 Administrators，停止繼承 C:\ 的 Users／Authenticated Users 權限，
+    只保留 Administrators、SYSTEM。各服務帳號的權限由安裝腳本另外加上。必須在寫入任何檔案之前執行。
+    （C:\ 預設給 Authenticated Users「修改」，若不處理，一般使用者可讀金鑰、替換發布檔。）
+#>
+function Set-RootAcl {
+    param([Parameter(Mandatory)][string]$Root)
+    New-Item -ItemType Directory -Force -Path $Root | Out-Null
+    # 先重設擁有者：避免有人事先建立子目錄、以擁有者身分改回權限
+    icacls $Root /setowner Administrators /T /C /Q | Out-Null
+    icacls $Root /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "無法設定 $Root 的權限。" }
+}
+
+<#
+.SYNOPSIS
+    含秘密的目錄（config、proxy-config、certs）：不繼承、只給 Administrators、SYSTEM；
+    /grant:r 只取代這兩者的項目，已授權的其他服務帳號（例如另一個槽位）會保留。
+#>
+function Protect-SecretDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    icacls $Path /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "無法設定 $Path 的權限。" }
+}
+
+<#
+.SYNOPSIS
     A/B 槽位：固定的服務名稱與埠（M0-12）。反向代理只轉給 upstream.json 指定的槽位。
 #>
 function Get-Slot {
@@ -115,4 +153,5 @@ function New-UpstreamContent {
     } | ConvertTo-Json -Depth 8
 }
 
-Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically, Get-Slot, New-UpstreamContent
+Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
+    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent
