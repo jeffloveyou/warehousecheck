@@ -46,7 +46,10 @@
 | `scripts/open-dev-firewall.ps1` | M0-05 開放手機連線用的防火牆連接埠 5443（`-Remove` 移除） |
 | `scripts/publish.ps1` | M0-10 發布（win-x64／linux-x64／linux-arm64，framework-dependent 或 self-contained） |
 | `scripts/windows/install-service.ps1`、`uninstall-service.ps1` | M0-10 安裝／移除 Windows 服務 |
+| `scripts/linux/install-service.sh`、`uninstall-service.sh` | M0-11 安裝／移除 Linux systemd 服務 |
+| `deploy/docker/Dockerfile` | M0-11 容器映像（直接使用 publish 輸出，x64／arm64） |
 | `docs/adr/0008-Windows部署與設定分離.md` | 部署目錄、外部設定、服務帳號、FDD／SC 決策 |
+| `docs/adr/0009-Linux部署與容器.md` | systemd 服務、容器、NAS 部署方式選擇順序 |
 | `templates/agent-task.md` | 每次交給 AI Agent 的需求任務模板 |
 | `templates/feature-handoff.md` | 每項功能的修改與驗證交接卡 |
 

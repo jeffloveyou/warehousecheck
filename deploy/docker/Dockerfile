@@ -3,8 +3,12 @@
 # 建置（在 repo 根目錄）：
 #   docker build -f deploy/docker/Dockerfile --build-arg RELEASE_DIR=artifacts/publish/<版本資料夾> -t warehouse:<版本> .
 # 執行：
-#   docker run -d --name warehouse-c --network host -e ASPNETCORE_URLS=http://localhost:5082 \
-#     -v /etc/warehouse:/config:ro warehouse:<版本>
+#   docker run -d --name warehouse-c --network host --restart unless-stopped \
+#     --group-add "$(getent group warehouse | cut -d: -f3)" \
+#     -e ASPNETCORE_URLS=http://localhost:5082 -v /etc/warehouse:/config:ro warehouse:<版本>
+# --group-add：/etc/warehouse 為 0750 root:warehouse，容器內的 app 使用者（UID 1654）需加入主機的
+#   warehouse 群組才能讀設定；不要為此放寬設定檔權限。
+# ARM64 映像：在 repo 根目錄加 --platform linux/arm64，RELEASE_DIR 指向 linux-arm64 發布資料夾。
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
 ARG RELEASE_DIR
