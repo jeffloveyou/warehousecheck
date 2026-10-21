@@ -22,6 +22,8 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("item_request_no_seq");
+
             modelBuilder.Entity("Warehouse.Domain.Items.Item", b =>
                 {
                     b.Property<Guid>("Id")
@@ -50,6 +52,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
                     b.Property<string>("ItemCode")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")
@@ -71,6 +77,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(19,4)")
                         .HasDefaultValue(0m)
                         .HasColumnName("negative_stock_limit");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasDefaultValue("")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<string>("NormalizedPartNo")
+                        .HasColumnType("text")
+                        .HasColumnName("normalized_part_no");
 
                     b.Property<string>("RequestNo")
                         .IsRequired()
@@ -117,6 +133,12 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.HasIndex("ItemCode")
                         .IsUnique()
                         .HasDatabaseName("ix_items_item_code");
+
+                    b.HasIndex("NormalizedName")
+                        .HasDatabaseName("ix_items_normalized_name");
+
+                    b.HasIndex("NormalizedPartNo")
+                        .HasDatabaseName("ix_items_normalized_part_no");
 
                     b.HasIndex("RequestNo")
                         .IsUnique()
@@ -267,6 +289,87 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("comment");
+
+                    b.Property<Guid?>("DuplicateOfItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("duplicate_of_item_id");
+
+                    b.Property<string>("FromStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("from_status");
+
+                    b.Property<string>("ItemCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("item_code");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("ToStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("to_status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_item_reviews");
+
+                    b.HasIndex("DuplicateOfItemId")
+                        .HasDatabaseName("ix_item_reviews_duplicate_of_item_id");
+
+                    b.HasIndex("ItemId", "OccurredAt")
+                        .HasDatabaseName("ix_item_reviews_item_id_occurred_at");
+
+                    b.ToTable("item_reviews", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_reviews_action", "action IN ('Submit', 'Update', 'Resubmit', 'Approve', 'Return', 'Reject', 'Withdraw', 'Deactivate', 'Reactivate')");
+
+                            t.HasCheckConstraint("ck_item_reviews_comment_required", "action NOT IN ('Return', 'Reject') OR btrim(coalesce(comment, '')) <> ''");
+
+                            t.HasCheckConstraint("ck_item_reviews_duplicate_on_reject", "duplicate_of_item_id IS NULL OR (action = 'Reject' AND duplicate_of_item_id <> item_id)");
+
+                            t.HasCheckConstraint("ck_item_reviews_from_status", "from_status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
+
+                            t.HasCheckConstraint("ck_item_reviews_item_code_on_approve", "(action = 'Approve') = (item_code IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_item_reviews_to_status", "to_status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.Unit", b =>
                 {
                     b.Property<Guid>("Id")
@@ -375,6 +478,28 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Persistence.ItemCodeCounter", b =>
+                {
+                    b.Property<string>("Prefix")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)")
+                        .HasColumnName("prefix");
+
+                    b.Property<long>("LastNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_number");
+
+                    b.HasKey("Prefix")
+                        .HasName("pk_item_code_counters");
+
+                    b.ToTable("item_code_counters", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_code_counters_last_number", "last_number >= 1");
+
+                            t.HasCheckConstraint("ck_item_code_counters_prefix_format", "prefix ~ '^[A-Z0-9]{2,4}$'");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.Item", b =>
                 {
                     b.HasOne("Warehouse.Domain.Items.Unit", null)
@@ -399,6 +524,22 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_item_categories_item_categories_parent_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemReview", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("DuplicateOfItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_item_reviews_items_duplicate_of_item_id");
+
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_reviews_items_item_id");
                 });
 #pragma warning restore 612, 618
         }
