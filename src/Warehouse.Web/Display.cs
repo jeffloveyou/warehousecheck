@@ -58,6 +58,24 @@ public static class Display
         _ => reason.ToString(),
     };
 
+    public static string Of(Warehouse.Domain.Warehousing.LocationStatus status) => status switch
+    {
+        Warehouse.Domain.Warehousing.LocationStatus.Available => "有效",
+        Warehouse.Domain.Warehousing.LocationStatus.Inspection => "待驗",
+        Warehouse.Domain.Warehousing.LocationStatus.Inactive => "停用",
+        _ => status.ToString(),
+    };
+
+    public static string Of(Warehouse.Domain.Warehousing.LocationType type) => type switch
+    {
+        Warehouse.Domain.Warehousing.LocationType.Shelf => "貨架",
+        Warehouse.Domain.Warehousing.LocationType.Floor => "地面",
+        Warehouse.Domain.Warehousing.LocationType.Pallet => "棧板",
+        Warehouse.Domain.Warehousing.LocationType.Cold => "冷藏",
+        Warehouse.Domain.Warehousing.LocationType.Hazmat => "危險品區",
+        _ => type.ToString(),
+    };
+
     /// <summary>時間一律存 UTC，顯示時轉成伺服器當地時間（台灣 +08:00）。</summary>
     public static string Time(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }

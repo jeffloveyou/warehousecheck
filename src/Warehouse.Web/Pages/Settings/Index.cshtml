@@ -1,0 +1,21 @@
+@page
+@model Warehouse.Web.Pages.Settings.IndexModel
+@{
+    ViewData["Title"] = "系統設定";
+}
+<h1>系統設定</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info">@message</div>
+}
+<form method="post" class="panel" id="settings-form">
+    <h2>期初建帳</h2>
+    <p><label><input type="checkbox" name="AllowSelfApproveOpening" value="true" checked="@Model.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
+    <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
+    <h2>倉位註記</h2>
+    <p><label><input type="checkbox" name="LocationNotesEnabled" value="true" checked="@Model.LocationNotesEnabled" /> 自由備註</label></p>
+    <p><label><input type="checkbox" name="LocationAttributesEnabled" value="true" checked="@Model.LocationAttributesEnabled" /> 結構化屬性（區／架／層／格、類型、承重、溫控、危險品）</label></p>
+    <p><label><input type="checkbox" name="LocationImagesEnabled" value="true" checked="@Model.LocationImagesEnabled" /> 倉位圖片</label></p>
+    <p class="muted">關閉只會隱藏畫面上的欄位，已填的資料會保留，重新開啟就能看到。每次變更都會留下稽核紀錄。</p>
+    <div class="actions"><button type="submit" id="settings-save">儲存</button></div>
+</form>

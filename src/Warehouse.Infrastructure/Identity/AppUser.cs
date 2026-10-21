@@ -27,6 +27,7 @@ public static class RoleSeed
         Role("0b1f6a10-0003-4c3a-9a00-000000000001", Application.Abstractions.Roles.SystemAdmin),
         Role("0b1f6a10-0003-4c3a-9a00-000000000002", Application.Abstractions.Roles.ItemManager),
         Role("0b1f6a10-0003-4c3a-9a00-000000000003", Application.Abstractions.Roles.Operator),
+        Role("0b1f6a10-0003-4c3a-9a00-000000000004", Application.Abstractions.Roles.WarehouseManager),
     ];
 
     // ConcurrencyStamp 固定，否則每次產生 Migration 都會出現 UpdateData

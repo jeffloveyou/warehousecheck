@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Warehouse.Domain.Items;
+using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
 
 namespace Warehouse.Infrastructure.Persistence;
@@ -27,6 +28,14 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
     public DbSet<ItemAlias> ItemAliases => Set<ItemAlias>();
 
     public DbSet<ItemKeyword> ItemKeywords => Set<ItemKeyword>();
+
+    public DbSet<WarehouseSite> Warehouses => Set<WarehouseSite>();
+
+    public DbSet<Location> Locations => Set<Location>();
+
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     /// <summary>申請單號 MR-000125 的流水號來源（PostgreSQL sequence，併發安全；交易失敗會跳號，可接受）。</summary>
     public const string RequestNoSequence = "item_request_no_seq";

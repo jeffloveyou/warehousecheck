@@ -1,0 +1,55 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Warehouses.LocationModel
+@using Warehouse.Domain.Warehousing
+@{
+    var l = Model.Location;
+    ViewData["Title"] = $"{l.WarehouseCode} {l.Code}";
+}
+<h1>@l.WarehouseCode／@l.Code <span class="location-@l.Status">@Display.Of(l.Status)</span></h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<dl class="status">
+    <dt>名稱</dt><dd>@l.Name</dd>
+    <dt>QR 內容</dt><dd><code id="qr-content">@l.QrContent</code> <span class="muted">（V1 不列印標籤；可用此文字自製 QR Code）</span></dd>
+    @if (Model.Settings.LocationNotesEnabled)
+    {
+        <dt>備註</dt><dd style="white-space: pre-line">@l.Note</dd>
+    }
+    @if (Model.Settings.LocationAttributesEnabled)
+    {
+        <dt>區／架／層／格</dt><dd>@string.Join(" / ", new[] { l.Zone, l.Rack, l.Level, l.Bin }.Where(s => s is not null))</dd>
+        <dt>類型</dt><dd>@(l.LocationType is { } t ? Display.Of(t) : "")</dd>
+        <dt>承重上限</dt><dd>@(l.MaxLoadKg is { } kg ? $"{kg:0.##} kg" : "")</dd>
+        <dt>溫控／危險品</dt><dd>@(l.TemperatureControlled ? "溫控" : "－")／@(l.Hazardous ? "危險品" : "－")</dd>
+    }
+    <dt>更新</dt><dd>@Display.Time(l.UpdatedAt)</dd>
+</dl>
+<p><a href="/Warehouses/Locations?warehouseId=@l.WarehouseId">回儲位清單</a></p>
+
+@if (Model.CanManage)
+{
+    <form method="post" asp-page-handler="Update" class="panel" id="location-edit-form">
+        <h2>修改</h2>
+        <input type="hidden" asp-for="Version" />
+        <partial name="_LocationFields" model="(Model.Form, Model.Settings, false)" />
+        <div class="actions"><button type="submit" id="location-save">儲存</button></div>
+    </form>
+    <form method="post" asp-page-handler="Status" class="panel filters" id="location-status-form">
+        <input type="hidden" asp-for="Version" />
+        <label for="NewStatus">變更狀態</label>
+        <select id="NewStatus" name="NewStatus">
+            @foreach (var status in Enum.GetValues<LocationStatus>().Where(s => s != l.Status))
+            {
+                <option value="@status">@Display.Of(status)</option>
+            }
+        </select>
+        <button type="submit" class="secondary" id="location-status">變更</button>
+        <span class="muted">待驗：可存放但不算可用量；停用：不能過帳。</span>
+    </form>
+}

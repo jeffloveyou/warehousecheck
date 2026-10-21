@@ -1,0 +1,208 @@
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using Warehouse.Application.Abstractions;
+using Warehouse.Application.Errors;
+using Warehouse.Application.Warehousing;
+using Warehouse.Domain;
+using Warehouse.Domain.Text;
+using Warehouse.Domain.Warehousing;
+using Warehouse.Infrastructure.Persistence;
+
+namespace Warehouse.Infrastructure.Warehousing;
+
+/// <summary>
+/// <see cref="IWarehouseService"/> 實作。每個寫入動作都在同一交易內寫稽核（audit_logs）。
+/// 儲位查詢在資料庫篩選與分頁（ILIKE 跳脫，見 <see cref="LikePattern"/>）。
+/// </summary>
+public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) : IWarehouseService
+{
+    public async Task<IReadOnlyList<WarehouseRow>> ListWarehousesAsync(CancellationToken cancellationToken) =>
+        await db.Warehouses.AsNoTracking()
+            .OrderBy(w => w.Code)
+            .Select(w => new WarehouseRow(
+                w.Id, w.Code, w.Name, w.IsActive, db.Locations.Count(l => l.WarehouseId == w.Id), EF.Property<uint>(w, "Version")))
+            .ToListAsync(cancellationToken);
+
+    public async Task<Guid> CreateWarehouseAsync(WarehouseInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        var now = clock.GetUtcNow();
+        var warehouse = new WarehouseSite(Guid.NewGuid(), input.Code, input.Name, now);
+        db.Warehouses.Add(warehouse);
+        AuditLog.Add(db, actor, now, "warehouse.create", "warehouse", warehouse.Id.ToString(), null,
+            new { warehouse.Code, warehouse.Name });
+        await SaveAsync("warehouse", cancellationToken);
+        return warehouse.Id;
+    }
+
+    public async Task RenameWarehouseAsync(
+        Guid id, uint expectedVersion, string name, Actor actor, CancellationToken cancellationToken)
+    {
+        var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
+        var before = warehouse.Name;
+        warehouse.Rename(name);
+        AuditLog.Add(db, actor, clock.GetUtcNow(), "warehouse.rename", "warehouse", id.ToString(),
+            new { Name = before }, new { warehouse.Name });
+        await SaveAsync("warehouse", cancellationToken);
+    }
+
+    public async Task SetWarehouseActiveAsync(
+        Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken)
+    {
+        var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
+        if (warehouse.IsActive == isActive)
+        {
+            throw new DomainRuleException(isActive ? "倉庫已經是啟用狀態。" : "倉庫已經停用。");
+        }
+        if (isActive)
+        {
+            warehouse.Reactivate();
+        }
+        else
+        {
+            warehouse.Deactivate();
+        }
+        AuditLog.Add(db, actor, clock.GetUtcNow(), "warehouse.active", "warehouse", id.ToString(),
+            new { IsActive = !isActive }, new { IsActive = isActive });
+        await SaveAsync("warehouse", cancellationToken);
+    }
+
+    public async Task<PagedResult<LocationRow>> SearchLocationsAsync(LocationSearch search, CancellationToken cancellationToken)
+    {
+        var page = Paging.ClampPage(search.Page);
+        var pageSize = Paging.ClampPageSize(search.PageSize);
+        // 篩選要套在實體上（投影成 record 之後 EF 無法再轉成 SQL）
+        var locations = db.Locations.AsNoTracking();
+        if (search.WarehouseId is { } warehouseId)
+        {
+            locations = locations.Where(l => l.WarehouseId == warehouseId);
+        }
+        if (search.Status is { } status)
+        {
+            locations = locations.Where(l => l.Status == status);
+        }
+        var keyword = search.Keyword?.Trim();
+        if (!string.IsNullOrEmpty(keyword))
+        {
+            if (keyword.Length > Paging.MaxKeywordLength)
+            {
+                keyword = keyword[..Paging.MaxKeywordLength];
+            }
+            // 儲位碼一律大寫英數：先正規化（全形、小寫都能找到），再部分比對
+            var pattern = LikePattern.Contains(TextNormalizer.Normalize(keyword));
+            var raw = LikePattern.Contains(keyword);
+            locations = locations.Where(l =>
+                EF.Functions.Like(l.Code, pattern, LikePattern.Escape)
+                || (l.Name != null && EF.Functions.ILike(l.Name, raw, LikePattern.Escape))
+                || (l.Zone != null && EF.Functions.ILike(l.Zone, raw, LikePattern.Escape))
+                || (l.Rack != null && EF.Functions.ILike(l.Rack, raw, LikePattern.Escape)));
+        }
+
+        var total = await locations.CountAsync(cancellationToken);
+        var rows = await ToRows(locations, ordered: true)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        return new PagedResult<LocationRow>(rows, page, pageSize, total);
+    }
+
+    public Task<LocationRow?> GetLocationAsync(Guid id, CancellationToken cancellationToken) =>
+        ToRows(db.Locations.AsNoTracking().Where(l => l.Id == id), ordered: false).SingleOrDefaultAsync(cancellationToken);
+
+    public async Task<Guid> CreateLocationAsync(
+        Guid warehouseId, LocationInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        var warehouse = await db.Warehouses.AsNoTracking().SingleOrDefaultAsync(w => w.Id == warehouseId, cancellationToken)
+            ?? throw new NotFoundException("warehouse.not_found", "找不到倉庫。");
+        if (!warehouse.IsActive)
+        {
+            throw new DomainRuleException("倉庫已停用，不能新增儲位。");
+        }
+        var now = clock.GetUtcNow();
+        var location = Location.Create(Guid.NewGuid(), warehouseId, input.Code, input.Details, now);
+        db.Locations.Add(location);
+        AuditLog.Add(db, actor, now, "location.create", "location", location.Id.ToString(), null,
+            new { WarehouseCode = warehouse.Code, location.Code, input.Details });
+        await SaveAsync("location", cancellationToken);
+        return location.Id;
+    }
+
+    public async Task UpdateLocationAsync(
+        Guid id, uint expectedVersion, LocationDetails details, Actor actor, CancellationToken cancellationToken)
+    {
+        var location = await LoadAsync(db.Locations, id, expectedVersion, "location", "找不到儲位。", cancellationToken);
+        var before = Snapshot(location);
+        var now = clock.GetUtcNow();
+        location.Update(details, now);
+        AuditLog.Add(db, actor, now, "location.update", "location", id.ToString(), before, Snapshot(location));
+        await SaveAsync("location", cancellationToken);
+    }
+
+    public async Task ChangeLocationStatusAsync(
+        Guid id, uint expectedVersion, LocationStatus status, Actor actor, CancellationToken cancellationToken)
+    {
+        var location = await LoadAsync(db.Locations, id, expectedVersion, "location", "找不到儲位。", cancellationToken);
+        var before = location.Status;
+        var now = clock.GetUtcNow();
+        location.ChangeStatus(status, now);
+        AuditLog.Add(db, actor, now, "location.status", "location", id.ToString(),
+            new { Status = before.ToString() }, new { Status = status.ToString() });
+        await SaveAsync("location", cancellationToken);
+    }
+
+    /// <summary>已篩選的儲位加上倉庫代碼，投影成畫面用的資料（排序在投影前完成）。</summary>
+    private IQueryable<LocationRow> ToRows(IQueryable<Location> locations, bool ordered)
+    {
+        var joined = locations.Join(db.Warehouses, l => l.WarehouseId, w => w.Id, (l, w) => new { l, WarehouseCode = w.Code });
+        if (ordered)
+        {
+            joined = joined.OrderBy(x => x.WarehouseCode).ThenBy(x => x.l.Code);
+        }
+        return joined.Select(x => new LocationRow(
+            x.l.Id, x.l.WarehouseId, x.WarehouseCode, x.l.Code, x.l.Name, x.l.Status, x.l.Note, x.l.Zone, x.l.Rack,
+            x.l.Level, x.l.Bin, x.l.LocationType, x.l.MaxLoadKg, x.l.TemperatureControlled, x.l.Hazardous, x.l.UpdatedAt,
+            EF.Property<uint>(x.l, "Version")));
+    }
+
+    private static object Snapshot(Location l) => new
+    {
+        l.Name, l.Note, l.Zone, l.Rack, l.Level, l.Bin, LocationType = l.LocationType?.ToString(), l.MaxLoadKg,
+        l.TemperatureControlled, l.Hazardous,
+    };
+
+    private async Task<T> LoadAsync<T>(
+        IQueryable<T> set, Guid id, uint expectedVersion, string kind, string notFound, CancellationToken cancellationToken)
+        where T : class
+    {
+        var entity = await set.SingleOrDefaultAsync(e => EF.Property<Guid>(e, "Id") == id, cancellationToken)
+            ?? throw new NotFoundException($"{kind}.not_found", notFound);
+        if (db.Entry(entity).Property<uint>("Version").CurrentValue != expectedVersion)
+        {
+            throw Conflict(kind);
+        }
+        return entity;
+    }
+
+    private async Task SaveAsync(string kind, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw Conflict(kind);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } pg)
+        {
+            throw new DomainRuleException(pg.ConstraintName switch
+            {
+                "ix_warehouses_code" => "倉庫代碼已存在。",
+                "ux_locations_warehouse_code" => "這個倉庫已經有相同的儲位碼。",
+                _ => "資料重複。",
+            });
+        }
+    }
+
+    private static ConcurrencyConflictException Conflict(string kind) =>
+        new($"{kind}.concurrency_conflict", "資料已被他人修改，請重新載入後再操作。");
+}
