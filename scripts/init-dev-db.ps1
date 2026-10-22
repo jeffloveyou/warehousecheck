@@ -6,7 +6,9 @@
     角色或資料庫已存在時會略過，不會修改既有角色密碼。
     密碼只在記憶體與本次處理程序的環境變數中使用，不寫入檔案。
     用法：在專案根目錄執行  .\scripts\init-dev-db.ps1
+    -Bench：只建立量測用的 warehouse_bench（M0-07／M0-13，docs/04 §9.2）；warehouse_app 必須已存在，不再問它的密碼。
 #>
+param([switch]$Bench)
 
 $ErrorActionPreference = 'Stop'
 
@@ -28,6 +30,19 @@ if (-not $psql) {
 }
 
 $pgPassword = Read-Host 'postgres 超級使用者密碼' -AsSecureString
+if ($Bench) {
+    $sql = "SELECT 'CREATE DATABASE warehouse_bench OWNER warehouse_app' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'warehouse_bench') \gexec"
+    try {
+        $env:PGPASSWORD = ConvertTo-PlainText $pgPassword
+        $sql | & $psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1
+        $code = $LASTEXITCODE
+    } finally {
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    }
+    if ($code -ne 0) { Write-Host "建立失敗（psql 結束碼 $code）。" -ForegroundColor Red; exit 1 }
+    Write-Host '完成：warehouse_bench（已存在則略過）。連線字串與 warehouse_dev 相同，只把 Database 換成 warehouse_bench。' -ForegroundColor Green
+    exit 0
+}
 $appPassword = Read-Host 'warehouse_app 新密碼' -AsSecureString
 $appPassword2 = Read-Host '再輸入一次 warehouse_app 密碼' -AsSecureString
 
