@@ -1,5 +1,6 @@
 @using Warehouse.Application.Abstractions
 @using Warehouse.Api.Authorization
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -15,7 +16,7 @@
     <title>@ViewData["Title"] - 倉庫管理系統</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body>
+<body data-pwa-disabled="@(Configuration.GetValue<bool>("Pwa:Disabled") ? "true" : "false")">
     <nav id="nav">
         <a id="nav-home" href="/">系統狀態</a>
         @if (User.Identity?.IsAuthenticated == true)

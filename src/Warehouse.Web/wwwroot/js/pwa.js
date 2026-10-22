@@ -13,6 +13,8 @@
   updateOnline();
 
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  // 伺服器設定 Pwa:Disabled 時不註冊（sw.js 已是自我註銷版），也不顯示更新提示（docs/11 §7.1）
+  if (document.body.getAttribute('data-pwa-disabled') === 'true') return;
 
   var banner = document.getElementById('pwa-update');
   var button = document.getElementById('pwa-update-button');
