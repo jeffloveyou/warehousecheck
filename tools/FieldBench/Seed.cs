@@ -24,7 +24,7 @@ public static class Seed
     private static readonly Actor Creator = new(Guid.Parse("0f1e1d00-0000-4000-8000-000000000001"), "量測建立者", false, IsWarehouseManager: true);
     private static readonly Actor Approver = new(Guid.Parse("0f1e1d00-0000-4000-8000-000000000002"), "量測核准者", false, IsWarehouseManager: true);
 
-    public static async Task<int> RunAsync(string connectionString, string attachmentsDirectory)
+    public static async Task<int> RunAsync(string connectionString, string attachmentsDirectory, bool resetImages = false)
     {
         if (new NpgsqlConnectionStringBuilder(connectionString).Database != "warehouse_bench")
         {
@@ -55,8 +55,8 @@ public static class Seed
             var warehouses = scope.ServiceProvider.GetRequiredService<IWarehouseService>();
             if ((await warehouses.ListWarehousesAsync(default)).FirstOrDefault(w => w.Code == "B1") is { } existing)
             {
-                Console.WriteLine("倉庫 B1 已存在，略過儲位、期初與圖片");
-                return 0;
+                Console.WriteLine("倉庫 B1 已存在，略過儲位與期初");
+                return resetImages ? await ResetImagesAsync(services) : 0;
             }
             warehouseId = await warehouses.CreateWarehouseAsync(new WarehouseInput("B1", "量測倉"), Creator, default);
             var empty = new LocationDetails(null, null, null, null, null, null, null, null, false, false);
@@ -86,19 +86,43 @@ public static class Seed
         await WithVersion(services, documentId, (s, v) => s.ApproveAsync(documentId, v, "seed-" + documentId, Approver, default));
         Console.WriteLine($"倉庫、50 個儲位、期初過帳完成（{sw.Elapsed.TotalSeconds:0.0} 秒）");
 
+        await UploadImagesAsync(services);
+        Console.WriteLine($"圖片完成（{sw.Elapsed.TotalSeconds:0.0} 秒）");
+        return 0;
+    }
+
+    /// <summary>
+    /// --reset-images：停用 A-01 現有圖片，再上傳 3 張到 --attachments 指定的目錄。
+    /// 用途：量測用網站以一般權限執行、讀不到服務專用的附件目錄時，改用它讀得到的目錄。
+    /// </summary>
+    private static async Task<int> ResetImagesAsync(ServiceProvider services)
+    {
         using (var scope = services.CreateScope())
         {
             var warehouses = scope.ServiceProvider.GetRequiredService<IWarehouseService>();
             var images = scope.ServiceProvider.GetRequiredService<ILocationImageService>();
             var location = (await warehouses.GetLocationByCodeAsync("B1", "A-01", default))!;
-            for (var n = 0; n < 3; n++)
+            foreach (var image in await images.ListAsync(location.Id, default))
             {
-                var png = Png.Gradient(2400, 1800, n);
-                await images.UploadAsync(location.Id, new MemoryStream(png), png.Length, Creator, default);
+                await images.DeactivateAsync(location.Id, image.Id, Creator, default);
             }
         }
-        Console.WriteLine($"圖片完成（{sw.Elapsed.TotalSeconds:0.0} 秒）");
+        await UploadImagesAsync(services);
+        Console.WriteLine("已重新上傳 3 張圖片");
         return 0;
+    }
+
+    private static async Task UploadImagesAsync(ServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var warehouses = scope.ServiceProvider.GetRequiredService<IWarehouseService>();
+        var images = scope.ServiceProvider.GetRequiredService<ILocationImageService>();
+        var location = (await warehouses.GetLocationByCodeAsync("B1", "A-01", default))!;
+        for (var n = 0; n < 3; n++)
+        {
+            var png = Png.Gradient(2400, 1800, n);
+            await images.UploadAsync(location.Id, new MemoryStream(png), png.Length, Creator, default);
+        }
     }
 
     private static async Task WithVersion(ServiceProvider services, Guid documentId, Func<IOpeningService, uint, Task> action)

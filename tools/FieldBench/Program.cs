@@ -30,7 +30,8 @@ return mode switch
     "load" => await LoadAsync(),
     "seed" => await Seed.RunAsync(
         Environment.GetEnvironmentVariable("FIELD_BENCH_DB") ?? throw new InvalidOperationException("請先設定環境變數 FIELD_BENCH_DB（warehouse_bench 連線字串）"),
-        options.Get("attachments", @"C:\Warehouse\data\attachments")),
+        options.Get("attachments", @"C:\Warehouse\data\attachments"),
+        options.GetOrNull("reset-images") is not null),
     _ => Usage(),
 };
 
@@ -76,6 +77,7 @@ async Task<int> BrowserAsync()
     var errors = new List<string>();
     page.PageError += (_, e) => errors.Add(e);
     page.Console += (_, m) => { if (m.Type == "error") errors.Add(m.Text); };
+    page.Response += (_, r) => { if (r.Status >= 400) errors.Add($"HTTP {r.Status} {r.Url}"); };
 
     async Task<object?> Safe(string name, Func<Task<object?>> action)
     {
@@ -160,12 +162,12 @@ async Task<int> BrowserAsync()
     {
         await cdpSession.SendAsync("HeapProfiler.collectGarbage");
         var before = await Metrics.ReadAsync(cdpSession);
-        // 搜尋每人每分鐘限 60 次（Search:RateLimitPerMinute），所以 100 次換頁輪流開四種頁面，搜尋只占 25 次
-        var paths = new[] { "/Search?Q=", "/Stock", "/Opening", "/Items" };
+        // 搜尋每人每分鐘限 60 次（Search:RateLimitPerMinute），前面已用掉約 23 次；100 次換頁輪流開八種頁面，搜尋只占 12 次
+        var paths = new[] { "/Search?Q=", "/Stock", "/Opening", "/Items", "/Warehouses", "/Stock", "/Opening", "/Items" };
         for (var i = 0; i < 100; i++)
         {
             var path = paths[i % paths.Length];
-            await page.GotoAsync(baseUrl + path + (path.EndsWith('=') ? Uri.EscapeDataString(terms[i / 4 % terms.Length]) : ""));
+            await page.GotoAsync(baseUrl + path + (path.EndsWith('=') ? Uri.EscapeDataString(terms[i / 8 % terms.Length]) : ""));
         }
         await cdpSession.SendAsync("HeapProfiler.collectGarbage");
         var after = await Metrics.ReadAsync(cdpSession);
