@@ -150,6 +150,59 @@ else if (item.Status != ItemStatus.Active)
     </table>
 </div>
 
+<h2 id="item-locations">常用倉位</h2>
+<p class="muted">入庫、期初時會優先建議這些儲位（只是建議，仍由人選擇）。每個倉庫最多一個預設倉位。</p>
+<div class="table-wrap">
+    <table id="item-location-list">
+        <thead><tr><th>倉庫</th><th>儲位</th><th>預設</th><th>儲位狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var x in Model.ItemLocations)
+            {
+                <tr>
+                    <td>@x.WarehouseCode</td>
+                    <td><a href="/Warehouses/Location/@x.LocationId">@x.LocationCode</a></td>
+                    <td>@(x.IsDefault ? "預設" : "")</td>
+                    <td>@Display.Of(x.LocationStatus)</td>
+                    <td>
+                        @if (Model.CanManageLocations)
+                        {
+                            @if (!x.IsDefault)
+                            {
+                                <form method="post" asp-page-handler="DefaultItemLocation" class="inline">
+                                    <input type="hidden" name="itemLocationId" value="@x.Id" />
+                                    <button type="submit" class="link">設為預設</button>
+                                </form>
+                            }
+                            <form method="post" asp-page-handler="RemoveItemLocation" class="inline">
+                                <input type="hidden" name="itemLocationId" value="@x.Id" />
+                                <button type="submit" class="link">移除</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.ItemLocations.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">尚未設定。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+@if (Model.CanManageLocations)
+{
+    <form method="post" asp-page-handler="AddItemLocation" class="filters" id="item-location-form">
+        <select name="warehouseId" aria-label="倉庫" required>
+            @foreach (var w in Model.Warehouses)
+            {
+                <option value="@w.Id">@w.Code @w.Name</option>
+            }
+        </select>
+        <input type="text" name="locationCode" maxlength="40" placeholder="儲位碼" aria-label="儲位碼" required />
+        <label><input type="checkbox" name="isDefault" value="true" /> 預設</label>
+        <button type="submit" id="item-location-add">新增常用倉位</button>
+    </form>
+}
+
 <h2>審核紀錄</h2>
 <div class="table-wrap">
     <table id="review-history">

@@ -56,7 +56,7 @@ id "$APP_USER" &>/dev/null || useradd --system --no-create-home --shell /usr/sbi
 
 # 2. 目錄與發布檔（每個版本獨立，不覆寫）
 mkdir -p /opt/warehouse/releases "$CONFIG_DIR"
-[[ "$is_proxy" == "true" ]] || mkdir -p /var/lib/warehouse/data /var/lib/warehouse/keys
+[[ "$is_proxy" == "true" ]] || mkdir -p /var/lib/warehouse/data /var/lib/warehouse/data/attachments /var/lib/warehouse/keys
 if [[ -d "$release_dir" ]]; then
   echo "版本目錄已存在，沿用：$release_dir"
 else
@@ -98,7 +98,8 @@ if [[ "$is_proxy" != "true" ]]; then
   chown -R "$APP_USER":"$APP_USER" /var/lib/warehouse
   chmod -R 0750 /var/lib/warehouse
   # M0-12：A/B 共用 Data Protection 金鑰；主程式只能寫 /var/lib/warehouse
-  web_env="Environment=DataProtection__KeysDirectory=/var/lib/warehouse/keys"
+  # M3-08：倉位圖片等附件，與發布目錄分開、A/B 共用
+  web_env=$'Environment=DataProtection__KeysDirectory=/var/lib/warehouse/keys\nEnvironment=Storage__AttachmentsDirectory=/var/lib/warehouse/data/attachments'
   rw_paths="ReadWritePaths=/var/lib/warehouse"
 fi
 

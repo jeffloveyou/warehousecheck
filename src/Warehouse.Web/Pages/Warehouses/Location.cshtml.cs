@@ -10,10 +10,18 @@ using Warehouse.Domain.Warehousing;
 
 namespace Warehouse.Web.Pages.Warehouses;
 
-/// <summary>儲位明細：QR 內容、屬性；倉庫主管可修改與變更狀態（表單帶 xmin 版本）。</summary>
+/// <summary>儲位明細：QR 內容、屬性、圖片；倉庫主管可修改、變更狀態、上傳與停用圖片（表單帶 xmin 版本）。</summary>
+[RequestSizeLimit(12 * 1024 * 1024)]
+[RequestFormLimits(MultipartBodyLengthLimit = 12 * 1024 * 1024)]
 public class LocationModel(
-    IWarehouseService warehouses, ISettingsService settings, IAuthorizationService authorization) : PageModel
+    IWarehouseService warehouses, ISettingsService settings, IAuthorizationService authorization,
+    ILocationImageService images) : PageModel
 {
+    public IReadOnlyList<LocationImageRow> Images { get; private set; } = [];
+
+    [BindProperty]
+    public IFormFile? Photo { get; set; }
+
     public LocationRow Location { get; private set; } = null!;
 
     public SystemSettings Settings { get; private set; } = null!;
@@ -52,6 +60,25 @@ public class LocationModel(
             return "已儲存。";
         }, cancellationToken);
 
+    public Task<IActionResult> OnPostUploadAsync(Guid id, CancellationToken cancellationToken) =>
+        RunAsync(id, async () =>
+        {
+            if (Photo is null)
+            {
+                throw new DomainRuleException("請選擇圖片檔案。");
+            }
+            await using var stream = Photo.OpenReadStream();
+            await images.UploadAsync(id, stream, Photo.Length, User.ToActor(), cancellationToken);
+            return "已上傳圖片。";
+        }, cancellationToken);
+
+    public Task<IActionResult> OnPostDeactivateImageAsync(Guid id, Guid imageId, CancellationToken cancellationToken) =>
+        RunAsync(id, async () =>
+        {
+            await images.DeactivateAsync(id, imageId, User.ToActor(), cancellationToken);
+            return "已停用圖片。";
+        }, cancellationToken);
+
     public Task<IActionResult> OnPostStatusAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, async () =>
         {
@@ -85,6 +112,10 @@ public class LocationModel(
         }
         Location = location;
         Settings = await settings.GetAsync(cancellationToken);
+        if (Settings.LocationImagesEnabled)
+        {
+            Images = await images.ListAsync(id, cancellationToken);
+        }
         CanManage = (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded;
         return true;
     }

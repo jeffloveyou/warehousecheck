@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\Warehouse.Api\Warehouse.Api.csproj" />
@@ -20,5 +20,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>7873ffd9-710d-42ef-8711-4f99fff1d8bd</UserSecretsId>
   </PropertyGroup>
+
+  <!-- SkiaSharp 的 Windows 原生套件附帶 90 MB 的除錯符號（libSkiaSharp.pdb），執行不需要，不放進發布輸出（M3-08） -->
+  <Target Name="RemoveSkiaNativePdbFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'libSkiaSharp.pdb'" />
+    </ItemGroup>
+  </Target>
 
 </Project>

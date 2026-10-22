@@ -5,8 +5,11 @@ using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
+using Warehouse.Application.Items;
+using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
+using Warehouse.Domain.Text;
 
 namespace Warehouse.Web.Pages.Opening;
 
@@ -15,8 +18,17 @@ namespace Warehouse.Web.Pages.Opening;
 /// 核准按鈕帶一個開頁時產生的冪等鍵：連點、重新整理後重送，都只會過帳一次。
 /// 權限一律由服務再檢查；這裡的 IAuthorizationService 只用來決定 handler 能不能執行、按鈕要不要顯示。
 /// </summary>
-public class DetailsModel(IOpeningService openings, IStockQueryService stock, IAuthorizationService authorization) : PageModel
+public class DetailsModel(
+    IOpeningService openings, IStockQueryService stock, IAuthorizationService authorization,
+    IItemQueryService items, IItemLocationService itemLocations) : PageModel
 {
+    /// <summary>查建議儲位的料號（GET ?Suggest=）。</summary>
+    [BindProperty(SupportsGet = true)]
+    public string? Suggest { get; set; }
+
+    /// <summary>建議儲位（預設、常用、目前有庫存；M3-07）。只是建議，由人選擇。</summary>
+    public IReadOnlyList<LocationSuggestion>? Suggestions { get; private set; }
+
     public OpeningDetails Doc { get; private set; } = null!;
 
     public IReadOnlyList<UncountedLocationRow> Uncounted { get; private set; } = [];
@@ -154,6 +166,11 @@ public class DetailsModel(IOpeningService openings, IStockQueryService stock, IA
         if (doc.Status == StockDocumentStatus.Draft)
         {
             Uncounted = (await stock.GetUncountedLocationsAsync(doc.WarehouseId, 1, cancellationToken)).Items;
+            if (!string.IsNullOrWhiteSpace(Suggest)
+                && await items.FindIdByItemCodeAsync(TextNormalizer.Normalize(Suggest), cancellationToken) is { } itemId)
+            {
+                Suggestions = await itemLocations.SuggestAsync(itemId, doc.WarehouseId, cancellationToken);
+            }
         }
         return true;
     }

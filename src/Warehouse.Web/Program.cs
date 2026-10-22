@@ -28,8 +28,17 @@ if (string.IsNullOrWhiteSpace(connectionString))
         + "伺服器請放在 WAREHOUSE_CONFIG_DIR 目錄的 appsettings.Production.json，見 docs/04-開發手冊.md §2.1、§10。");
 }
 
+// 正式環境一定要明確設定附件目錄：預設的 %LOCALAPPDATA% 在服務帳號下 A/B 槽位各不相同、也不在備份範圍（M3-08 審查 O2）
+var attachmentsDirectory = builder.Configuration["Storage:AttachmentsDirectory"];
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(attachmentsDirectory))
+{
+    throw new InvalidOperationException(
+        "未設定附件目錄 Storage:AttachmentsDirectory。請用安裝腳本設定環境變數 Storage__AttachmentsDirectory，"
+        + "見 docs/04-開發手冊.md §15.4。");
+}
+
 builder.Services.AddProblemDetails();
-builder.Services.AddWarehouseInfrastructure(connectionString);
+builder.Services.AddWarehouseInfrastructure(connectionString, attachmentsDirectory);
 builder.Services.AddWarehouseApi();
 builder.Services.AddWarehouseIdentity();
 builder.Services.AddRazorPages(options =>

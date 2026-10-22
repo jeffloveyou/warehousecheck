@@ -50,6 +50,10 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<ProcessedCommand> ProcessedCommands => Set<ProcessedCommand>();
 
+    public DbSet<ItemLocation> ItemLocations => Set<ItemLocation>();
+
+    public DbSet<LocationImage> LocationImages => Set<LocationImage>();
+
     /// <summary>期初單號 OB-000001 的流水號來源。</summary>
     public const string OpeningDocNoSequence = "opening_doc_no_seq";
 

@@ -15,6 +15,27 @@ namespace Warehouse.Api.Endpoints;
 /// </summary>
 public static class WarehouseEndpoints
 {
+    /// <summary>
+    /// 倉位圖片檔案（M3-08）：/files/location-images/{id}/thumb 或 /large。要登入（Stock.Read）；
+    /// 圖片內容不會變（新圖是新 ID），所以讓瀏覽器私人快取一天，舊電腦重看不必重新下載。
+    /// </summary>
+    public static void MapFileEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGet("/files/location-images/{id:guid}/{variant:regex(^(thumb|large)$)}", async Task<IResult> (
+                ILocationImageService images, Guid id, string variant, HttpContext context, CancellationToken ct) =>
+            {
+                var file = await images.OpenAsync(id, string.Equals(variant, "thumb", StringComparison.OrdinalIgnoreCase), ct);
+                if (file is null)
+                {
+                    return TypedResults.NotFound();
+                }
+                context.Response.Headers.CacheControl = "private, max-age=86400";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                return TypedResults.File(file.Content, file.ContentType);
+            })
+            .RequireAuthorization(Policies.StockRead);
+    }
+
     public static void MapWarehouseEndpoints(this IEndpointRouteBuilder api)
     {
         var group = api.MapGroup("").RequireAuthorization(Policies.StockRead);
