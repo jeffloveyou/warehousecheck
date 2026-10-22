@@ -37,6 +37,8 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetails) :
 
         var problem = new ProblemDetails { Status = status, Title = code, Detail = exception.Message };
         problem.Extensions["errorCode"] = code;
+        // 與 stock_posting_failures.trace_id、日誌相同的追蹤碼：使用者回報這個碼就能找到同一個請求（M4-05）
+        problem.Extensions["traceId"] = System.Diagnostics.Activity.Current?.TraceId.ToHexString() ?? context.TraceIdentifier;
         if (exception is DuplicateCandidatesUnconfirmedException duplicate)
         {
             problem.Extensions["candidates"] = duplicate.Candidates;

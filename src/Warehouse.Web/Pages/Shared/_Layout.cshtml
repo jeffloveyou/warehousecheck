@@ -19,10 +19,18 @@
             <a id="nav-warehouses" href="/Warehouses">倉庫</a>
             <a id="nav-stock" href="/Stock">庫存</a>
             <a id="nav-opening" href="/Opening">期初</a>
+            <a id="nav-documents" href="/Documents">進出倉單</a>
+            <a id="nav-reservations" href="/Reservations">預留</a>
+            <a id="nav-anomalies" href="/Stock/Anomalies">庫存異常</a>
             @if (User.IsInRole(Roles.ItemManager))
             {
                 <a id="nav-categories" href="/MasterData/Categories">分類</a>
                 <a id="nav-units" href="/MasterData/Units">單位</a>
+            }
+            @if (User.IsInRole(Roles.ItemManager) || User.IsInRole(Roles.WarehouseManager))
+            {
+                <a id="nav-purposes" href="/MasterData/Purposes">用途類型</a>
+                <a id="nav-partners" href="/MasterData/Partners">往來對象</a>
             }
             @if (User.IsInRole(Roles.SystemAdmin))
             {

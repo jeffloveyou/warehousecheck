@@ -278,6 +278,71 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Inventory.DocumentAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("FileKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("file_key");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("file_name");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsPdf")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_pdf");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<string>("ThumbKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("thumb_key");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("uploaded_at");
+
+                    b.Property<Guid>("UploadedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("uploaded_by_id");
+
+                    b.Property<string>("UploadedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("uploaded_by_name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stock_document_attachments");
+
+                    b.HasIndex("DocumentId", "IsActive")
+                        .HasDatabaseName("ix_stock_document_attachments_document_id_is_active");
+
+                    b.ToTable("stock_document_attachments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_document_attachments_kind", "(is_pdf AND thumb_key IS NULL) OR (NOT is_pdf AND thumb_key IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Inventory.DocumentPurpose", b =>
                 {
                     b.Property<Guid>("Id")
@@ -564,6 +629,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("ItemId", "LocationId", "LotId", "SerialId", "StockStatus"), false);
 
+                    b.HasIndex(new[] { "ItemId" }, "ix_stock_balances_negative")
+                        .HasDatabaseName("ix_stock_balances_negative")
+                        .HasFilter("quantity < 0");
+
                     b.ToTable("stock_balances", null, t =>
                         {
                             t.HasCheckConstraint("ck_stock_balances_serial_quantity", "serial_id IS NULL OR (quantity <= 1 AND quantity = trunc(quantity))");
@@ -684,6 +753,9 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("WarehouseId")
                         .HasDatabaseName("ix_stock_documents_warehouse_id");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("ix_stock_documents_status_created_at");
 
                     b.HasIndex("DocType", "Status", "CreatedAt")
                         .HasDatabaseName("ix_stock_documents_doc_type_status_created_at");
@@ -872,6 +944,9 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.HasIndex("LotId")
                         .HasDatabaseName("ix_stock_movements_lot_id");
 
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_stock_movements_occurred_at");
+
                     b.HasIndex("SerialId")
                         .HasDatabaseName("ix_stock_movements_serial_id");
 
@@ -912,6 +987,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("created_by_name");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
 
                     b.Property<Guid>("ItemId")
                         .HasColumnType("uuid")
@@ -960,6 +1039,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_stock_reservations");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_stock_reservations_expiry")
+                        .HasFilter("status = 'Open' AND expires_at IS NOT NULL");
 
                     b.HasIndex("WarehouseId")
                         .HasDatabaseName("ix_stock_reservations_warehouse_id");
@@ -2000,6 +2083,67 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Inventory.PostingFailure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("Command")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("command");
+
+                    b.Property<string>("DocNo")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("doc_no");
+
+                    b.Property<Guid?>("DocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_id");
+
+                    b.Property<string>("ErrorCode")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("message");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("TraceId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("trace_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stock_posting_failures");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_stock_posting_failures_occurred_at");
+
+                    b.ToTable("stock_posting_failures", (string)null);
+                });
+
             modelBuilder.Entity("Warehouse.Infrastructure.Persistence.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2054,6 +2198,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("EntityType", "EntityId", "OccurredAt")
                         .HasDatabaseName("ix_audit_logs_entity_type_entity_id_occurred_at");
+
+                    b.HasIndex(new[] { "OccurredAt" }, "ix_audit_logs_document_events")
+                        .HasDatabaseName("ix_audit_logs_document_events")
+                        .HasFilter("entity_type = 'stock_document' AND action IN ('document.cancel', 'document.return', 'document.reversal_create')");
 
                     b.ToTable("audit_logs", (string)null);
                 });
@@ -2229,6 +2377,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_user_tokens_users_user_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.DocumentAttachment", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Inventory.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_document_attachments_stock_documents_document_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Inventory.InventoryLot", b =>

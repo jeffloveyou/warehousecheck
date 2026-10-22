@@ -93,6 +93,23 @@
     </form>
 }
 
+<h2 id="negative-policy">負庫存</h2>
+<p class="muted">目前：@(item.AllowNegativeStock ? $"允許，下限 -{item.NegativeStockLimit:0.####}" : "不允許")。只有不追蹤批號／序號的物料可以設定。下限是這個料號「全倉合計可用量」的最低值（例如下限 5，合計可用量最低可到 -5）。</p>
+@if (Model.CanEditNegativePolicy)
+{
+    <form method="post" asp-page-handler="NegativePolicy" class="panel" id="negative-policy-form">
+        <input type="hidden" asp-for="Version" />
+        <div class="form-grid">
+            <span></span>
+            <label><input type="checkbox" name="AllowNegative" value="true" checked="@Model.AllowNegative" /> 允許負庫存</label>
+            <label for="NegativeLimit">下限（正數，基本單位）</label>
+            <input type="number" id="NegativeLimit" name="NegativeLimit" value="@Model.NegativeLimit.ToString("0.####")" min="0" step="any" />
+        </div>
+        <p class="muted">已有負結存時不能關閉，也不能把下限調得比目前的負數還小。每次修改都會留下稽核紀錄。</p>
+        <div class="actions"><button type="submit" id="negative-policy-save">儲存負庫存設定</button></div>
+    </form>
+}
+
 <h2 id="index">搜尋索引</h2>
 <p class="muted">專屬別名：全系統只能對應這一個物料。共用關鍵字：俗稱、用途，可同時掛在多個物料。停用後不再被搜尋到，紀錄保留。</p>
 @if (Model.CanAddIndex)

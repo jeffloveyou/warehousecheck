@@ -3,6 +3,7 @@ using Npgsql;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Settings;
+using Warehouse.Domain;
 using Warehouse.Infrastructure.Persistence;
 
 namespace Warehouse.Infrastructure.Settings;
@@ -46,7 +47,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
                 throw new ConcurrencyConflictException(
                     "setting.concurrency_conflict", "設定已被他人修改，請重新載入後再儲存。");
             }
-            var text = after ? "true" : "false";
+            var text = after;
             if (existing.TryGetValue(key, out var row))
             {
                 AuditLog.Add(db, actor, now, "setting.update", "setting", key, new { value = row.Value }, new { value = text });
@@ -91,11 +92,30 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             DocumentExternalNoRequired = Flag(SettingKeys.DocumentExternalNoRequired, Defaults.DocumentExternalNoRequired),
             DocumentNoteEnabled = Flag(SettingKeys.DocumentNoteEnabled, Defaults.DocumentNoteEnabled),
             DocumentNoteRequired = Flag(SettingKeys.DocumentNoteRequired, Defaults.DocumentNoteRequired),
+            DocumentAttachmentsEnabled = Flag(SettingKeys.DocumentAttachmentsEnabled, Defaults.DocumentAttachmentsEnabled),
+            PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
         };
     }
 
     /// <summary>每個鍵的（開表單時的值、送出的值、資料庫目前的值）。</summary>
-    private static IEnumerable<(string Key, bool Before, bool After, bool Current)> Pairs(
+    private static IEnumerable<(string Key, string Before, string After, string Current)> Pairs(
+        SystemSettings original, SystemSettings updated, SystemSettings current) =>
+        Flags(original, updated, current)
+            .Select(p => (p.Key, Text(p.Before), Text(p.After), Text(p.Current)))
+            .Append((SettingKeys.PrintCompanyName, Clean(original.PrintCompanyName), Clean(updated.PrintCompanyName), Clean(current.PrintCompanyName)));
+
+    private static string Text(bool value) => value ? "true" : "false";
+
+    /// <summary>文字設定：去頭尾空白、限制長度（超過丟錯，不默默截斷）。</summary>
+    private static string Clean(string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        return trimmed.Length <= SettingKeys.TextMaxLength
+            ? trimmed
+            : throw new DomainRuleException($"文字設定不可超過 {SettingKeys.TextMaxLength} 字。");
+    }
+
+    private static IEnumerable<(string Key, bool Before, bool After, bool Current)> Flags(
         SystemSettings original, SystemSettings updated, SystemSettings current) =>
     [
         (SettingKeys.AllowSelfApproveOpening, original.AllowSelfApproveOpening, updated.AllowSelfApproveOpening, current.AllowSelfApproveOpening),
@@ -112,5 +132,6 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.DocumentExternalNoRequired, original.DocumentExternalNoRequired, updated.DocumentExternalNoRequired, current.DocumentExternalNoRequired),
         (SettingKeys.DocumentNoteEnabled, original.DocumentNoteEnabled, updated.DocumentNoteEnabled, current.DocumentNoteEnabled),
         (SettingKeys.DocumentNoteRequired, original.DocumentNoteRequired, updated.DocumentNoteRequired, current.DocumentNoteRequired),
+        (SettingKeys.DocumentAttachmentsEnabled, original.DocumentAttachmentsEnabled, updated.DocumentAttachmentsEnabled, current.DocumentAttachmentsEnabled),
     ];
 }

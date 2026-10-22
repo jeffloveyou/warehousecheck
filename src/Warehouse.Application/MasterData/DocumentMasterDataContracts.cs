@@ -31,6 +31,12 @@ public interface IDocumentMasterDataService
     Task<PagedResult<PartnerRow>> ListPartnersAsync(
         PartnerType? type, string? keyword, bool includeInactive, int page, CancellationToken cancellationToken);
 
+    /// <summary>單據表頭下拉用：啟用的往來對象，依類型、代碼排序，最多 <paramref name="limit"/> 筆（上限 500）。</summary>
+    Task<IReadOnlyList<PartnerRow>> ListActivePartnersAsync(PartnerType? type, int limit, CancellationToken cancellationToken);
+
+    /// <summary>以代碼精確查詢啟用的往來對象（不分大小寫；代碼只在同類型內唯一，所以可能有多筆）。</summary>
+    Task<IReadOnlyList<PartnerRow>> FindActivePartnersByCodeAsync(string code, CancellationToken cancellationToken);
+
     Task<Guid> CreatePartnerAsync(PartnerInput input, Actor actor, CancellationToken cancellationToken);
 
     Task RenamePartnerAsync(Guid id, uint expectedVersion, string name, Actor actor, CancellationToken cancellationToken);

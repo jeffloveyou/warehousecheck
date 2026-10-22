@@ -93,5 +93,8 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(a => a.After).HasColumnType("jsonb");
         builder.HasIndex(a => new { a.EntityType, a.EntityId, a.OccurredAt });
         builder.HasIndex(a => a.OccurredAt);
+        // 異常追蹤「單據事件」用（M4-03 審查 #2）；動作清單同 StockAnomalyService.DocumentActions
+        builder.HasIndex(a => a.OccurredAt, "ix_audit_logs_document_events").HasDatabaseName("ix_audit_logs_document_events")
+            .HasFilter("entity_type = 'stock_document' AND action IN ('document.cancel', 'document.return', 'document.reversal_create')");
     }
 }

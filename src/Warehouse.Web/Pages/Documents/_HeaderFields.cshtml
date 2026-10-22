@@ -1,0 +1,88 @@
+@model Warehouse.Web.Pages.Documents.HeaderFieldsModel
+@using Warehouse.Domain.Inventory
+@using Warehouse.Application.Settings
+@{
+    var s = Model.Options.Settings;
+    var docType = Model.DocType;
+    // 每個群組適用的單據類型；Keep＝目前已選但不在清單內的項目，永遠保留
+    string TypesOf(string group) => group switch
+    {
+        "In" => "Inbound",
+        "Out" => "Outbound",
+        "Vendor" or "Customer" => "Inbound,Outbound",
+        "Department" => "Inbound,Outbound,Transfer",
+        _ => "Inbound,Outbound,Transfer",
+    };
+    string GroupLabel(string group) => group switch
+    {
+        "In" => "進倉用途",
+        "Out" => "出倉用途",
+        "Vendor" => "廠商",
+        "Customer" => "客戶",
+        "Department" => "部門",
+        _ => "目前的設定",
+    };
+    bool Applies(string group) => docType is null || TypesOf(group).Split(',').Contains(docType.ToString());
+    var purposeGroups = new[] { "In", "Out", "Keep" };
+    var partnerGroups = new[] { "Vendor", "Customer", "Department", "Keep" };
+    string Star(bool required) => required ? "*" : "";
+}
+@if (s.DocumentPurposeEnabled && docType != StockDocumentType.Transfer)
+{
+    <label for="Header_PurposeId">用途 <span class="required-mark">@Star(s.DocumentPurposeRequired)</span></label>
+    <select id="Header_PurposeId" name="Header.PurposeId" data-filter-by-type="true">
+        <option value="">（未選）</option>
+        @foreach (var group in purposeGroups.Where(Applies))
+        {
+            var options = Model.Options.Purposes.Where(o => o.Group == group).ToList();
+            if (options.Count == 0)
+            {
+                continue;
+            }
+            <optgroup label="@GroupLabel(group)" data-types="@TypesOf(group)">
+                @foreach (var o in options)
+                {
+                    <option value="@o.Id" selected="@(o.Id == Model.Form.PurposeId)">@o.Label</option>
+                }
+            </optgroup>
+        }
+    </select>
+}
+@if (s.DocumentPartnerEnabled)
+{
+    <label for="Header_PartnerId">往來對象 <span class="required-mark">@Star(s.DocumentPartnerRequired)</span></label>
+    <div>
+        <select id="Header_PartnerId" name="Header.PartnerId" data-filter-by-type="true">
+            <option value="">（未選）</option>
+            @foreach (var group in partnerGroups.Where(Applies))
+            {
+                var options = Model.Options.Partners.Where(o => o.Group == group).ToList();
+                if (options.Count == 0)
+                {
+                    continue;
+                }
+                <optgroup label="@GroupLabel(group)" data-types="@TypesOf(group)">
+                    @foreach (var o in options)
+                    {
+                        <option value="@o.Id" selected="@(o.Id == Model.Form.PartnerId)">@o.Label</option>
+                    }
+                </optgroup>
+            }
+        </select>
+        <input type="text" id="Header_PartnerCode" name="Header.PartnerCode" value="@Model.Form.PartnerCode" maxlength="20" placeholder="或輸入對象代碼" aria-label="往來對象代碼" />
+        @if (Model.Options.PartnersTruncated)
+        {
+            <div class="muted">下拉選單每種類型只列前 20 筆，其他請輸入代碼（有輸入代碼時以代碼為準）。</div>
+        }
+    </div>
+}
+@if (s.DocumentExternalNoEnabled)
+{
+    <label for="Header_ExternalNo">外部單號 <span class="required-mark">@Star(s.DocumentExternalNoRequired)</span></label>
+    <input type="text" id="Header_ExternalNo" name="Header.ExternalNo" value="@Model.Form.ExternalNo" maxlength="50" placeholder="例：採購單號、領料單號" />
+}
+@if (s.DocumentNoteEnabled)
+{
+    <label for="Header_Note">備註 <span class="required-mark">@Star(s.DocumentNoteRequired)</span></label>
+    <input type="text" id="Header_Note" name="Header.Note" value="@Model.Form.Note" maxlength="@StockDocument.NoteMaxLength" />
+}

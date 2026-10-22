@@ -1,0 +1,117 @@
+@page
+@model Warehouse.Web.Pages.MasterData.PartnersModel
+@using Warehouse.Domain.Inventory
+@{
+    ViewData["Title"] = "往來對象";
+    var editing = Model.EditId is not null && Model.Result.Items.Any(p => p.Id == Model.EditId);
+}
+<h1>往來對象</h1>
+<p class="muted">進出倉單選用的廠商、客戶、部門。停用後新單據不能再選，已用過的單據保留原值；代碼與類型建立後不可修改。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@* 寫入表單帶著目前的篩選條件，完成後回到同一個清單位置 *@
+@functions {
+    private Microsoft.AspNetCore.Html.IHtmlContent FilterHidden() => new Microsoft.AspNetCore.Html.HtmlString(
+        $"<input type=\"hidden\" name=\"Type\" value=\"{Model.Type}\" />"
+        + $"<input type=\"hidden\" name=\"q\" value=\"{System.Net.WebUtility.HtmlEncode(Model.Keyword ?? "")}\" />"
+        + $"<input type=\"hidden\" name=\"IncludeInactive\" value=\"{Model.IncludeInactive.ToString().ToLowerInvariant()}\" />"
+        + $"<input type=\"hidden\" name=\"p\" value=\"{Model.PageNumber}\" />");
+}
+<form method="get" class="filters" id="partner-filter">
+    <select name="Type" aria-label="類型">
+        <option value="">全部類型</option>
+        @foreach (var t in Enum.GetValues<PartnerType>())
+        {
+            <option value="@t" selected="@(Model.Type == t)">@Display.Of(t)</option>
+        }
+    </select>
+    <input type="text" name="q" value="@Model.Keyword" maxlength="50" placeholder="代碼或名稱" aria-label="關鍵字" />
+    <label><input type="checkbox" name="IncludeInactive" value="true" checked="@Model.IncludeInactive" /> 含停用</label>
+    <button type="submit">查詢</button>
+</form>
+@if (Model.CanManage)
+{
+    <form method="post" asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="partner-form">
+        <h2>@(editing ? "修改名稱" : "新增往來對象")</h2>
+        <input type="hidden" name="Version" value="@Model.Version" />
+        @FilterHidden()
+        <div class="form-grid">
+            <label for="Input_Type">類型</label>
+            @if (editing)
+            {
+                <input type="hidden" name="Input.Type" value="@Model.Input.Type" />
+                <input type="text" value="@Display.Of(Model.Input.Type)" readonly />
+            }
+            else
+            {
+                <select id="Input_Type" name="Input.Type">
+                    @foreach (var t in Enum.GetValues<PartnerType>())
+                    {
+                        <option value="@t" selected="@(Model.Input.Type == t)">@Display.Of(t)</option>
+                    }
+                </select>
+            }
+            <label for="Input_Code">代碼</label>
+            <input type="text" id="Input_Code" name="Input.Code" value="@Model.Input.Code" readonly="@editing" maxlength="20" placeholder="大寫英數，例：V001" />
+            <label for="Input_Name">名稱</label>
+            <input type="text" id="Input_Name" name="Input.Name" value="@Model.Input.Name" maxlength="100" />
+        </div>
+        <div class="actions">
+            <button type="submit" id="partner-save">@(editing ? "儲存" : "新增")</button>
+            @if (editing)
+            {
+                <a href="@Model.PageUrl(Model.Result.Page)">取消</a>
+            }
+        </div>
+    </form>
+}
+<div class="table-wrap">
+    <table id="partner-list">
+        <thead><tr><th>類型</th><th>代碼</th><th>名稱</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var p in Model.Result.Items)
+            {
+                <tr>
+                    <td>@Display.Of(p.Type)</td>
+                    <td>@p.Code</td>
+                    <td>@p.Name</td>
+                    <td>@(p.IsActive ? "啟用" : "停用")</td>
+                    <td>
+                        @if (Model.CanManage)
+                        {
+                            <a href="@Model.EditUrl(p.Id)">改名</a>
+                            <form method="post" asp-page-handler="Toggle" class="inline">
+                                <input type="hidden" name="id" value="@p.Id" />
+                                <input type="hidden" name="version" value="@p.Version" />
+                                <input type="hidden" name="isActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
+                                @FilterHidden()
+                                <button type="submit" class="link">@(p.IsActive ? "停用" : "啟用")</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">沒有符合的往來對象。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

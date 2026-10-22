@@ -1,0 +1,83 @@
+@page
+@model Warehouse.Web.Pages.Stock.MovementsModel
+@{
+    ViewData["Title"] = "異動歷史";
+}
+<h1>異動歷史</h1>
+<p class="muted">所有庫存異動的帳（只增不改）。不填條件時只列最近的異動；日期為台灣當地日期，含起迄兩天。</p>
+<form method="get" class="filters" id="movement-filter">
+    <input type="text" name="ItemCode" value="@Model.ItemCode" maxlength="20" placeholder="料號" aria-label="料號" />
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <input type="text" name="LocationCode" value="@Model.LocationCode" maxlength="40" placeholder="儲位碼" aria-label="儲位碼" />
+    <input type="text" name="DocNo" value="@Model.DocNo" maxlength="20" placeholder="單號" aria-label="單號" />
+    <input type="text" name="ActorName" value="@Model.ActorName" maxlength="50" placeholder="操作者" aria-label="操作者" />
+    <label>起 <input type="date" name="From" value="@(Model.From?.ToString("yyyy-MM-dd"))" /></label>
+    <label>迄 <input type="date" name="To" value="@(Model.To?.ToString("yyyy-MM-dd"))" /></label>
+    <button type="submit" id="movement-submit">查詢</button>
+</form>
+@if (Model.Notice is not null)
+{
+    <div class="message warn">@Model.Notice</div>
+}
+<div class="table-wrap">
+    <table id="movement-history">
+        <thead>
+            <tr><th>時間</th><th>單號</th><th>類型</th><th>料號</th><th>品名</th><th>倉庫</th><th>儲位</th><th>批號</th><th>序號</th><th>異動量</th><th>異動後結存</th><th>操作者</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var m in Model.Result.Items)
+            {
+                <tr>
+                    <td>@Display.Time(m.OccurredAt)</td>
+                    <td>
+                        @if (m.DocumentId != Guid.Empty)
+                        {
+                            <a href="@Display.DocumentUrl(m.DocType, m.DocumentId)">@m.DocNo</a>
+                        }
+                        else
+                        {
+                            <span>@m.DocNo</span>
+                        }
+                    </td>
+                    <td>@Display.Of(m.DocType)</td>
+                    <td>@m.ItemCode</td>
+                    <td>@m.ItemName</td>
+                    <td>@m.WarehouseCode</td>
+                    <td>@m.LocationCode</td>
+                    <td>@m.LotNo</td>
+                    <td>@m.SerialNo</td>
+                    <td class="num @(m.QuantityDelta < 0 ? "bad" : "")">@(m.QuantityDelta > 0 ? "+" : "")@Display.Qty(m.QuantityDelta)</td>
+                    <td class="num">
+                        <span>@Display.Qty(m.BalanceAfter)</span>
+                        @if (m.IsNegative)
+                        {
+                            <span class="bad">（負庫存）</span>
+                        }
+                    </td>
+                    <td>@m.ActorName</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="12" class="muted">沒有符合的異動。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

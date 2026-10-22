@@ -46,6 +46,12 @@ public static class DependencyInjection
         services.AddScoped<IOpeningService, OpeningService>();
         services.AddScoped<IStockDocumentService, StockDocumentService>();
         services.AddScoped<IDocumentMasterDataService, DocumentMasterDataService>();
+        services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
+        services.AddSingleton<IPostingFailureLog, PostingFailureLog>();
+        services.AddScoped<IStockAnomalyService, StockAnomalyService>();
+        services.AddScoped<StockReservationService>();
+        services.AddScoped<IStockReservationService>(sp => sp.GetRequiredService<StockReservationService>());
+        services.AddScoped<IItemNegativePolicyService>(sp => sp.GetRequiredService<StockReservationService>());
         services.AddScoped<IStockQueryService, StockQueryService>();
         services.AddScoped<IMasterDataService, MasterDataService>();
         services.AddScoped<IItemLocationService, ItemLocationService>();

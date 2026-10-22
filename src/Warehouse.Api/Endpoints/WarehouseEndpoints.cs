@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
+using Warehouse.Application.Inventory;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Warehousing;
@@ -32,6 +33,23 @@ public static class WarehouseEndpoints
                 context.Response.Headers.CacheControl = "private, max-age=86400";
                 context.Response.Headers.XContentTypeOptions = "nosniff";
                 return TypedResults.File(file.Content, file.ContentType);
+            })
+            .RequireAuthorization(Policies.StockRead);
+
+        // 單據附件（M4-10）：PDF 一律下載（Content-Disposition: attachment），不在瀏覽器內以同源執行
+        endpoints.MapGet("/files/document-attachments/{id:guid}/{variant:regex(^(thumb|file)$)}", async Task<IResult> (
+                IDocumentAttachmentService attachments, Guid id, string variant, HttpContext context, CancellationToken ct) =>
+            {
+                var file = await attachments.OpenAsync(id, string.Equals(variant, "thumb", StringComparison.OrdinalIgnoreCase), ct);
+                if (file is null)
+                {
+                    return TypedResults.NotFound();
+                }
+                context.Response.Headers.CacheControl = "private, max-age=86400";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                return file.ContentType == "application/pdf"
+                    ? TypedResults.File(file.Content, file.ContentType, $"{id:N}.pdf")
+                    : TypedResults.File(file.Content, file.ContentType);
             })
             .RequireAuthorization(Policies.StockRead);
     }

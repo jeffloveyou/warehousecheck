@@ -20,7 +20,8 @@ namespace Warehouse.Infrastructure.Inventory;
 /// 過帳（確認或核准）的步驟見 <see cref="PostCoreAsync"/>；結存只經 <see cref="IInventoryPostingService"/> 改變。
 /// </summary>
 public sealed class StockDocumentService(
-    WarehouseDbContext db, IInventoryPostingService posting, ISettingsService settings, TimeProvider clock) : IStockDocumentService
+    WarehouseDbContext db, IInventoryPostingService posting, ISettingsService settings, TimeProvider clock,
+    IPostingFailureLog? failures = null) : IStockDocumentService
 {
     /// <summary>出倉單送審時建立的預留來源類型（ADR-0004 決策三）。</summary>
     public const string ReservationReference = "StockDocument";
@@ -103,7 +104,40 @@ public sealed class StockDocumentService(
     }
 
     public async Task<Guid> CreateAsync(
-        StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken)
+        StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken,
+        Guid? requestId = null)
+    {
+        if (requestId is { } existingId && await SameRequestAsync(existingId, actor, cancellationToken))
+        {
+            return existingId;
+        }
+        try
+        {
+            return await CreateCoreAsync(type, warehouseId, header, actor, requestId ?? Guid.NewGuid(), cancellationToken);
+        }
+        catch (ConflictException ex) when (requestId is not null && ex.ErrorCode == "document.request_id_conflict")
+        {
+            // 同一個請求同時送兩次：後到的撞主鍵，回傳先到的那張（別人用同一個 ID 則照樣拒絕）
+            if (await SameRequestAsync(requestId.Value, actor, cancellationToken))
+            {
+                return requestId.Value;
+            }
+            throw;
+        }
+    }
+
+    /// <summary>這個 ID 的單據已存在：同一位建立者＝重送（true）；別人用同一個 ID＝拒絕。</summary>
+    private async Task<bool> SameRequestAsync(Guid id, Actor actor, CancellationToken cancellationToken)
+    {
+        var creator = await db.StockDocuments.AsNoTracking().Where(d => d.Id == id).Select(d => (Guid?)d.CreatedById)
+            .SingleOrDefaultAsync(cancellationToken);
+        return creator is null
+            ? false
+            : creator == actor.Id ? true : throw new ConflictException("document.request_id_conflict", "這個請求識別碼已被使用，請重新整理頁面。");
+    }
+
+    private async Task<Guid> CreateCoreAsync(
+        StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, Guid id, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var warehouse = await db.Warehouses.AsNoTracking().SingleOrDefaultAsync(w => w.Id == warehouseId, cancellationToken)
@@ -116,7 +150,7 @@ public sealed class StockDocumentService(
         var effective = await EffectiveHeaderAsync(type, header, null, current, cancellationToken);
         var now = clock.GetUtcNow();
         var doc = StockDocument.CreateMovement(
-            Guid.NewGuid(), await NextDocNoAsync(type, cancellationToken), type, warehouseId, effective, null, actor.Id, actor.Name, now);
+            id, await NextDocNoAsync(type, cancellationToken), type, warehouseId, effective, null, actor.Id, actor.Name, now);
         db.StockDocuments.Add(doc);
         AuditLog.Add(db, actor, now, "document.create", "stock_document", doc.Id.ToString(), null,
             new { doc.DocNo, DocType = type.ToString(), WarehouseCode = warehouse.Code, effective.PurposeId, effective.PartnerId, doc.ExternalNo, doc.Note });
@@ -440,6 +474,22 @@ public sealed class StockDocumentService(
         }
         try
         {
+            await IdempotentCoreAsync(commandType, id, expectedVersion, key, requestHash, actor, cancellationToken, action);
+        }
+        catch (Exception ex) when (failures is not null && ex is AppException or DomainRuleException)
+        {
+            // 被拒絕的過帳嘗試另外記錄（交易已回滾；在獨立連線寫入，M4-05）
+            await failures.RecordAsync(commandType, id, actor, ex, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task IdempotentCoreAsync(
+        string commandType, Guid id, uint expectedVersion, string key, string requestHash, Actor actor, CancellationToken cancellationToken,
+        Func<StockDocument, SystemSettings, DateTimeOffset, Task<(string Action, object? After)>> action)
+    {
+        try
+        {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
             await LockDocumentAsync(id, cancellationToken);
@@ -624,6 +674,7 @@ public sealed class StockDocumentService(
                 "ux_stock_document_lines_key" => new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細。"),
                 "ux_stock_documents_reversal" => new ConflictException("document.reversal_exists", "這張單已經有沖銷單（未取消）。"),
                 "pk_processed_commands" => new ConflictException("idempotency.key_reused", "這個請求識別碼已被使用。"),
+                "pk_stock_documents" => new ConflictException("document.request_id_conflict", "這個請求識別碼已被使用，請重新整理頁面。"),
                 _ => new DomainRuleException("資料重複。"),
             };
         }

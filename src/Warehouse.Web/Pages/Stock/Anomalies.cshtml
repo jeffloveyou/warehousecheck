@@ -1,0 +1,135 @@
+@page
+@model Warehouse.Web.Pages.Stock.AnomaliesModel
+@using Warehouse.Application.Inventory
+@{
+    ViewData["Title"] = "庫存異常";
+    var paging = Model.Paging;
+    string TabClass(string tab) => Model.Tab == tab ? "chip tab-active" : "chip";
+}
+<h1>庫存異常</h1>
+<p class="muted">需要有人注意的情況：被拒絕的過帳嘗試、取消或退回的單據、久未處理的單據（草稿或待核准超過 @IStockAnomalyService.StaleDocumentDays 天）、需注意的預留（建立超過 @IStockAnomalyService.StaleReservationDays 天或 @IStockAnomalyService.ExpiringSoonDays 天內到期）。</p>
+<div class="tabs" id="anomaly-tabs" role="navigation" aria-label="異常分類">
+    <a class="@TabClass(AnomaliesModel.TabFailures)" href="/Stock/Anomalies?tab=failures">被拒嘗試</a>
+    <a class="@TabClass(AnomaliesModel.TabEvents)" href="/Stock/Anomalies?tab=events">單據事件</a>
+    <a class="@TabClass(AnomaliesModel.TabStaleDocuments)" href="/Stock/Anomalies?tab=stale-documents">久未處理單據</a>
+    <a class="@TabClass(AnomaliesModel.TabStaleReservations)" href="/Stock/Anomalies?tab=stale-reservations">需注意的預留</a>
+    <a class="chip" href="/Stock/Negative">負庫存</a>
+</div>
+
+@if (Model.Failures is { } failures)
+{
+    <div class="table-wrap">
+        <table id="failure-list">
+            <thead><tr><th>時間</th><th>操作者</th><th>動作</th><th>單號</th><th>錯誤碼</th><th>訊息</th><th>追蹤碼</th></tr></thead>
+            <tbody>
+                @foreach (var f in failures.Items)
+                {
+                    <tr>
+                        <td>@Display.Time(f.OccurredAt)</td>
+                        <td>@f.ActorName</td>
+                        <td>@Display.OfCommand(f.Command)</td>
+                        <td>
+                            @if (f.DocumentId is { } docId)
+                            {
+                                <a href="/Documents/Details/@docId">@f.DocNo</a>
+                            }
+                        </td>
+                        <td><code>@f.ErrorCode</code></td>
+                        <td>@f.Message</td>
+                        <td><code>@f.TraceId</code></td>
+                    </tr>
+                }
+                @if (failures.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="muted">沒有被拒絕的過帳嘗試。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (Model.Events is { } events)
+{
+    <div class="table-wrap">
+        <table id="event-list">
+            <thead><tr><th>時間</th><th>操作者</th><th>事件</th><th>單號</th><th>退回原因</th></tr></thead>
+            <tbody>
+                @foreach (var e in events.Items)
+                {
+                    <tr>
+                        <td>@Display.Time(e.OccurredAt)</td>
+                        <td>@e.ActorName</td>
+                        <td>@Display.OfDocumentEvent(e.Action)</td>
+                        <td><a href="/Documents/Details/@e.DocumentId">@e.DocNo</a></td>
+                        <td>@e.Detail</td>
+                    </tr>
+                }
+                @if (events.Items.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">沒有取消、退回或沖銷的紀錄。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (Model.StaleDocuments is { } staleDocuments)
+{
+    <div class="table-wrap">
+        <table id="stale-document-list">
+            <thead><tr><th>單號</th><th>類型</th><th>狀態</th><th>建立者</th><th>起算時間</th><th>已過天數</th></tr></thead>
+            <tbody>
+                @foreach (var s in staleDocuments.Items)
+                {
+                    <tr>
+                        <td><a href="@Display.DocumentUrl(s.DocType, s.Id)">@s.DocNo</a></td>
+                        <td>@Display.Of(s.DocType)</td>
+                        <td>@Display.Of(s.Status)</td>
+                        <td>@s.CreatedByName</td>
+                        <td>@Display.Time(s.Since)</td>
+                        <td class="num">@Model.DaysSince(s.Since)</td>
+                    </tr>
+                }
+                @if (staleDocuments.Items.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">沒有久未處理的單據。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (Model.StaleReservations is { } staleReservations)
+{
+    <div class="table-wrap">
+        <table id="stale-reservation-list">
+            <thead><tr><th>料號</th><th>倉庫</th><th>剩餘</th><th>來源</th><th>建立者</th><th>建立時間</th><th>到期</th></tr></thead>
+            <tbody>
+                @foreach (var r in staleReservations.Items)
+                {
+                    <tr>
+                        <td>@r.ItemCode</td>
+                        <td>@r.WarehouseCode</td>
+                        <td class="num">@Display.Qty(r.RemainingQuantity)</td>
+                        <td>@(r.ReferenceDocNo ?? "手動")</td>
+                        <td>@r.CreatedByName</td>
+                        <td>@Display.Time(r.CreatedAt)</td>
+                        <td>@(r.ExpiresAt is { } expires ? Display.Time(expires) : "不到期")</td>
+                    </tr>
+                }
+                @if (staleReservations.Items.Count == 0)
+                {
+                    <tr><td colspan="7" class="muted">沒有需要注意的預留。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+<div class="pager">
+    @if (paging.Page > 1)
+    {
+        <a href="@Model.PageUrl(paging.Page - 1)">上一頁</a>
+    }
+    <span>第 @paging.Page / @paging.TotalPages 頁（共 @paging.TotalCount 筆）</span>
+    @if (paging.Page < paging.TotalPages)
+    {
+        <a href="@Model.PageUrl(paging.Page + 1)">下一頁</a>
+    }
+</div>

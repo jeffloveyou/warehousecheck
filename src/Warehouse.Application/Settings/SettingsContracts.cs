@@ -34,6 +34,12 @@ public sealed record SystemSettings(
     public bool DocumentNoteEnabled { get; init; } = true;
 
     public bool DocumentNoteRequired { get; init; }
+
+    /// <summary>單據附件（照片、掃描檔）是否啟用（預設 true）。</summary>
+    public bool DocumentAttachmentsEnabled { get; init; } = true;
+
+    /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
+    public string PrintCompanyName { get; init; } = string.Empty;
 }
 
 /// <summary>設定鍵（資料庫 system_settings.key）。改名會讓既有設定失效，只能新增。</summary>
@@ -56,6 +62,11 @@ public static class SettingKeys
     public const string DocumentExternalNoRequired = "stock.documents.field.external_no.required";
     public const string DocumentNoteEnabled = "stock.documents.field.note.enabled";
     public const string DocumentNoteRequired = "stock.documents.field.note.required";
+    public const string DocumentAttachmentsEnabled = "stock.documents.attachments.enabled";
+    public const string PrintCompanyName = "print.company_name";
+
+    /// <summary>文字設定的長度上限。</summary>
+    public const int TextMaxLength = 100;
 }
 
 public interface ISettingsService

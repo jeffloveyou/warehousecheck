@@ -40,6 +40,8 @@ if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(attachmentsD
 builder.Services.AddProblemDetails();
 builder.Services.AddWarehouseInfrastructure(connectionString, attachmentsDirectory);
 builder.Services.AddWarehouseApi();
+// 預留到期釋放（M4-07）：每 10 分鐘一次，A／B 兩個實例同時執行也安全（條件式更新）
+builder.Services.AddHostedService<Warehouse.Web.Jobs.ReservationExpiryJob>();
 builder.Services.AddWarehouseIdentity();
 builder.Services.AddRazorPages(options =>
 {
@@ -51,7 +53,13 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Items", Policies.ItemsRead);
     options.Conventions.AuthorizePage("/Items/Create", Policies.ItemsSubmit);
     options.Conventions.AuthorizePage("/Items/Edit", Policies.ItemsSubmit);
-    options.Conventions.AuthorizeFolder("/MasterData", Policies.MasterDataManage);
+    // 分類、單位限物料管理員；用途、往來對象任何登入者可看，寫入在 handler 內檢查 PartnersManage（倉庫主管也能維護）
+    options.Conventions.AuthorizePage("/MasterData/Categories", Policies.MasterDataManage);
+    options.Conventions.AuthorizePage("/MasterData/Units", Policies.MasterDataManage);
+    options.Conventions.AuthorizePage("/MasterData/Purposes", Policies.StockRead);
+    options.Conventions.AuthorizePage("/MasterData/Partners", Policies.StockRead);
+    options.Conventions.AuthorizeFolder("/Documents", Policies.StockRead);
+    options.Conventions.AuthorizeFolder("/Reservations", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Search", Policies.ItemsRead);
     options.Conventions.AuthorizePage("/Search/AddIndex", Policies.ItemsIndex);
     options.Conventions.AuthorizeFolder("/Warehouses", Policies.StockRead);

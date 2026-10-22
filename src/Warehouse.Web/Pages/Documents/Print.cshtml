@@ -1,0 +1,106 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Documents.PrintModel
+@using Warehouse.Domain.Inventory
+@{
+    Layout = null;
+    var d = Model.Doc;
+    var isTransfer = d.DocType == StockDocumentType.Transfer;
+    var title = d.DocType switch
+    {
+        StockDocumentType.Inbound => "進倉單",
+        StockDocumentType.Outbound => "出倉單",
+        StockDocumentType.Transfer => "移庫單",
+        _ => "庫存單據",
+    };
+    // 簽名欄第三格：出倉單是領料人，進倉與移庫是收料人
+    var receiver = d.DocType == StockDocumentType.Outbound ? "領料人" : "收料人";
+    var watermark = d.Status switch
+    {
+        StockDocumentStatus.Posted => null,
+        StockDocumentStatus.Cancelled => "已取消",
+        _ => "草稿／未過帳",
+    };
+    var date = d.PostedAt ?? d.CreatedAt;
+}
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>@d.DocNo @title</title>
+    <link rel="stylesheet" href="~/css/print.css" asp-append-version="true" />
+</head>
+<body>
+    <div class="print-toolbar">
+        <button type="button" id="print-button" onclick="window.print()">列印</button>
+        <a href="/Documents/Details/@d.Id">回單據</a>
+        <span>建議使用 A4 直式；瀏覽器列印設定請取消「頁首及頁尾」。</span>
+    </div>
+    @if (watermark is not null)
+    {
+        <div class="print-watermark" id="print-watermark">@watermark</div>
+    }
+    <div class="print-page">
+        @if (Model.CompanyName.Length > 0)
+        {
+            <p class="print-company" id="print-company">@Model.CompanyName</p>
+        }
+        <h1 class="print-title" id="print-title">@title</h1>
+        <table class="print-header">
+            <tr><th>單號</th><td>@d.DocNo</td><th>狀態</th><td>@Display.Of(d.Status)</td></tr>
+            <tr><th>日期</th><td>@Display.Time(date)</td><th>倉庫</th><td>@d.WarehouseCode</td></tr>
+            @if (!isTransfer)
+            {
+                <tr><th>用途</th><td>@d.PurposeName</td><th>往來對象</th><td>@d.PartnerName</td></tr>
+            }
+            else
+            {
+                <tr><th>往來對象</th><td>@d.PartnerName</td><th></th><td></td></tr>
+            }
+            <tr><th>外部單號</th><td>@d.ExternalNo</td><th>建立者</th><td>@d.CreatedByName</td></tr>
+            <tr><th>備註</th><td colspan="3">@d.Note</td></tr>
+        </table>
+        <table class="print-lines" id="print-lines">
+            <thead>
+                <tr>
+                    <th>#</th><th>儲位</th>
+                    @if (isTransfer)
+                    {
+                        <th>目的</th>
+                    }
+                    <th>料號</th><th>品名</th><th>批號</th><th>序號</th><th>有效期限</th><th>數量</th><th>單位</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in d.Lines)
+                {
+                    <tr>
+                        <td>@l.LineNo</td>
+                        <td>@l.LocationCode</td>
+                        @if (isTransfer)
+                        {
+                            <td>@l.TargetWarehouseCode @l.TargetLocationCode</td>
+                        }
+                        <td>@l.ItemCode</td>
+                        <td>@l.ItemName</td>
+                        <td>@l.LotNo</td>
+                        <td>@l.SerialNo</td>
+                        <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
+                        <td class="num">@Display.Qty(l.Quantity)</td>
+                        <td>@l.UnitCode</td>
+                    </tr>
+                }
+                @if (d.Lines.Count == 0)
+                {
+                    <tr><td colspan="@(isTransfer ? 10 : 9)">（沒有明細）</td></tr>
+                }
+            </tbody>
+        </table>
+        <table class="print-sign" id="print-sign">
+            <tr><td>經手人</td><td>主管</td><td>@receiver</td></tr>
+        </table>
+        <p class="print-footer">列印時間 @Display.Time(DateTimeOffset.UtcNow)@(d.ApprovedByName is { } approver ? $"　核准者 {approver}" : "")</p>
+    </div>
+</body>
+</html>

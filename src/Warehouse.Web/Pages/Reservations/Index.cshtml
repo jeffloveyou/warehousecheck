@@ -1,0 +1,142 @@
+@page
+@model Warehouse.Web.Pages.Reservations.IndexModel
+@using Warehouse.Domain.Inventory
+@using Warehouse.Application.Inventory
+@{
+    ViewData["Title"] = "預留";
+    var now = DateTimeOffset.UtcNow;
+}
+<h1>預留</h1>
+<p class="muted">預留會從可用量扣除，但不動結存。手動預留可設到期時間，過期後自動釋放；出倉單送審產生的預留跟著單據走，不能在這裡取消。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="get" class="filters" id="reservation-filter">
+    <input type="text" name="ItemCode" value="@Model.ItemCode" maxlength="20" placeholder="料號" aria-label="料號" />
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <select name="status" aria-label="狀態">
+        <option value="All" selected="@(Model.StatusValue == "All")">全部狀態</option>
+        @foreach (var st in Enum.GetValues<ReservationStatus>())
+        {
+            <option value="@st" selected="@(Model.StatusValue == st.ToString())">@Display.Of(st)</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+</form>
+@if (Model.CanManage)
+{
+    <form method="post" asp-page-handler="Create" class="panel" id="reservation-create-form">
+        <h2>建立預留</h2>
+        <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+        <div class="form-grid">
+            <label for="Create_ItemCode">料號 <span class="required-mark">*</span></label>
+            <input type="text" id="Create_ItemCode" name="Create.ItemCode" value="@Model.Create.ItemCode" required maxlength="20" placeholder="輸入或掃描料號" />
+            <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
+            <select id="Create_WarehouseId" name="Create.WarehouseId" required>
+                <option value="">選擇倉庫</option>
+                @foreach (var w in Model.Warehouses.Where(w => w.IsActive))
+                {
+                    <option value="@w.Id" selected="@(w.Id == Model.Create.WarehouseId)">@w.Code @w.Name</option>
+                }
+            </select>
+            <label for="Create_Quantity">數量（基本單位） <span class="required-mark">*</span></label>
+            <input type="number" id="Create_Quantity" name="Create.Quantity" value="@(Model.Create.Quantity == 0 ? "" : Display.Qty(Model.Create.Quantity))" min="0" step="any" required />
+            <label for="Create_Note">說明</label>
+            <input type="text" id="Create_Note" name="Create.Note" value="@Model.Create.Note" maxlength="200" placeholder="例：留給 A 專案" />
+            <label for="Create_ExpiresAt">到期時間</label>
+            <input type="datetime-local" id="Create_ExpiresAt" name="Create.ExpiresAt" value="@(Model.Create.ExpiresAt?.ToString("yyyy-MM-ddTHH:mm"))" />
+        </div>
+        <p class="muted">到期時間空白＝不到期（台灣時間）。可用量不足時無法預留。</p>
+        <div class="actions"><button type="submit" id="reservation-create">建立預留</button></div>
+    </form>
+}
+<div class="table-wrap">
+    <table id="reservation-list">
+        <thead>
+            <tr><th>料號</th><th>品名</th><th>倉庫</th><th>預留量</th><th>剩餘</th><th>來源</th><th>說明</th><th>建立者</th><th>建立時間</th><th>到期</th><th>狀態</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model.Result.Items)
+            {
+                <tr>
+                    <td>@r.ItemCode</td>
+                    <td>@r.ItemName</td>
+                    <td>@r.WarehouseCode</td>
+                    <td class="num">@Display.Qty(r.Quantity)</td>
+                    <td class="num">@Display.Qty(r.RemainingQuantity)</td>
+                    <td>
+                        @if (r.ReferenceType == IndexModel.StockDocumentRef && r.ReferenceId is { } docId)
+                        {
+                            <a href="/Documents/Details/@docId">@r.ReferenceDocNo</a>
+                        }
+                        else
+                        {
+                            <span>手動</span>
+                        }
+                    </td>
+                    <td>@r.Note</td>
+                    <td>@r.CreatedByName</td>
+                    <td>@Display.Time(r.CreatedAt)</td>
+                    <td>
+                        @if (r.ExpiresAt is { } expires)
+                        {
+                            <span>@Display.Time(expires)</span>
+                            @if (r.Status == ReservationStatus.Open && expires <= now)
+                            {
+                                <span class="bad">（已過期）</span>
+                            }
+                            else if (r.Status == ReservationStatus.Open && expires <= now.AddDays(IStockAnomalyService.ExpiringSoonDays))
+                            {
+                                <span class="status-PendingApproval">（即將到期）</span>
+                            }
+                        }
+                    </td>
+                    <td>@Display.Of(r.Status)</td>
+                    <td>
+                        @if (Model.CanCancel(r))
+                        {
+                            <form method="post" asp-page-handler="Cancel" class="inline">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <input type="hidden" name="ItemCode" value="@Model.ItemCode" />
+                                <input type="hidden" name="WarehouseId" value="@Model.WarehouseId" />
+                                <input type="hidden" name="status" value="@Model.StatusValue" />
+                                <input type="hidden" name="p" value="@Model.PageNumber" />
+                                <button type="submit" class="link">取消預留</button>
+                            </form>
+                        }
+                        else if (r.Status == ReservationStatus.Open && r.ReferenceType == IndexModel.StockDocumentRef)
+                        {
+                            <span class="muted">請到單據處理</span>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="12" class="muted">沒有符合的預留。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>
