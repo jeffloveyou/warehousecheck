@@ -468,7 +468,9 @@
       }
       return;
     }
-    var text = el.quantity.value;
+    // 全形數字（中文輸入法全形模式）先轉半形，才不會被當成條碼
+    var text = el.quantity.value.replace(/[０-９．]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+    el.quantity.value = text;
     var fast = keyTimes.length >= 4 && (keyTimes[keyTimes.length - 1] - keyTimes[0]) / (keyTimes.length - 1) < 30;
     // 數量欄是文字欄（inputmode=decimal），英數條碼不會被瀏覽器吃掉；不是純數字就一定是掃到條碼（PR 2 審查 M3）
     var looksLikeScan = fast || !/^[0-9.]*$/.test(text.trim()) || text.replace(/\D/g, '').length > 8;
