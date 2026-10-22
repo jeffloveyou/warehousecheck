@@ -5,7 +5,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="/icons/favicon-32.png" type="image/png" />
+    @* PWA（M5-02）：可安裝到主畫面；Service Worker 只快取靜態檔（/sw.js，pwa.js） *@
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#243447" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="倉庫管理" />
     <title>@ViewData["Title"] - 倉庫管理系統</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
@@ -55,9 +61,15 @@
             <a id="nav-login" href="/Account/Login">登入</a>
         }
     </nav>
+    <div class="message error banner" id="offline-banner" role="alert" hidden>目前離線：畫面上的資料可能不是最新，送出不會成功。恢復連線後請重新整理。</div>
+    <div class="message info banner" id="pwa-update" role="status" hidden>
+        有新版本。<button type="button" id="pwa-update-button">完成目前作業後按這裡更新</button>
+        <span id="pwa-update-note"></span>
+    </div>
     <main>
         @RenderBody()
     </main>
+    <script src="~/js/pwa.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

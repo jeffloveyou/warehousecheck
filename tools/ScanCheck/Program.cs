@@ -12,7 +12,7 @@ using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Warehousing;
 
 // M5 掃碼面板實測（docs/04 §6、T-M5-03-07～12）：用 Chromium 109 模擬條碼槍（鍵盤輸入，每字 10 ms，尾碼 Enter 或 Tab），
-// 操作 https://localhost:5447（連 warehouse_test 的網站，要先另外啟動，同 tools/UiCheck）。
+// 操作 https://localhost:5447 與 http://localhost:5448（同一個連 warehouse_test 的網站，要先另外啟動：--urls "https://localhost:5447;http://localhost:5448"）。
 // 檢查：一般流程跳數量欄、外箱條碼帶入包裝數量、數量欄收到條碼改當掃碼、逐件累加連掃 100 筆（Enter、Tab 各 50）不遺失不重複、
 // 序號物料自動一行、焦點守衛、不載入相機程式、手機寬 390 無水平捲動、沒有主控台錯誤。
 // 用法：dotnet run --project tools/ScanCheck [-- <截圖資料夾>]，需要環境變數 WAREHOUSE_TEST_DB。
@@ -306,6 +306,29 @@ Check(!await mobile.IsVisibleAsync("#nav-items") && await mobile.IsVisibleAsync(
 await mobile.FocusAsync("#nav-toggle");
 await mobile.Keyboard.PressAsync("Space");
 Check(await mobile.IsVisibleAsync("#nav-items"), "手機寬：用鍵盤（焦點在選單、按空白鍵）展開其他連結");
+
+
+// 11. PWA（M5-02）：Service Worker 註冊、離線時開頁顯示離線頁、/api 不經快取。
+// 用 http://localhost:5448（localhost 是安全內容；https 的開發憑證在無頭瀏覽器會讓註冊失敗）
+var pwaContext = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 390, Height = 800 } });
+var pwa = await pwaContext.NewPageAsync();
+pwa.PageError += (_, e) => consoleErrors.Add($"pwa {pwa.Url}: {e}");
+await pwa.GotoAsync("http://localhost:5448/Account/Login");
+var registered = await pwa.EvaluateAsync<bool>("async () => { const r = await navigator.serviceWorker.ready; return !!r.active; }");
+Check(registered, "Service Worker 註冊並啟用");
+await pwa.ReloadAsync();
+Check(await pwa.EvaluateAsync<bool>("() => !!navigator.serviceWorker.controller"), "重新整理後頁面由 Service Worker 控制");
+var cacheNames = await pwa.EvaluateAsync<string[]>("async () => await caches.keys()");
+Check(cacheNames.Length == 1 && cacheNames[0].StartsWith("wh-static-", StringComparison.Ordinal), "只有一個帶版本的靜態檔快取：" + string.Join(",", cacheNames));
+await pwaContext.SetOfflineAsync(true);
+await pwa.GotoAsync("http://localhost:5448/Scan");
+Check((await pwa.ContentAsync()).Contains("目前無法連到伺服器"), "離線時開頁顯示離線頁");
+var apiOffline = await pwa.EvaluateAsync<string>("async () => { try { await fetch('/api/scan?code=ABC'); return 'served'; } catch (e) { return 'failed'; } }");
+Check(apiOffline == "failed", "離線時 /api 請求失敗（沒有被快取回應）");
+await pwaContext.SetOfflineAsync(false);
+var cachedUrls = await pwa.EvaluateAsync<string[]>("async () => { const c = await caches.open((await caches.keys())[0]); return (await c.keys()).map(r => new URL(r.url).pathname); }");
+Check(cachedUrls.All(u => u == "/offline.html" || Regex.IsMatch(u, "^/(css|js|lib|icons)/")), "快取裡只有離線頁與靜態檔：" + string.Join(",", cachedUrls));
+await pwaContext.CloseAsync();
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
