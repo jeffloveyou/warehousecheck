@@ -22,6 +22,14 @@ internal static class AdvisoryLocks
             : db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock_shared(hashtext({CategoryTree}))", cancellationToken);
 
     /// <summary>
+    /// 精確識別碼的鎖（M5-01，ADR-0016）：新增專屬別名與原廠條碼前，先以正規化文字取這把鎖，再檢查另一張表。
+    /// 兩張表各自的部分唯一索引只能擋「同表重複」；跨表（別名＝條碼）靠這把鎖讓兩個新增排隊，不會同時通過檢查。
+    /// 必須在交易內呼叫。鍵名前綴不可變更（A/B 兩版需鎖到同一把）。
+    /// </summary>
+    public static Task LockIdentifierAsync(WarehouseDbContext db, string normalized, CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"ident:" + normalized}))", cancellationToken);
+
+    /// <summary>
     /// 「料號＋倉庫」庫存鎖鍵（ADR-0004 併發控制）：所有會降低倉庫可用量的寫入（扣減、建立預留）都先取這把鎖，
     /// 再於新語句檢查可用量。SHA-256("stock-iw:"‖item‖warehouse) 前 8 bytes。
     /// **算法不可變更**：A/B 兩個版本同時運作時必須鎖到同一把；變更需排維護窗口。

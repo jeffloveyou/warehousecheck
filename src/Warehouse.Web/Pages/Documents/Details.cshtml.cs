@@ -326,7 +326,7 @@ public class DetailsModel(
         var result = await search.SearchAsync(new ItemSearchRequest(text, false, 1, CandidateLimit), cancellationToken);
         var hits = result.Items.Where(h => h.ItemCode is not null).ToList();
         var exact = hits.Where(h => h.Reason == HitReason.ItemCode).ToList();
-        if (exact.Count == 0 && hits.Count == 1 && hits[0].Reason == HitReason.Alias)
+        if (exact.Count == 0 && hits.Count == 1 && hits[0].Reason is HitReason.Alias or HitReason.Barcode)
         {
             exact = hits;
         }

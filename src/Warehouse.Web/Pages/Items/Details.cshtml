@@ -111,15 +111,17 @@
 }
 
 <h2 id="index">搜尋索引</h2>
-<p class="muted">專屬別名：全系統只能對應這一個物料。共用關鍵字：俗稱、用途，可同時掛在多個物料。停用後不再被搜尋到，紀錄保留。</p>
+<p class="muted">專屬別名：全系統只能對應這一個物料。共用關鍵字：俗稱、用途，可同時掛在多個物料。原廠條碼：包裝上的條碼，掃到就精確對應這個物料（只收英數字，可設包裝數量）。停用後不再被搜尋或掃到，紀錄保留。</p>
 @if (Model.CanAddIndex)
 {
     <form method="post" asp-page-handler="AddIndex" class="filters" id="index-form">
-        <input type="text" name="IndexText" value="@Model.IndexText" maxlength="@ItemAlias.TextMaxLength" placeholder="例：伺服AMP、維修用放大器" aria-label="索引文字" required />
+        <input type="text" name="IndexText" value="@Model.IndexText" maxlength="@ItemAlias.TextMaxLength" placeholder="例：伺服AMP、維修用放大器，或掃描包裝條碼" aria-label="索引文字" autocomplete="off" required />
         <select name="IndexKind" aria-label="索引類型">
             <option value="Keyword" selected="@(Model.IndexKind == ItemIndexKind.Keyword)">共用關鍵字</option>
             <option value="Alias" selected="@(Model.IndexKind == ItemIndexKind.Alias)">專屬別名</option>
+            <option value="Barcode" selected="@(Model.IndexKind == ItemIndexKind.Barcode)">原廠條碼</option>
         </select>
+        <input type="number" name="IndexPackQuantity" value="@Model.IndexPackQuantity" min="0" step="any" placeholder="包裝數量（條碼用，預設 1）" aria-label="包裝數量" id="index-pack-quantity" />
         <button type="submit" id="index-add">新增</button>
     </form>
     @if (Model.SuggestKeyword is not null)
@@ -137,14 +139,14 @@ else if (item.Status != ItemStatus.Active)
 }
 <div class="table-wrap">
     <table id="index-list">
-        <thead><tr><th>類型</th><th>文字</th><th>使用中料號數</th><th>建立</th><th>狀態</th><th></th></tr></thead>
+        <thead><tr><th>類型</th><th>文字</th><th>使用中料號數／包裝</th><th>建立</th><th>狀態</th><th></th></tr></thead>
         <tbody>
             @foreach (var x in Model.Indexes)
             {
                 <tr class="@(x.IsActive ? "" : "muted")">
-                    <td>@(x.Kind == ItemIndexKind.Alias ? "專屬別名" : "共用關鍵字")</td>
+                    <td>@Display.Of(x.Kind)@(x.Symbology is { } sym ? $"（{sym}）" : "")</td>
                     <td>@x.Text</td>
-                    <td>@(x.Kind == ItemIndexKind.Keyword && x.IsActive ? x.UsageCount.ToString() : "")</td>
+                    <td>@(x.Kind == ItemIndexKind.Keyword && x.IsActive ? x.UsageCount.ToString() : x.PackQuantity is { } pack ? $"每掃一次 {Display.Qty(pack)}" : "")</td>
                     <td>@x.CreatedByName @Display.Time(x.CreatedAt)</td>
                     <td>@(x.IsActive ? "有效" : $"已停用（{x.DeactivatedByName} {(x.DeactivatedAt is { } at ? Display.Time(at) : "")}）")</td>
                     <td>

@@ -51,11 +51,20 @@ public static class Display
         Warehouse.Application.Search.HitReason.ItemCode => "料號",
         Warehouse.Application.Search.HitReason.RequestNo => "申請單號",
         Warehouse.Application.Search.HitReason.Alias => "專屬別名",
+        Warehouse.Application.Search.HitReason.Barcode => "原廠條碼",
         Warehouse.Application.Search.HitReason.PartNo => "型號",
         Warehouse.Application.Search.HitReason.Name => "品名",
         Warehouse.Application.Search.HitReason.Keyword => "共用關鍵字",
         Warehouse.Application.Search.HitReason.Partial => "部分符合",
         _ => reason.ToString(),
+    };
+
+    public static string Of(Warehouse.Application.Items.ItemIndexKind kind) => kind switch
+    {
+        Warehouse.Application.Items.ItemIndexKind.Alias => "專屬別名",
+        Warehouse.Application.Items.ItemIndexKind.Keyword => "共用關鍵字",
+        Warehouse.Application.Items.ItemIndexKind.Barcode => "原廠條碼",
+        _ => kind.ToString(),
     };
 
     public static string Of(Warehouse.Domain.Warehousing.LocationStatus status) => status switch

@@ -10,6 +10,7 @@ using Warehouse.Domain.Items;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Persistence;
+using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
 
 namespace Warehouse.Infrastructure.Inventory;
@@ -181,15 +182,18 @@ public sealed class StockDocumentService(
                 {
                     throw new DomainRuleException("移庫必須指定目的儲位。");
                 }
-                var targetWarehouseId = string.IsNullOrWhiteSpace(input.TargetWarehouseCode)
+                // 目的倉庫沒填時：掃到的是儲位 QR 就用 QR 上的倉庫（跨倉移庫可以只掃目的儲位），否則同一個倉庫
+                var targetWarehouseCode = string.IsNullOrWhiteSpace(input.TargetWarehouseCode)
+                    ? ScanCodes.Location(input.TargetLocationCode).WarehouseCode
+                    : input.TargetWarehouseCode;
+                var targetWarehouseId = targetWarehouseCode is null
                     ? doc.WarehouseId
-                    : await FindWarehouseIdAsync(input.TargetWarehouseCode, cancellationToken);
+                    : await FindWarehouseIdAsync(targetWarehouseCode, cancellationToken);
                 target = await FindLocationAsync(targetWarehouseId, input.TargetLocationCode, cancellationToken);
             }
 
-            var code = TextNormalizer.Normalize(input.ItemCode);
-            var item = await db.Items.AsNoTracking()
-                .Where(i => i.ItemCode == code)
+            var (items, code) = ScanCodes.Items(db, input.ItemCode);
+            var item = await items.AsNoTracking()
                 .Select(i => new
                 {
                     i.Id, i.Status, i.TrackingMode,
@@ -646,7 +650,13 @@ public sealed class StockDocumentService(
 
     private async Task<Location> FindLocationAsync(Guid warehouseId, string locationCode, CancellationToken cancellationToken)
     {
-        var code = TextNormalizer.Normalize(locationCode);
+        // 可直接收掃到的儲位 QR（M5-01）：QR 上的倉庫必須是這張單的倉庫
+        var (code, qrWarehouseCode) = ScanCodes.Location(locationCode);
+        if (qrWarehouseCode is not null
+            && !await db.Warehouses.AnyAsync(w => w.Id == warehouseId && w.Code == qrWarehouseCode, cancellationToken))
+        {
+            throw new DomainRuleException($"掃到的是倉庫 {qrWarehouseCode} 的儲位 QR，與這張單的倉庫不同。");
+        }
         var location = await db.Locations.AsNoTracking()
             .SingleOrDefaultAsync(l => l.WarehouseId == warehouseId && l.Code == code, cancellationToken)
             ?? throw new DomainRuleException($"這個倉庫沒有儲位 {code}。");
