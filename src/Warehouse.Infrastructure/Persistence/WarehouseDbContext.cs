@@ -50,6 +50,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<ProcessedCommand> ProcessedCommands => Set<ProcessedCommand>();
 
+    public DbSet<StockReservation> StockReservations => Set<StockReservation>();
+
     public DbSet<ItemLocation> ItemLocations => Set<ItemLocation>();
 
     public DbSet<LocationImage> LocationImages => Set<LocationImage>();

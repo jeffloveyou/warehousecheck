@@ -4,6 +4,7 @@ using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
+using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Persistence;
@@ -61,6 +62,12 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
                 b => b.Quantity != 0 && db.Locations.Any(l => l.Id == b.LocationId && l.WarehouseId == id), cancellationToken))
         {
             throw new DomainRuleException("倉庫還有庫存，不能停用。");
+        }
+        // 建立預留先取倉庫 FOR SHARE，會等這裡的 FOR UPDATE；這裡看到的 Open 預留是完整的（M4-01 審查 #7）
+        if (!isActive && await db.StockReservations.AnyAsync(
+                r => r.WarehouseId == id && r.Status == ReservationStatus.Open, cancellationToken))
+        {
+            throw new DomainRuleException("倉庫還有未結束的預留，不能停用；請先取消預留。");
         }
         if (isActive)
         {
