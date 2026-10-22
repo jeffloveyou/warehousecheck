@@ -56,6 +56,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
+    public DbSet<DocumentAttachment> DocumentAttachments => Set<DocumentAttachment>();
+
     public DbSet<ItemLocation> ItemLocations => Set<ItemLocation>();
 
     public DbSet<LocationImage> LocationImages => Set<LocationImage>();

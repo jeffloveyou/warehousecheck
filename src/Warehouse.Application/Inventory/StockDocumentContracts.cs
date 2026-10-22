@@ -49,8 +49,12 @@ public interface IStockDocumentService
 
     Task<DocumentDetails?> GetAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 建立草稿。<paramref name="requestId"/>：畫面開表單時產生、直接當單據 ID；連點或重送時回傳同一張單，不會多一張（M4-03 審查 #13）。
+    /// </summary>
     Task<Guid> CreateAsync(
-        StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken);
+        StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken,
+        Guid? requestId = null);
 
     Task UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken);
 

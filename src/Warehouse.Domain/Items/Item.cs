@@ -232,6 +232,9 @@ public sealed partial class Item
     /// <summary>是否允許負庫存（ADR-0004）；只有 <see cref="TrackingMode.None"/> 可開啟。</summary>
     public bool AllowNegativeStock { get; private set; }
 
+    /// <summary>負庫存下限的上限（numeric(19,4) 也放得下，且遠大於實務需要）。</summary>
+    public const decimal MaxNegativeStockLimit = 999_999_999m;
+
     /// <summary>負庫存下限（≥ 0）：結存最低可到 -NegativeStockLimit。</summary>
     public decimal NegativeStockLimit { get; private set; }
 
@@ -248,6 +251,10 @@ public sealed partial class Item
         if (limit < 0)
         {
             throw new DomainRuleException("負庫存下限不可小於 0。");
+        }
+        if (limit > MaxNegativeStockLimit)
+        {
+            throw new DomainRuleException($"負庫存下限不可超過 {MaxNegativeStockLimit:N0}。");
         }
         if (allow && TrackingMode != TrackingMode.None)
         {

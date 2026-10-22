@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
+using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
@@ -17,9 +18,35 @@ namespace Warehouse.Web.Pages.Items;
 /// </summary>
 public class DetailsModel(
     IItemQueryService queries, IItemWorkflowService workflow, IItemIndexService index, IAuthorizationService authorization,
-    IItemLocationService itemLocations, IWarehouseService warehouses)
+    IItemLocationService itemLocations, IWarehouseService warehouses, IItemNegativePolicyService negativePolicy)
     : PageModel
 {
+    /// <summary>負庫存設定表單（M4-08）。</summary>
+    [BindProperty]
+    public bool AllowNegative { get; set; }
+
+    [BindProperty]
+    public decimal NegativeLimit { get; set; }
+
+    /// <summary>可編輯負庫存設定：物料管理員、有效物料、不追蹤批號／序號。</summary>
+    public bool CanEditNegativePolicy { get; private set; }
+
+    public Task<IActionResult> OnPostNegativePolicyAsync(Guid id, CancellationToken cancellationToken) =>
+        RunNegativeAsync(id, cancellationToken);
+
+    private async Task<IActionResult> RunNegativeAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.NegativePolicy)).Succeeded)
+        {
+            return Forbid();
+        }
+        return await RunAsync(id, async actor =>
+        {
+            await negativePolicy.SetAsync(id, Version, AllowNegative, AllowNegative ? NegativeLimit : 0, actor, cancellationToken);
+            return AllowNegative ? "已更新負庫存設定。" : "已關閉負庫存。";
+        }, cancellationToken);
+    }
+
     /// <summary>預設／常用倉位（M3-07）。</summary>
     public IReadOnlyList<ItemLocationRow> ItemLocations { get; private set; } = [];
 
@@ -192,6 +219,14 @@ public class DetailsModel(
         Indexes = await index.ListAsync(id, cancellationToken);
         ItemLocations = await itemLocations.ListAsync(id, cancellationToken);
         CanManageLocations = item.Status == ItemStatus.Active && await CanManageLocationsAsync();
+        CanEditNegativePolicy = item.Status == ItemStatus.Active && item.TrackingMode == TrackingMode.None
+            && (await authorization.AuthorizeAsync(User, Policies.NegativePolicy)).Succeeded;
+        if (HttpMethods.IsGet(Request.Method))
+        {
+            // 只在 GET 時從資料庫帶入；送出失敗重新顯示時保留使用者剛輸入的值（M4-03 審查 #14）
+            AllowNegative = item.AllowNegativeStock;
+            NegativeLimit = item.NegativeStockLimit;
+        }
         if (CanManageLocations)
         {
             Warehouses = (await warehouses.ListWarehousesAsync(cancellationToken)).Where(w => w.IsActive).ToList();

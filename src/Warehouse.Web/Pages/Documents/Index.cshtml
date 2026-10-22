@@ -1,0 +1,112 @@
+@page
+@model Warehouse.Web.Pages.Documents.IndexModel
+@using Warehouse.Domain.Inventory
+@using Warehouse.Web.Pages.Documents
+@{
+    ViewData["Title"] = "進出倉單";
+}
+<h1>進出倉單</h1>
+<p class="muted">進倉、出倉、移庫都用單據處理：先建立草稿、加明細，再依設定直接確認過帳，或送審後由倉庫主管核准。草稿與待核准都不影響庫存。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="get" class="filters" id="document-filter">
+    <select name="Type" aria-label="類型">
+        <option value="">全部類型</option>
+        @foreach (var t in IndexModel.CreatableTypes)
+        {
+            <option value="@t" selected="@(Model.Type == t)">@Display.Of(t)</option>
+        }
+    </select>
+    <select name="Status" aria-label="狀態">
+        <option value="">全部狀態</option>
+        @foreach (var s in Enum.GetValues<StockDocumentStatus>())
+        {
+            <option value="@s" selected="@(Model.Status == s)">@Display.Of(s)</option>
+        }
+    </select>
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+</form>
+@if (Model.CanEdit && Model.Options is { } options)
+{
+    <form method="post" asp-page-handler="Create" class="panel" id="document-create-form">
+        <input type="hidden" name="Create.RequestId" value="@(Model.Create.RequestId ?? Guid.NewGuid())" />
+        <h2>建立單據</h2>
+        <div class="form-grid">
+            <label for="Create_Type">類型 <span class="required-mark">*</span></label>
+            <select id="Create_Type" name="Create.Type" required>
+                <option value="">選擇類型</option>
+                @foreach (var t in IndexModel.CreatableTypes)
+                {
+                    <option value="@t" selected="@(Model.Create.Type == t)">@Display.Of(t)</option>
+                }
+            </select>
+            <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
+            <select id="Create_WarehouseId" name="Create.WarehouseId" required>
+                <option value="">選擇倉庫</option>
+                @foreach (var w in Model.Warehouses.Where(w => w.IsActive))
+                {
+                    <option value="@w.Id" selected="@(w.Id == Model.Create.WarehouseId)">@w.Code @w.Name</option>
+                }
+            </select>
+            <partial name="_HeaderFields" model="new HeaderFieldsModel(options, Model.Header, null)" />
+        </div>
+        <p class="muted">用途、往來對象等欄位以 * 標示的是必填，確認或送審時檢查；欄位顯示與必填可由系統管理員在「設定」調整。移庫不需要用途。</p>
+        <div class="actions"><button type="submit" id="document-create">建立單據</button></div>
+    </form>
+}
+<div class="table-wrap">
+    <table id="document-list">
+        <thead>
+            <tr><th>單號</th><th>類型</th><th>狀態</th><th>倉庫</th><th>用途</th><th>往來對象</th><th>外部單號</th><th>行數</th><th>建立者</th><th>建立時間</th><th>過帳時間</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var d in Model.Result.Items)
+            {
+                <tr>
+                    <td><a href="/Documents/Details/@d.Id">@d.DocNo</a></td>
+                    <td>@Display.Of(d.DocType)</td>
+                    <td>@Display.Of(d.Status)</td>
+                    <td>@d.WarehouseCode</td>
+                    <td>@d.PurposeName</td>
+                    <td>@d.PartnerName</td>
+                    <td>@d.ExternalNo</td>
+                    <td class="num">@d.LineCount</td>
+                    <td>@d.CreatedByName</td>
+                    <td>@Display.Time(d.CreatedAt)</td>
+                    <td>@(d.PostedAt is { } p ? Display.Time(p) : "")</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="11" class="muted">沒有符合的單據。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>
+@section Scripts {
+    <script src="~/js/documents.js" asp-append-version="true"></script>
+}

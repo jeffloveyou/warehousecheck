@@ -18,6 +18,18 @@
     <input type="hidden" name="Original.LocationNotesEnabled" value="@Model.Original.LocationNotesEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LocationAttributesEnabled" value="@Model.Original.LocationAttributesEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LocationImagesEnabled" value="@Model.Original.LocationImagesEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentApprovalEnabled" value="@Model.Original.DocumentApprovalEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.AllowSelfApproveDocuments" value="@Model.Original.AllowSelfApproveDocuments.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentPurposeEnabled" value="@Model.Original.DocumentPurposeEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentPurposeRequired" value="@Model.Original.DocumentPurposeRequired.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentPartnerEnabled" value="@Model.Original.DocumentPartnerEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentPartnerRequired" value="@Model.Original.DocumentPartnerRequired.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentExternalNoEnabled" value="@Model.Original.DocumentExternalNoEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentExternalNoRequired" value="@Model.Original.DocumentExternalNoRequired.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentNoteEnabled" value="@Model.Original.DocumentNoteEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentNoteRequired" value="@Model.Original.DocumentNoteRequired.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.DocumentAttachmentsEnabled" value="@Model.Original.DocumentAttachmentsEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.PrintCompanyName" value="@Model.Original.PrintCompanyName" />
     <h2>期初建帳</h2>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveOpening" value="true" checked="@Model.Form.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
@@ -26,5 +38,43 @@
     <p><label><input type="checkbox" name="Form.LocationAttributesEnabled" value="true" checked="@Model.Form.LocationAttributesEnabled" /> 結構化屬性（區／架／層／格、類型、承重、溫控、危險品）</label></p>
     <p><label><input type="checkbox" name="Form.LocationImagesEnabled" value="true" checked="@Model.Form.LocationImagesEnabled" /> 倉位圖片</label></p>
     <p class="muted">關閉只會隱藏畫面上的欄位，已填的資料會保留，重新開啟就能看到。每次變更都會留下稽核紀錄。</p>
+    <h2>進出倉單</h2>
+    <p><label><input type="checkbox" name="Form.DocumentApprovalEnabled" value="true" checked="@Model.Form.DocumentApprovalEnabled" /> 單據需要審核（草稿 → 送審 → 倉庫主管核准才過帳）</label></p>
+    <p class="muted">關閉時（預設）：草稿確認即過帳。開啟後出倉單送審時會預留庫存。已在待核准的單據不受影響。</p>
+    <p><label><input type="checkbox" name="Form.AllowSelfApproveDocuments" value="true" checked="@Model.Form.AllowSelfApproveDocuments" /> 允許建立者核准自己的進出倉單</label></p>
+    <p class="muted">預設不允許；與期初單的自核設定分開。不論哪一種，都會記錄建立者、核准者與時間。</p>
+    <div class="table-wrap">
+        <table id="document-field-settings">
+            <thead><tr><th>表頭欄位</th><th>啟用</th><th>必填（確認或送審時檢查）</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>用途（移庫不適用）</td>
+                    <td><input type="checkbox" name="Form.DocumentPurposeEnabled" value="true" checked="@Model.Form.DocumentPurposeEnabled" aria-label="用途啟用" /></td>
+                    <td><input type="checkbox" name="Form.DocumentPurposeRequired" value="true" checked="@Model.Form.DocumentPurposeRequired" aria-label="用途必填" /></td>
+                </tr>
+                <tr>
+                    <td>往來對象</td>
+                    <td><input type="checkbox" name="Form.DocumentPartnerEnabled" value="true" checked="@Model.Form.DocumentPartnerEnabled" aria-label="往來對象啟用" /></td>
+                    <td><input type="checkbox" name="Form.DocumentPartnerRequired" value="true" checked="@Model.Form.DocumentPartnerRequired" aria-label="往來對象必填" /></td>
+                </tr>
+                <tr>
+                    <td>外部單號</td>
+                    <td><input type="checkbox" name="Form.DocumentExternalNoEnabled" value="true" checked="@Model.Form.DocumentExternalNoEnabled" aria-label="外部單號啟用" /></td>
+                    <td><input type="checkbox" name="Form.DocumentExternalNoRequired" value="true" checked="@Model.Form.DocumentExternalNoRequired" aria-label="外部單號必填" /></td>
+                </tr>
+                <tr>
+                    <td>備註</td>
+                    <td><input type="checkbox" name="Form.DocumentNoteEnabled" value="true" checked="@Model.Form.DocumentNoteEnabled" aria-label="備註啟用" /></td>
+                    <td><input type="checkbox" name="Form.DocumentNoteRequired" value="true" checked="@Model.Form.DocumentNoteRequired" aria-label="備註必填" /></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="muted">關閉欄位只隱藏畫面並略過檢查，已填的資料保留。</p>
+    <p><label><input type="checkbox" name="Form.DocumentAttachmentsEnabled" value="true" checked="@Model.Form.DocumentAttachmentsEnabled" /> 單據附件（照片、掃描檔）</label></p>
+    <div class="form-grid">
+        <label for="Form_PrintCompanyName">列印公司名稱</label>
+        <input type="text" id="Form_PrintCompanyName" name="Form.PrintCompanyName" value="@Model.Form.PrintCompanyName" maxlength="100" placeholder="空白＝列印時不印抬頭" />
+    </div>
     <div class="actions"><button type="submit" id="settings-save">儲存</button></div>
 </form>

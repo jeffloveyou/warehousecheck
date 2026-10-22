@@ -63,6 +63,7 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(d => d.DocNo).IsUnique();
         builder.HasIndex(d => new { d.DocType, d.Status, d.CreatedAt });
+        builder.HasIndex(d => new { d.Status, d.CreatedAt }); // 久未處理的單據（M4-05）
         builder.HasOne<WarehouseSite>().WithMany().HasForeignKey(d => d.WarehouseId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<DocumentPurpose>().WithMany().HasForeignKey(d => d.PurposeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<BusinessPartner>().WithMany().HasForeignKey(d => d.PartnerId).OnDelete(DeleteBehavior.Restrict);
@@ -130,6 +131,7 @@ public class StockBalanceConfiguration : IEntityTypeConfiguration<StockBalance>
         builder.HasIndex(b => b.SerialId).IsUnique().HasFilter("serial_id IS NOT NULL AND quantity > 0")
             .HasDatabaseName("ux_stock_balances_serial_in_stock");
         builder.HasIndex(b => new { b.LocationId, b.ItemId });
+        builder.HasIndex(b => b.ItemId, "ix_stock_balances_negative").HasDatabaseName("ix_stock_balances_negative").HasFilter("quantity < 0"); // 待補帳清單（M4-08）
         builder.HasOne<Item>().WithMany().HasForeignKey(b => b.ItemId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Location>().WithMany().HasForeignKey(b => b.LocationId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<InventoryLot>().WithMany().HasForeignKey(b => b.LotId).OnDelete(DeleteBehavior.Restrict);
@@ -156,6 +158,7 @@ public class StockMovementConfiguration : IEntityTypeConfiguration<StockMovement
         builder.HasIndex(m => new { m.ItemId, m.OccurredAt });
         builder.HasIndex(m => new { m.LocationId, m.OccurredAt });
         builder.HasIndex(m => m.DocumentId);
+        builder.HasIndex(m => m.OccurredAt); // 異動歷史只依日期區間或操作者查詢時用（M4-05）
         builder.HasOne<StockDocument>().WithMany().HasForeignKey(m => m.DocumentId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<StockDocumentLine>().WithMany().HasForeignKey(m => m.LineId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Item>().WithMany().HasForeignKey(m => m.ItemId).OnDelete(DeleteBehavior.Restrict);
@@ -188,6 +191,7 @@ public class StockReservationConfiguration : IEntityTypeConfiguration<StockReser
         builder.Property(r => r.Note).HasMaxLength(StockReservation.NoteMaxLength);
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
         builder.Property(r => r.CreatedByName).HasMaxLength(100);
+        builder.HasIndex(r => r.ExpiresAt).HasFilter("status = 'Open' AND expires_at IS NOT NULL").HasDatabaseName("ix_stock_reservations_expiry");
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(r => new { r.ItemId, r.WarehouseId }).HasFilter("status = 'Open'")
             .HasDatabaseName("ix_stock_reservations_open");

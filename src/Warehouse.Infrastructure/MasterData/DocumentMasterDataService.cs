@@ -84,6 +84,24 @@ public sealed class DocumentMasterDataService(WarehouseDbContext db, TimeProvide
         return new PagedResult<PartnerRow>(rows, page, Paging.DefaultPageSize, total);
     }
 
+    public async Task<IReadOnlyList<PartnerRow>> ListActivePartnersAsync(PartnerType? type, int limit, CancellationToken cancellationToken) =>
+        await db.BusinessPartners.AsNoTracking()
+            .Where(p => p.IsActive && (type == null || p.PartnerType == type))
+            .OrderBy(p => p.PartnerType).ThenBy(p => p.Code)
+            .Take(Math.Clamp(limit, 1, 500))
+            .Select(p => new PartnerRow(p.Id, p.PartnerType, p.Code, p.Name, p.IsActive, EF.Property<uint>(p, "Version")))
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<PartnerRow>> FindActivePartnersByCodeAsync(string code, CancellationToken cancellationToken)
+    {
+        // 代碼一律存大寫：轉大寫後精確比對，用得到 (partner_type, code) 唯一索引（M4-03 審查 #1）
+        var normalized = (code ?? string.Empty).Trim().ToUpperInvariant();
+        return await db.BusinessPartners.AsNoTracking()
+            .Where(p => p.IsActive && p.Code == normalized)
+            .Select(p => new PartnerRow(p.Id, p.PartnerType, p.Code, p.Name, p.IsActive, EF.Property<uint>(p, "Version")))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<Guid> CreatePartnerAsync(PartnerInput input, Actor actor, CancellationToken cancellationToken)
     {
         var partner = BusinessPartner.Create(Guid.NewGuid(), input.Type, input.Code, input.Name, clock.GetUtcNow());

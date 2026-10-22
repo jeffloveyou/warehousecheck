@@ -47,24 +47,26 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
             AS u(id, line_id, item_id, location_id, lot_id, serial_id, stock_status, delta, after)
         """;
 
-    /// <summary>倉庫可用量（ADR-0004 公式＋ADR-0014 決策 7）：Available 結存且儲位有效 − Open 預留剩餘量。</summary>
+    /// <summary>倉庫可用量（ADR-0004 公式＋ADR-0014 決策 7）：Available 結存且儲位有效 − Open 且未過期預留的剩餘量（到期日之後不計，背景工作稍後才改狀態）。</summary>
     private const string AvailableSql = """
         SELECT p.item_id, p.warehouse_id,
             COALESCE((SELECT SUM(b.quantity) FROM stock_balances b JOIN locations l ON l.id = b.location_id
                       WHERE b.item_id = p.item_id AND l.warehouse_id = p.warehouse_id
                         AND b.stock_status = 'Available' AND l.status = 'Available'), 0)
           - COALESCE((SELECT SUM(r.remaining_quantity) FROM stock_reservations r
-                      WHERE r.item_id = p.item_id AND r.warehouse_id = p.warehouse_id AND r.status = 'Open'), 0)
+                      WHERE r.item_id = p.item_id AND r.warehouse_id = p.warehouse_id AND r.status = 'Open'
+                        AND (r.expires_at IS NULL OR r.expires_at > now())), 0)
         FROM unnest(@items, @warehouses) AS p(item_id, warehouse_id)
         """;
 
     /// <summary>料號全倉合計可用量（負庫存物料的下限檢查）：各倉 Available 結存且儲位有效 − 全部 Open 預留剩餘量。</summary>
-    private const string ItemAvailableSql = """
+    internal const string ItemAvailableSql = """
         SELECT p.item_id,
             COALESCE((SELECT SUM(b.quantity) FROM stock_balances b JOIN locations l ON l.id = b.location_id
                       WHERE b.item_id = p.item_id AND b.stock_status = 'Available' AND l.status = 'Available'), 0)
           - COALESCE((SELECT SUM(r.remaining_quantity) FROM stock_reservations r
-                      WHERE r.item_id = p.item_id AND r.status = 'Open'), 0)
+                      WHERE r.item_id = p.item_id AND r.status = 'Open'
+                        AND (r.expires_at IS NULL OR r.expires_at > now())), 0)
         FROM unnest(@items) AS p(item_id)
         """;
 
@@ -102,7 +104,7 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         bool forDocument = false)
     {
         var validated = requests.Select(r => (Request: r, Id: Guid.NewGuid(),
-            Fields: StockReservation.ValidateRequest(r.Quantity, r.ReferenceType, r.Note))).ToList();
+            Fields: StockReservation.ValidateRequest(r.Quantity, r.ReferenceType, r.Note, r.ExpiresAt, now))).ToList();
         var created = new List<Guid>();
         if (validated.Count == 0)
         {
@@ -154,12 +156,13 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
                 }
                 await ExecuteAsync(db, """
                     INSERT INTO stock_reservations (id, item_id, warehouse_id, quantity, remaining_quantity, reference_type,
-                        reference_id, note, status, created_by_id, created_by_name, created_at)
-                    VALUES (@id, @item, @warehouse, @qty, @qty, @type, @ref, @note, 'Open', @actor, @actor_name, @now)
+                        reference_id, note, status, created_by_id, created_by_name, created_at, expires_at)
+                    VALUES (@id, @item, @warehouse, @qty, @qty, @type, @ref, @note, 'Open', @actor, @actor_name, @now, @expires)
                     """, cancellationToken,
                     Param("id", id), Param("item", request.ItemId), Param("warehouse", request.WarehouseId),
                     Param("qty", quantity), Param("type", referenceType), Uuid("ref", request.ReferenceId),
-                    Param("note", note), Param("actor", actor.Id), Param("actor_name", actor.Name), Param("now", now.ToUniversalTime()));
+                    Param("note", note), Param("actor", actor.Id), Param("actor_name", actor.Name), Param("now", now.ToUniversalTime()),
+                    Param("expires", request.ExpiresAt?.ToUniversalTime()));
                 AuditLog.Add(db, actor, now, "reservation.create", "stock_reservation", id.ToString(), null,
                     new { ItemCode = item.Code, WarehouseCode = warehouses[request.WarehouseId].Code, Quantity = quantity, Requested = request.Quantity, referenceType, request.ReferenceId, note });
                 created.Add(id);
@@ -214,6 +217,26 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         AuditLog.Add(db, actor, now, "reservation.release", "stock_reservation", reservationId.ToString(), null,
             new { Remaining = released[0] });
         return true;
+    }
+
+    public async Task<int> ExpireDueReservationsAsync(Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        // - 時間一律用資料庫的 now()，與可用量 SQL 判斷「已過期」的時間來源相同（M4-03 審查 #7）。
+        // - SKIP LOCKED：正被過帳鎖住的預留下一輪再處理，背景工作不等鎖；每次最多 500 筆、依 id 排序。
+        // - A/B 兩個實例同時執行時，同一筆只會被其中一個改到。
+        await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
+        var expired = await QueryAsync(db, """
+            UPDATE stock_reservations SET status = 'Released', closed_at = now()
+            WHERE id IN (SELECT id FROM stock_reservations
+                         WHERE status = 'Open' AND expires_at IS NOT NULL AND expires_at <= now()
+                         ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED)
+            RETURNING id, remaining_quantity
+            """, r => (Id: r.GetGuid(0), Remaining: r.GetDecimal(1)), cancellationToken);
+        foreach (var (id, remaining) in expired)
+        {
+            AuditLog.Add(db, actor, now, "reservation.expire", "stock_reservation", id.ToString(), null, new { Remaining = remaining });
+        }
+        return expired.Count;
     }
 
     private async Task ApplyCoreAsync(
@@ -393,9 +416,9 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
             return result;
         }
         var reservations = (await QueryAsync(db, """
-            SELECT id, item_id, warehouse_id, remaining_quantity, status FROM stock_reservations
-            WHERE id = ANY(@ids) ORDER BY id FOR UPDATE
-            """, r => (Id: r.GetGuid(0), Item: r.GetGuid(1), Warehouse: r.GetGuid(2), Remaining: r.GetDecimal(3), Status: r.GetString(4)),
+            SELECT id, item_id, warehouse_id, remaining_quantity, status, expires_at IS NOT NULL AND expires_at <= now()
+            FROM stock_reservations WHERE id = ANY(@ids) ORDER BY id FOR UPDATE
+            """, r => (Id: r.GetGuid(0), Item: r.GetGuid(1), Warehouse: r.GetGuid(2), Remaining: r.GetDecimal(3), Status: r.GetString(4), Expired: r.GetBoolean(5)),
             cancellationToken, Param("ids", ids)))
             .ToDictionary(r => r.Id);
         var remaining = reservations.ToDictionary(r => r.Key, r => r.Value.Remaining);
@@ -405,9 +428,9 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
             {
                 throw new NotFoundException("reservation.not_found", "找不到預留。");
             }
-            if (reservation.Status != nameof(ReservationStatus.Open))
+            if (reservation.Status != nameof(ReservationStatus.Open) || reservation.Expired)
             {
-                throw new ConflictException("reservation.closed", "這筆預留已沖銷或已釋放，請重新選擇。");
+                throw new ConflictException("reservation.closed", "這筆預留已沖銷、已釋放或已過期，請重新選擇。");
             }
             if (reservation.Item != change.ItemId || reservation.Warehouse != warehouseOf(change))
             {

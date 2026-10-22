@@ -115,3 +115,60 @@ public sealed class BusinessPartner
 
     public void SetActive(bool isActive) => IsActive = isActive;
 }
+
+/// <summary>
+/// 進出倉單附件（M4-10，使用者 2026-10-22）：圖片（轉成 JPEG 大圖＋縮圖）或 PDF（原檔）。
+/// 草稿可移除（停用）；送出、過帳後只能新增，不能移除（trigger 保證）。檔案在附件目錄，不在資料庫。
+/// </summary>
+public sealed class DocumentAttachment
+{
+    public const int MaxActivePerDocument = 10;
+    public const int FileNameMaxLength = 200;
+
+    private DocumentAttachment()
+    {
+    }
+
+    public static DocumentAttachment Create(
+        Guid id, Guid documentId, bool isPdf, string fileName, string fileKey, string? thumbKey, long sizeBytes,
+        Guid actorId, string actorName, DateTimeOffset now) =>
+        new()
+        {
+            Id = id,
+            DocumentId = documentId,
+            IsPdf = isPdf,
+            FileName = Rules.Required(Path.GetFileName(fileName ?? string.Empty), FileNameMaxLength, "檔名"),
+            FileKey = fileKey,
+            ThumbKey = thumbKey,
+            SizeBytes = sizeBytes,
+            UploadedById = actorId,
+            UploadedByName = actorName,
+            UploadedAt = now.ToUniversalTime(),
+            IsActive = true,
+        };
+
+    public Guid Id { get; private set; }
+
+    public Guid DocumentId { get; private set; }
+
+    public bool IsPdf { get; private set; }
+
+    /// <summary>使用者上傳時的原檔名（只顯示用，不用來組路徑）。</summary>
+    public string FileName { get; private set; } = string.Empty;
+
+    /// <summary>附件目錄內的鍵：圖片是 1600 大圖、PDF 是原檔。</summary>
+    public string FileKey { get; private set; } = string.Empty;
+
+    /// <summary>圖片縮圖的鍵；PDF 為 null。</summary>
+    public string? ThumbKey { get; private set; }
+
+    public long SizeBytes { get; private set; }
+
+    public Guid UploadedById { get; private set; }
+
+    public string UploadedByName { get; private set; } = string.Empty;
+
+    public DateTimeOffset UploadedAt { get; private set; }
+
+    public bool IsActive { get; private set; }
+}

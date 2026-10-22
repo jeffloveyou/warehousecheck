@@ -1,0 +1,87 @@
+@page
+@model Warehouse.Web.Pages.MasterData.PurposesModel
+@using Warehouse.Domain.Inventory
+@{
+    ViewData["Title"] = "用途類型";
+    var editing = Model.EditId is not null && Model.Purposes.Any(p => p.Id == Model.EditId);
+}
+<h1>用途類型</h1>
+<p class="muted">進倉單、出倉單選用的用途（例：採購入庫、生產領料）。移庫不選用途。停用後新單據不能再選，已用過的單據保留原值；代碼與方向建立後不可修改。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (Model.CanManage)
+{
+    <form method="post" asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="purpose-form">
+        <h2>@(editing ? "修改用途" : "新增用途")</h2>
+        <input type="hidden" name="Version" value="@Model.Version" />
+        <div class="form-grid">
+            <label for="Input_Direction">方向</label>
+            @if (editing)
+            {
+                <input type="hidden" name="Input.Direction" value="@Model.Input.Direction" />
+                <input type="text" value="@Display.Of(Model.Input.Direction)" readonly />
+            }
+            else
+            {
+                <select id="Input_Direction" name="Input.Direction">
+                    @foreach (var direction in Enum.GetValues<PurposeDirection>())
+                    {
+                        <option value="@direction" selected="@(Model.Input.Direction == direction)">@Display.Of(direction)</option>
+                    }
+                </select>
+            }
+            <label for="Input_Code">代碼</label>
+            <input type="text" id="Input_Code" name="Input.Code" value="@Model.Input.Code" readonly="@editing" maxlength="20" placeholder="大寫英數，例：PURCHASE" />
+            <label for="Input_Name">名稱</label>
+            <input type="text" id="Input_Name" name="Input.Name" value="@Model.Input.Name" maxlength="50" />
+            <label for="Input_SortOrder">排序</label>
+            <input type="number" id="Input_SortOrder" name="Input.SortOrder" value="@Model.Input.SortOrder" step="1" />
+        </div>
+        <div class="actions">
+            <button type="submit" id="purpose-save">@(editing ? "儲存" : "新增")</button>
+            @if (editing)
+            {
+                <a href="/MasterData/Purposes">取消</a>
+            }
+        </div>
+    </form>
+}
+<div class="table-wrap">
+    <table id="purpose-list">
+        <thead><tr><th>方向</th><th>代碼</th><th>名稱</th><th>排序</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var p in Model.Purposes)
+            {
+                <tr>
+                    <td>@Display.Of(p.Direction)</td>
+                    <td>@p.Code</td>
+                    <td>@p.Name</td>
+                    <td class="num">@p.SortOrder</td>
+                    <td>@(p.IsActive ? "啟用" : "停用")</td>
+                    <td>
+                        @if (Model.CanManage)
+                        {
+                            <a href="/MasterData/Purposes?edit=@p.Id">修改</a>
+                            <form method="post" asp-page-handler="Toggle" class="inline">
+                                <input type="hidden" name="id" value="@p.Id" />
+                                <input type="hidden" name="version" value="@p.Version" />
+                                <input type="hidden" name="isActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
+                                <button type="submit" class="link">@(p.IsActive ? "停用" : "啟用")</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Purposes.Count == 0)
+            {
+                <tr><td colspan="6" class="muted">尚無用途。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>

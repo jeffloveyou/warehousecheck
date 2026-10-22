@@ -14,7 +14,7 @@ public sealed record StockChange(
 
 /// <summary>建立倉庫層級預留（ADR-0004 決策二）。<see cref="ReferenceType"/> 例如 <c>Manual</c>、<c>StockDocument</c>。</summary>
 public sealed record ReservationRequest(
-    Guid ItemId, Guid WarehouseId, decimal Quantity, string ReferenceType, Guid? ReferenceId, string? Note);
+    Guid ItemId, Guid WarehouseId, decimal Quantity, string ReferenceType, Guid? ReferenceId, string? Note, DateTimeOffset? ExpiresAt = null);
 
 /// <summary>
 /// 過帳服務：**唯一**可以改變 stock_balances 與 stock_reservations 的地方（AGENTS.md 第六節、ADR-0014、ADR-0004）。
@@ -42,6 +42,9 @@ public interface IInventoryPostingService
 
     /// <summary>釋放（取消）仍為 Open 的預留；已結束的預留回傳 false（重送不出錯）。</summary>
     Task<bool> ReleaseReservationAsync(Guid reservationId, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>把已到期的 Open 預留改成 Released 並寫稽核（背景工作呼叫；兩個實例同時執行也只會處理一次）。回傳處理筆數。</summary>
+    Task<int> ExpireDueReservationsAsync(Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public sealed record OpeningRow(
@@ -100,7 +103,59 @@ public sealed record BalanceRow(
 public sealed record MovementRow(
     DateTimeOffset OccurredAt, string DocNo, StockDocumentType DocType, string? ItemCode, string ItemName,
     string WarehouseCode, string LocationCode, string? LotNo, string? SerialNo, StockStatus Status,
-    decimal QuantityDelta, decimal BalanceAfter, string ActorName);
+    decimal QuantityDelta, decimal BalanceAfter, string ActorName, Guid DocumentId = default, bool IsNegative = false);
+
+/// <summary>
+/// 異動歷史查詢條件（M4-05）。料號、儲位碼、單號精確比對（正規化後）；操作者部分相符；
+/// 日期區間以當地日期輸入，呼叫端轉成 UTC 的 [From, To)。沒有料號、儲位、單號與起日時只查最近 30 天。
+/// </summary>
+public sealed record MovementQuery(
+    string? ItemCode = null, Guid? WarehouseId = null, string? LocationCode = null, string? DocNo = null, string? ActorName = null,
+    DateTimeOffset? From = null, DateTimeOffset? To = null, int Page = 1)
+{
+    /// <summary>沒有料號、儲位、單號與起日時，預設只查最近幾天。</summary>
+    public const int DefaultDays = 30;
+}
+
+/// <summary>被拒絕的過帳嘗試（M4-05）：送審、確認、核准、預留失敗時另外記錄（交易已回滾，這筆是在另一個連線寫入）。</summary>
+public sealed record PostingFailureRow(
+    DateTimeOffset OccurredAt, string ActorName, string Command, Guid? DocumentId, string? DocNo, string ErrorCode, string Message, string? TraceId);
+
+/// <summary>單據事件：取消、退回、建立沖銷單（來自稽核紀錄）。</summary>
+public sealed record DocumentEventRow(DateTimeOffset OccurredAt, string ActorName, string Action, Guid DocumentId, string DocNo, string? Detail);
+
+/// <summary>久未處理：草稿或待核准超過門檻的單據。</summary>
+public sealed record StaleDocumentRow(Guid Id, string DocNo, StockDocumentType DocType, StockDocumentStatus Status, string CreatedByName, DateTimeOffset Since);
+
+/// <summary>需要注意的預留：建立超過門檻，或即將到期。</summary>
+public sealed record StaleReservationRow(
+    Guid Id, string ItemCode, string WarehouseCode, decimal RemainingQuantity, string ReferenceType, string? ReferenceDocNo,
+    string CreatedByName, DateTimeOffset CreatedAt, DateTimeOffset? ExpiresAt);
+
+/// <summary>
+/// 異常追蹤（M4-05，使用者 2026-10-22 決定四項）。門檻：草稿或待核准 &gt; <see cref="StaleDocumentDays"/> 天、
+/// 預留 &gt; <see cref="StaleReservationDays"/> 天或 <see cref="ExpiringSoonDays"/> 天內到期。負庫存見 <see cref="IStockQueryService.GetNegativeBalancesAsync"/>。
+/// </summary>
+public interface IStockAnomalyService
+{
+    const int StaleDocumentDays = 7;
+    const int StaleReservationDays = 30;
+    const int ExpiringSoonDays = 3;
+
+    Task<PagedResult<PostingFailureRow>> GetPostingFailuresAsync(int page, CancellationToken cancellationToken);
+
+    Task<PagedResult<DocumentEventRow>> GetDocumentEventsAsync(int page, CancellationToken cancellationToken);
+
+    Task<PagedResult<StaleDocumentRow>> GetStaleDocumentsAsync(int page, CancellationToken cancellationToken);
+
+    Task<PagedResult<StaleReservationRow>> GetStaleReservationsAsync(int page, CancellationToken cancellationToken);
+}
+
+/// <summary>記錄被拒絕的過帳嘗試。實作必須在獨立連線寫入，而且自己吞掉錯誤（記錄失敗不能影響原本的錯誤回應）。</summary>
+public interface IPostingFailureLog
+{
+    Task RecordAsync(string command, Guid? documentId, Actor actor, Exception error, CancellationToken cancellationToken);
+}
 
 public sealed record UncountedLocationRow(Guid LocationId, string WarehouseCode, string LocationCode, string? Name);
 
@@ -115,6 +170,12 @@ public interface IStockQueryService
 
     Task<PagedResult<MovementRow>> GetMovementsAsync(
         Guid? itemId, Guid? locationId, Guid? documentId, int page, CancellationToken cancellationToken);
+
+    /// <summary>異動歷史（M4-05）：多條件篩選、新到舊、伺服器分頁。</summary>
+    Task<PagedResult<MovementRow>> SearchMovementsAsync(MovementQuery query, CancellationToken cancellationToken);
+
+    /// <summary>待補帳：目前結存為負的料號＋儲位（M4-08），倉庫碼、儲位碼、料號排序。</summary>
+    Task<PagedResult<NegativeBalanceRow>> GetNegativeBalancesAsync(Guid? warehouseId, int page, CancellationToken cancellationToken);
 
     /// <summary>還沒做過期初的儲位（停用的不列）。</summary>
     Task<PagedResult<UncountedLocationRow>> GetUncountedLocationsAsync(Guid warehouseId, int page, CancellationToken cancellationToken);

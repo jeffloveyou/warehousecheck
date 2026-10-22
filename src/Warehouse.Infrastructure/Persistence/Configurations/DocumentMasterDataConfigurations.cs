@@ -38,3 +38,21 @@ public class BusinessPartnerConfiguration : IEntityTypeConfiguration<BusinessPar
         builder.HasIndex(p => new { p.PartnerType, p.Name });
     }
 }
+
+/// <summary>stock_document_attachments：依單據查有效附件；刪除與送出後的移除由 trigger 禁止（M4_03）。</summary>
+public class DocumentAttachmentConfiguration : IEntityTypeConfiguration<DocumentAttachment>
+{
+    public void Configure(EntityTypeBuilder<DocumentAttachment> builder)
+    {
+        builder.ToTable("stock_document_attachments", t =>
+            t.HasCheckConstraint("ck_stock_document_attachments_kind", "(is_pdf AND thumb_key IS NULL) OR (NOT is_pdf AND thumb_key IS NOT NULL)"));
+        builder.HasKey(a => a.Id);
+        builder.Property(a => a.Id).ValueGeneratedNever();
+        builder.Property(a => a.FileName).HasMaxLength(DocumentAttachment.FileNameMaxLength);
+        builder.Property(a => a.FileKey).HasMaxLength(200);
+        builder.Property(a => a.ThumbKey).HasMaxLength(200);
+        builder.Property(a => a.UploadedByName).HasMaxLength(100);
+        builder.HasIndex(a => new { a.DocumentId, a.IsActive });
+        builder.HasOne<StockDocument>().WithMany().HasForeignKey(a => a.DocumentId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

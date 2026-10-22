@@ -1,0 +1,62 @@
+@page
+@model Warehouse.Web.Pages.Stock.NegativeModel
+@{
+    ViewData["Title"] = "待補帳";
+}
+<h1>待補帳</h1>
+<p class="muted">允許負庫存的料號出庫超過結存後，會出現在這裡。補入庫（或盤點調整）讓結存回到 0 以上，就會從清單消失。下限是該料號全倉合計可用量的最低值。</p>
+<form method="get" class="filters" id="negative-filter">
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+</form>
+<div class="table-wrap">
+    <table id="negative-list">
+        <thead><tr><th>料號</th><th>品名</th><th>倉庫</th><th>儲位</th><th>結存</th><th>單位</th><th>下限</th><th>最後造成負數的單據</th><th>時間</th></tr></thead>
+        <tbody>
+            @foreach (var r in Model.Result.Items)
+            {
+                <tr>
+                    <td>@r.ItemCode</td>
+                    <td>@r.ItemName</td>
+                    <td>@r.WarehouseCode</td>
+                    <td>@r.LocationCode</td>
+                    <td class="num bad">@Display.Qty(r.Quantity)</td>
+                    <td>@r.UnitCode</td>
+                    <td class="num">-@Display.Qty(r.NegativeStockLimit)</td>
+                    <td>
+                        @if (r.LastDocumentId is { } docId)
+                        {
+                            <a href="/Documents/Details/@docId">@r.LastDocNo</a>
+                        }
+                        else
+                        {
+                            <span>@r.LastDocNo</span>
+                        }
+                    </td>
+                    <td>@(r.LastOccurredAt is { } at ? Display.Time(at) : "")</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="9" class="muted">目前沒有負結存。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

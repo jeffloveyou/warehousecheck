@@ -125,11 +125,16 @@ public sealed class StockReservation
     }
 
     /// <summary>建立預留前的輸入檢查（數量 &gt; 0、來源必填、長度上限）；回傳去空白後的來源與說明。</summary>
-    public static (string ReferenceType, string? Note) ValidateRequest(decimal quantity, string? referenceType, string? note)
+    public static (string ReferenceType, string? Note) ValidateRequest(
+        decimal quantity, string? referenceType, string? note, DateTimeOffset? expiresAt, DateTimeOffset now)
     {
         if (quantity <= 0)
         {
             throw new DomainRuleException("預留數量必須大於 0。");
+        }
+        if (expiresAt is { } expiry && expiry <= now)
+        {
+            throw new DomainRuleException("預留到期時間必須在未來。");
         }
         return (Rules.Required(referenceType, ReferenceTypeMaxLength, "預留來源"), Rules.Optional(note, NoteMaxLength, "預留說明"));
     }
@@ -162,4 +167,7 @@ public sealed class StockReservation
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset? ClosedAt { get; private set; }
+
+    /// <summary>到期時間（只用於手動預留；null＝不會到期）。過了就不計入可用量，背景工作每 10 分鐘把它改成 Released（使用者 2026-10-22）。</summary>
+    public DateTimeOffset? ExpiresAt { get; private set; }
 }

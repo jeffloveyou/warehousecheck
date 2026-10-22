@@ -4,6 +4,7 @@
     ViewData["Title"] = "庫存";
 }
 <h1>庫存查詢</h1>
+<p><a href="/Stock/Movements" id="link-movements">異動歷史</a>　<a href="/Stock/Negative" id="link-negative">待補帳</a>　<a href="/Stock/Anomalies" id="link-anomalies">庫存異常</a></p>
 <form method="get" class="filters" id="stock-filters">
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">選擇倉庫</option>
@@ -71,7 +72,16 @@
                 {
                     <tr>
                         <td>@Display.Time(m.OccurredAt)</td>
-                        <td>@m.DocNo</td>
+                        <td>
+                            @if (m.DocumentId != Guid.Empty)
+                            {
+                                <a href="@Display.DocumentUrl(m.DocType, m.DocumentId)">@m.DocNo</a>
+                            }
+                            else
+                            {
+                                <span>@m.DocNo</span>
+                            }
+                        </td>
                         <td>@Display.Of(m.DocType)</td>
                         <td>@m.WarehouseCode／@m.LocationCode</td>
                         <td>@m.ItemCode @m.ItemName</td>

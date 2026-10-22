@@ -95,7 +95,56 @@ public static class Display
     public static string Of(Warehouse.Domain.Inventory.StockDocumentType type) => type switch
     {
         Warehouse.Domain.Inventory.StockDocumentType.Opening => "期初",
+        Warehouse.Domain.Inventory.StockDocumentType.Inbound => "進倉",
+        Warehouse.Domain.Inventory.StockDocumentType.Outbound => "出倉",
+        Warehouse.Domain.Inventory.StockDocumentType.Transfer => "移庫",
         _ => type.ToString(),
+    };
+
+    public static string Of(Warehouse.Domain.Inventory.ReservationStatus status) => status switch
+    {
+        Warehouse.Domain.Inventory.ReservationStatus.Open => "有效",
+        Warehouse.Domain.Inventory.ReservationStatus.Consumed => "已用完",
+        Warehouse.Domain.Inventory.ReservationStatus.Released => "已釋放",
+        _ => status.ToString(),
+    };
+
+    /// <summary>異常追蹤「被拒嘗試」的動作代碼轉中文。</summary>
+    public static string OfCommand(string command) => command switch
+    {
+        "document.confirm" => "確認",
+        "document.submit" => "送審",
+        "document.approve" => "核准",
+        "reservation.create" => "建立預留",
+        _ => command,
+    };
+
+    /// <summary>單據事件（稽核動作）轉中文。</summary>
+    public static string OfDocumentEvent(string action) => action switch
+    {
+        "document.cancel" => "取消",
+        "document.return" => "退回",
+        "document.reversal_create" => "建立沖銷單",
+        _ => action,
+    };
+
+    /// <summary>單號連結：期初單走 /Opening，其他走 /Documents。</summary>
+    public static string DocumentUrl(Warehouse.Domain.Inventory.StockDocumentType type, Guid id) =>
+        type == Warehouse.Domain.Inventory.StockDocumentType.Opening ? $"/Opening/Details/{id}" : $"/Documents/Details/{id}";
+
+    public static string Of(Warehouse.Domain.Inventory.PartnerType type) => type switch
+    {
+        Warehouse.Domain.Inventory.PartnerType.Vendor => "廠商",
+        Warehouse.Domain.Inventory.PartnerType.Customer => "客戶",
+        Warehouse.Domain.Inventory.PartnerType.Department => "部門",
+        _ => type.ToString(),
+    };
+
+    public static string Of(Warehouse.Domain.Inventory.PurposeDirection direction) => direction switch
+    {
+        Warehouse.Domain.Inventory.PurposeDirection.In => "進倉用",
+        Warehouse.Domain.Inventory.PurposeDirection.Out => "出倉用",
+        _ => direction.ToString(),
     };
 
     /// <summary>數量：去掉多餘的 0（12.5000 → 12.5）。</summary>

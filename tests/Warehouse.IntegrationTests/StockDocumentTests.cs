@@ -363,6 +363,29 @@ public class StockDocumentTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.ElapsedMilliseconds} ms");
     }
 
+    // T-M4-02-13（M4-03 審查 #1 #13）：同一個請求 ID 建單兩次只有一張、別人用同一個 ID 被拒；往來對象代碼精確查詢不受相似代碼影響
+    [Fact]
+    public async Task 建單請求ID冪等_往來對象代碼精確查詢()
+    {
+        var (w, _) = await WarehouseAsync("A-01");
+        var requestId = Guid.NewGuid();
+        var header = new StockDocumentHeader(PurchaseIn, null, null, null);
+        var first = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w, header, Operator, Ct, requestId));
+        Assert.Equal(first, await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w, header, Operator, Ct, requestId)));
+        Assert.Equal(requestId, first);
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => Docs(s => s.CreateAsync(StockDocumentType.Inbound, w, header, Operator2, Ct, requestId)));
+        Assert.Equal("document.request_id_conflict", ex.ErrorCode);
+
+        var prefix = "Z" + Guid.NewGuid().ToString("N")[..5];
+        for (var i = 0; i < 21; i++)
+        {
+            await Master(s => s.CreatePartnerAsync(new PartnerInput(PartnerType.Vendor, $"{prefix}{i:D2}", "相似廠商"), Manager, Ct));
+        }
+        var target = await Master(s => s.CreatePartnerAsync(new PartnerInput(PartnerType.Vendor, prefix, "目標廠商"), Manager, Ct));
+        var found = await Master(s => s.FindActivePartnersByCodeAsync(prefix.ToLowerInvariant(), Ct));
+        Assert.Equal(target, Assert.Single(found).Id);
+    }
+
     // ---- 輔助 ----
 
     private static async Task SqlAsync(FormattableString sql)

@@ -54,4 +54,23 @@ code { font-family: Consolas, monospace; background: #f3f5f7; padding: 1px 4px; 
 .image-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .image-grid figure { margin: 0; width: 160px; }
 .image-grid img { width: 160px; height: auto; border: 1px solid #ccd; border-radius: 3px; }
+/* M4-03：進出倉單 */
+.doc-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: 12px 0; }
+.doc-actions form { margin: 0; }
+.doc-actions .hint { flex-basis: 100%; margin: 0; }
+.doc-actions input[type=text] { width: 220px; }
+.required-mark { color: #b3261e; }
+.num { text-align: right; white-space: nowrap; }
+.attachment-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.attachment-grid figure { margin: 0; width: 160px; word-break: break-all; }
+.attachment-grid img { width: 160px; height: auto; border: 1px solid #ccd; border-radius: 3px; }
+.attachment-pdf { display: block; width: 160px; padding: 24px 8px; border: 1px solid #ccd; border-radius: 3px; text-align: center; background: #f3f5f7; }
+.add-line-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+input[type=file] { max-width: 100%; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.tabs a { text-decoration: none; color: #243447; }
+.tabs a.tab-active { background: #243447; color: #fff; border-color: #243447; }
+@media (max-width: 600px) {
+    .doc-actions input[type=text] { width: 100%; }
+}
 .chip { display: inline-block; padding: 2px 8px; margin: 2px; border: 1px solid #ccd; border-radius: 12px; background: #f3f5f7; }

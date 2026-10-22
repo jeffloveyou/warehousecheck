@@ -44,6 +44,12 @@ public static class Policies
     /// <summary>維護用途類型與往來對象（廠商、客戶、部門）：倉庫主管、物料管理員（M4-10）。</summary>
     public const string PartnersManage = "MasterData.Partners";
 
+    /// <summary>建立、取消手動預留：作業員、倉庫主管（取消他人的預留限主管，服務層檢查；M4-07）。</summary>
+    public const string ReservationManage = "Stock.Reservation.Manage";
+
+    /// <summary>修改物料的負庫存設定：物料管理員（M4-08，ADR-0004）。</summary>
+    public const string NegativePolicy = "Stock.NegativePolicy";
+
     /// <summary>系統設定：系統管理員。</summary>
     public const string SettingsManage = "Settings.Manage";
 
@@ -66,6 +72,8 @@ public static class Policies
             .AddPolicy(DocumentEdit, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
             .AddPolicy(DocumentApprove, p => p.RequireRole(Roles.WarehouseManager))
             .AddPolicy(PartnersManage, p => p.RequireRole(Roles.WarehouseManager, Roles.ItemManager))
+            .AddPolicy(ReservationManage, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
+            .AddPolicy(NegativePolicy, p => p.RequireRole(Roles.ItemManager))
             .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin));
         return services;
     }
