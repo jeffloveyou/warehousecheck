@@ -350,6 +350,27 @@ public class ScanBarcodeTests
         Assert.Equal(10m, Assert.Single((await Opening(s => s.GetAsync(opening, Ct)))!.Lines).Quantity);
     }
 
+    // T-M5-03-07（PR 2 審查 S6）：十個請求同時累加同一行，數量＝總和、仍只有一行（單據列鎖讓請求排隊）
+    [Fact]
+    public async Task 十個請求同時累加同一行_數量是總和且只有一行()
+    {
+        var (w1, _) = await WarehouseAsync("C-01");
+        var (_, itemCode) = await ActiveItemAsync();
+        var doc = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w1, new StockDocumentHeader(null, null, null, null), Operator, Ct));
+
+        using var gate = new SemaphoreSlim(0);
+        var tasks = Enumerable.Range(1, 10).Select(n => Task.Run(async () =>
+        {
+            await gate.WaitAsync(Ct);
+            await Docs(s => s.AddLineAsync(doc, new DocumentLineInput("C-01", itemCode, n, MergeIfSame: true), Operator, Ct));
+        })).ToList();
+        gate.Release(10);
+        await Task.WhenAll(tasks);
+
+        var line = Assert.Single((await Docs(s => s.GetAsync(doc, Ct)))!.Lines);
+        Assert.Equal(55m, line.Quantity);
+    }
+
     private static string Barcode() => "47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
 
     private static async Task<string?> TryAsync(Func<Task> action)

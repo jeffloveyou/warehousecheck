@@ -166,10 +166,12 @@ await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
 await WaitIdleAsync(page);
 Check(await page.EvaluateAsync<string>("() => document.activeElement.id") == "scan-quantity", "欄位齊了游標跳到數量欄");
 Check(await page.InputValueAsync("#scan-quantity") == "1", "數量預填 1");
+var versionBefore = await page.InputValueAsync("input[name='Version']");
 await page.FillAsync("#scan-quantity", "3");
 await page.PressAsync("#scan-quantity", "Enter");
 await WaitIdleAsync(page);
 Check((await page.InnerTextAsync("#document-lines")).Contains(itemCodes[0]), "按 Enter 後明細表出現物料（頁面沒有重新載入）");
+Check(await page.InputValueAsync("input[name='Version']") == versionBefore, "加入明細不改頁面上的單據版本（表頭併發檢查仍有效）");
 Check(await page.EvaluateAsync<string>("() => document.activeElement.id") == "scan-input", "加入後焦點回到掃碼框");
 
 // 3. 外箱條碼：數量帶入包裝數量 12
@@ -189,6 +191,14 @@ await WaitIdleAsync(page);
 Check(await page.InputValueAsync("#scan-item") == itemCodes[0], "數量欄收到的條碼被當成掃碼（物料換成條碼對應的物料）");
 var afterQtyScan = await LinesAsync(docId, "A-01");
 Check(!afterQtyScan.Values.Any(q => q > 1000), "沒有把條碼數字當成數量加入");
+await page.ClickAsync("#scan-clear");
+// 數量欄收到 3 碼英數條碼（例 B12）：不是純數字，當成掃碼處理，不會變成數量 12（PR 2 審查 M3）
+await ScanAsync(page, "WH:ITEM:" + itemCodes[3]);
+await WaitIdleAsync(page);
+await ScanAsync(page, "B12");
+await WaitIdleAsync(page);
+Check(!(await LinesAsync(docId, "A-01")).ContainsKey(itemCodes[3]), "數量欄收到英數短碼時不會加入明細");
+Check((await page.InnerTextAsync("#scan-status")).Contains("B12"), "英數短碼被當成掃碼並提示");
 await page.ClickAsync("#scan-clear");
 
 // 5. 逐件累加：A-02 連掃 8 種物料共 50 筆（Enter）、再 50 筆（Tab），不等處理完；結果每種物料的數量＝掃的次數

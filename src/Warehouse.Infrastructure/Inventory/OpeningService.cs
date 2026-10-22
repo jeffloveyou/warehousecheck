@@ -129,9 +129,13 @@ public sealed class OpeningService(
             {
                 throw new DomainRuleException($"料號 {code} 不是有效狀態，不能建帳。");
             }
-            doc.AddLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, location.Id,
+            var line = doc.AddLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, location.Id,
                 input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.MergeIfSame);
-            return ("opening.line_add", new { Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity, input.MergeIfSame });
+            // 逐件累加併入既有行時稽核記為 line_merge，並記合併後數量（與進出倉單相同）
+            return (line.Id != lineId ? "opening.line_merge" : "opening.line_add", new
+            {
+                LineId = line.Id, LineQuantity = line.Quantity, Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
+            });
         });
 
     public Task RemoveLineAsync(Guid documentId, Guid lineId, Actor actor, CancellationToken cancellationToken) =>

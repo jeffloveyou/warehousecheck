@@ -302,12 +302,13 @@ public class DetailsModel(
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
+        Guid lineId;
         try
         {
             var doc = await documents.GetAsync(id, cancellationToken)
                 ?? throw new NotFoundException("document.not_found", "找不到單據。");
             var isTransfer = doc.DocType == StockDocumentType.Transfer;
-            var lineId = await documents.AddLineAsync(id, new DocumentLineInput(
+            lineId = await documents.AddLineAsync(id, new DocumentLineInput(
                 request.LocationCode ?? string.Empty, request.ItemCode ?? string.Empty, request.Quantity,
                 request.LotNo, request.SerialNo,
                 doc.DocType == StockDocumentType.Inbound ? request.ExpiryDate : null,
@@ -315,17 +316,24 @@ public class DetailsModel(
                 isTransfer ? request.TargetLocationCode : null,
                 doc.DocType == StockDocumentType.Outbound ? request.ReservationId : null,
                 request.Merge), User.ToActor(), cancellationToken);
-            if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))
-            {
-                return NotFound();
-            }
-            Response.Headers["X-Line-Id"] = lineId.ToString();
-            return Partial("_DocumentLines", this);
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
+            // 400 只代表「寫入前就被拒絕」：畫面據此判斷這一筆沒有加入
             return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
         }
+        // 已寫入：之後的重繪若出錯會是 500，畫面當成「不確定」並重新讀取明細表，不會讓人以為失敗而重掃（PR 2 審查 S2）。
+        // 只讀明細表需要的資料，不載入表頭選項、附件（PR 2 審查 S3）
+        if (await documents.GetAsync(id, cancellationToken) is not { } current)
+        {
+            return NotFound();
+        }
+        Doc = current;
+        Version = current.Version;
+        var actor = User.ToActor();
+        CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        Response.Headers["X-Line-Id"] = lineId.ToString();
+        return Partial("_DocumentLines", this);
     }
 
     /// <summary>掃碼面板送出的明細（JSON）。</summary>

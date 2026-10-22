@@ -27,6 +27,7 @@
         <video id="scan-video" playsinline muted></video>
         <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
     </div>
+    <div class="message warn" id="scan-stale" hidden>這張單已被別人修改（表頭或狀態），請重新整理頁面後再修改表頭或過帳。</div>
     <div class="scan-status" id="scan-status" role="status" aria-live="polite"></div>
     <div class="scan-next" id="scan-next"></div>
 
@@ -58,7 +59,7 @@
             <select id="scan-reservation"><option value="">（不指定）</option></select>
         }
         <label for="scan-quantity">數量（基本單位）</label>
-        <input type="number" id="scan-quantity" min="0" step="any" inputmode="decimal" autocomplete="off" />
+        <input type="text" id="scan-quantity" inputmode="decimal" autocomplete="off" maxlength="200" />
     </div>
     <div class="scan-hints" id="scan-hints"></div>
     <div class="actions">

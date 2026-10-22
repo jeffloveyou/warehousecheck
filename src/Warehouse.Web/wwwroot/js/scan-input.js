@@ -59,7 +59,7 @@
   }
 
   // options：input、onScan(value, source, extra) 回傳 Promise、onReject(message)、
-  //          focusWarning、refocusButton、capsIndicator、muteCheckbox、
+  //          container（焦點在它以外的輸入框也提示）、focusWarning、refocusButton、capsIndicator、muteCheckbox、
   //          cameraButton、cameraBox、cameraVideo、cameraState、cameraStop
   function attach(o) {
     var input = o.input;
@@ -92,8 +92,9 @@
       }
       if (ev.key !== 'Enter' && ev.key !== 'Tab') return;
       if (ev.isComposing) return; // 中文輸入法選字中的 Enter 不是掃碼尾碼
-      ev.preventDefault(); // Tab 不讓焦點跳走，Enter 不送出任何表單
       var value = clean(input.value);
+      if (value.length === 0 && ev.key === 'Tab') return; // 空白時 Tab 照常換欄（不形成鍵盤陷阱）
+      ev.preventDefault(); // Tab 不讓焦點跳走，Enter 不送出任何表單
       input.value = '';
       if (value.length === 0) return;
       if (value.length < MIN_LENGTH) {
@@ -106,16 +107,21 @@
     // 焦點守衛：焦點離開輸入框 0.8 秒後仍沒回來才顯示提示。
     // 不立刻顯示：按按鈕時 mousedown 就會失焦，提示若馬上出現會把按鈕往下推，滑鼠放開時已不在按鈕上，按鈕就沒按到。
     var warnTimer = null;
+    // 焦點在掃碼區（o.container，例如掃碼面板）以外的輸入框也提示：條碼槍的字與 Enter 會打進那個欄位、送出那個表單
+    function focusOk() {
+      var active = document.activeElement;
+      return document.hasFocus() && isEditable(active) && (!o.container || o.container.contains(active));
+    }
     function checkFocus() {
       if (!o.focusWarning) return;
       if (warnTimer) { clearTimeout(warnTimer); warnTimer = null; }
-      if (document.hasFocus() && isEditable(document.activeElement)) {
+      if (focusOk()) {
         o.focusWarning.hidden = true;
         return;
       }
       warnTimer = setTimeout(function () {
         warnTimer = null;
-        o.focusWarning.hidden = document.hasFocus() && isEditable(document.activeElement);
+        o.focusWarning.hidden = focusOk();
       }, 800);
     }
     document.addEventListener('focusin', checkFocus);
@@ -130,7 +136,7 @@
     document.addEventListener('keydown', function (ev) {
       var active = document.activeElement;
       if (isEditable(active)) return;
-      if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.key.length !== 1) return;
+      if (ev.ctrlKey || ev.altKey || ev.metaKey || !ev.key || ev.key.length !== 1) return;
       if (ev.key === ' ' && active && active !== document.body && active !== document.documentElement) return;
       ev.preventDefault();
       input.focus();

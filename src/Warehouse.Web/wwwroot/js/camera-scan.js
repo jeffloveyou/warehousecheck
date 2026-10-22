@@ -3,7 +3,7 @@
 // 2. 解碼器：瀏覽器內建 BarcodeDetector 時使用（Android Chrome），可讀 QR 與常見一維碼；
 //    否則動態載入 /lib/jsqr/jsQR.js（iPhone Safari、Windows Chrome），只讀 QR。
 // 3. 每 200 ms 解碼一次並縮小畫面到最長 640 px，降低舊手機 CPU 與耗電。
-// 4. continuous（連續掃碼面板）：讀到後回報、暫停 1.5 秒再繼續，同一個碼 3 秒內不重複回報；
+// 4. continuous（連續掃碼面板）：讀到後回報、暫停 1.5 秒再繼續；同一個碼要先離開畫面 1.5 秒才會再回報（偶爾漏讀幾格不算離開）；
 //    否則（/dev/camera）讀到一次就停止。
 // 5. 按停止、切到背景或離開頁面時，立即停止所有 track 釋放相機。
 // 相容 Chrome 109：只用原生 API。
@@ -11,7 +11,8 @@
 const DECODE_INTERVAL_MS = 200;
 const MAX_DECODE_SIZE = 640;
 const PAUSE_AFTER_RESULT_MS = 1500;
-const SAME_CODE_WINDOW_MS = 3000;
+// 同一個碼要先離開畫面這麼久（期間沒再被讀到）才會再回報：鏡頭停在同一個條碼上不會重複計數（PR 2 審查 M2）
+const SAME_CODE_GONE_MS = 1500;
 const WANTED_FORMATS = ['qr_code', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar', 'data_matrix'];
 
 let stream = null;
@@ -21,7 +22,7 @@ let callbacks = null;
 let currentVideo = null;
 let continuous = false;
 let startedAt = 0;
-let last = { text: null, at: 0 };
+let last = { text: null, seenAt: 0 };
 
 function setState(text) {
   if (callbacks && callbacks.onState) callbacks.onState(text);
@@ -99,8 +100,10 @@ async function tick(video) {
     if (video.readyState >= 2) {
       const result = await decoder.decode(video);
       const now = performance.now();
-      if (result && result.text && !(result.text === last.text && now - last.at < SAME_CODE_WINDOW_MS)) {
-        last = { text: result.text, at: now };
+      if (result && result.text && result.text === last.text && now - last.seenAt < SAME_CODE_GONE_MS) {
+        last.seenAt = now; // 還在畫面上：不回報，延長「還看得到」的時間
+      } else if (result && result.text) {
+        last = { text: result.text, seenAt: now + (continuous ? PAUSE_AFTER_RESULT_MS : 0) };
         const elapsed = Math.round(now - startedAt);
         if (!continuous) {
           stop();
@@ -140,7 +143,7 @@ export async function start(video, handlers, options) {
     video.srcObject = stream;
     await video.play();
     startedAt = performance.now();
-    last = { text: null, at: 0 };
+    last = { text: null, seenAt: 0 };
     setState('掃描中');
     tick(video);
   } catch (error) {

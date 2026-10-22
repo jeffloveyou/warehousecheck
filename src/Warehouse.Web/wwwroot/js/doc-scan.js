@@ -28,6 +28,7 @@
     lot: $('scan-lot'), serial: $('scan-serial'), expiry: $('scan-expiry'), reservation: $('scan-reservation'),
     quantity: $('scan-quantity'), add: $('scan-add'), clear: $('scan-clear'), accumulate: $('scan-accumulate')
   };
+  var stale = $('scan-stale');
   var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
   var item = null;          // 伺服器解析出的物料（追蹤模式、單位、包裝數量）
   var pending = 0;          // 逐件累加：已掃但還沒加入的數量
@@ -300,7 +301,8 @@
     };
   }
 
-  // 用重繪的明細表換掉舊的，並更新頁面上所有表單的單據版本（確認過帳的併發檢查要用最新版本）
+  // 用重繪的明細表換掉舊的。加明細不會改變單據版本（只寫明細表），所以不動頁面上的 Version；
+  // 版本不同代表別人改過表頭或狀態，只提示重新整理，不自動套用新版本（否則表頭表單會無聲覆蓋別人的修改，PR 2 審查 M1）
   function replaceLines(html) {
     var old = document.querySelector('[data-scan-lines]');
     var template = document.createElement('template');
@@ -309,8 +311,9 @@
     if (!old || !fresh) return false;
     old.parentNode.replaceChild(fresh, old);
     var version = fresh.getAttribute('data-version');
-    if (version) {
-      document.querySelectorAll('input[name="Version"]').forEach(function (input) { input.value = version; });
+    var pageVersion = document.querySelector('input[name="Version"]');
+    if (version && pageVersion && pageVersion.value !== version && stale) {
+      stale.hidden = false;
     }
     return true;
   }
@@ -322,8 +325,15 @@
     } catch (e) { /* 仍然離線：讓人自行重新整理 */ }
   }
 
-  async function submit(merge) {
-    if (busy) return;
+  // 一次只送一筆：手動按「加入明細」與掃碼觸發的送出若同時發生，後到的等前一筆結束再送（PR 2 審查 S1）
+  var inflight = Promise.resolve();
+  function submit(merge) {
+    var run = inflight.then(function () { return submitNow(merge); });
+    inflight = run.catch(function () { });
+    return run;
+  }
+
+  async function submitNow(merge) {
     var s = step();
     if (s !== 'quantity') {
       fail('還沒完成：' + LABELS[s]);
@@ -333,7 +343,14 @@
     var data = payload(merge);
     if (merge) data.quantity = pending;
     if (!(data.quantity > 0)) {
-      fail('數量必須大於 0。');
+      if (!merge) {
+        fail('數量必須大於 0。');
+        focusQuantity();
+      }
+      return;
+    }
+    if (!merge && !/^\d+(\.\d+)?$/.test(el.quantity.value.trim())) {
+      fail('數量請輸入數字（例 3 或 2.5）。');
       focusQuantity();
       return;
     }
@@ -350,6 +367,7 @@
     confirmLarge = false;
     busy = true;
     el.add.disabled = true;
+    if (merge) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
     try {
       var res = await fetch(addUrl, {
         method: 'POST',
@@ -366,19 +384,27 @@
         ok('已加入：' + data.itemCode + ' × ' + fmt(data.quantity) + (merge ? '（累加）' : '') + '，儲位 ' + data.locationCode);
         log(data.itemCode, '加入 ' + fmt(data.quantity), true);
         afterSubmit();
-      } else {
-        var message = type.indexOf('json') >= 0 ? (await res.json()).message : null;
-        fail(message || (res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '加入失敗（HTTP ' + res.status + '）'));
+      } else if (res.status === 400 && type.indexOf('json') >= 0) {
+        // 400＝規則錯誤（伺服器在寫入前拒絕），這一筆沒有加入
+        fail((await res.json()).message || '加入失敗');
         log(data.itemCode, '加入失敗', false);
+        if (merge) pending = 0;
+      } else {
+        // 其他錯誤（逾時登入、500 等）不能確定是否已寫入：重新讀取明細表讓人核對，不自動重送（PR 2 審查 S2）
+        fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
+          : '不確定這一行是否已加入（HTTP ' + res.status + '），已重新讀取明細表，請核對後再繼續。');
+        log(data.itemCode, '不確定是否已加入', false);
+        if (merge) pending = 0;
+        await reloadLines();
       }
     } catch (e) {
       fail('網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
       log(data.itemCode, '不確定是否已加入', false);
+      if (merge) pending = 0;
       await reloadLines();
     } finally {
       busy = false;
       el.add.disabled = false;
-      pending = 0;
       showNext();
       focusScan();
     }
@@ -417,6 +443,7 @@
 
   var scanner = window.WhScan.attach({
     input: el.input,
+    container: panel,
     onScan: onScan,
     onReject: function (message) { fail(message); log('', message, false); focusScan(); },
     focusWarning: $('scan-focus-warning'),
@@ -435,7 +462,7 @@
   el.quantity.addEventListener('focus', function () { keyTimes = []; });
   el.quantity.addEventListener('keydown', function (ev) {
     if (ev.key !== 'Enter' && ev.key !== 'Tab') {
-      if (ev.key.length === 1) {
+      if (ev.key && ev.key.length === 1) {
         keyTimes.push(performance.now());
         confirmLarge = false; // 改了數量就要重新確認
       }
@@ -443,7 +470,8 @@
     }
     var text = el.quantity.value;
     var fast = keyTimes.length >= 4 && (keyTimes[keyTimes.length - 1] - keyTimes[0]) / (keyTimes.length - 1) < 30;
-    var looksLikeScan = fast || text.replace(/\D/g, '').length > 8;
+    // 數量欄是文字欄（inputmode=decimal），英數條碼不會被瀏覽器吃掉；不是純數字就一定是掃到條碼（PR 2 審查 M3）
+    var looksLikeScan = fast || !/^[0-9.]*$/.test(text.trim()) || text.replace(/\D/g, '').length > 8;
     if (ev.key === 'Tab' && !looksLikeScan) return; // 人按 Tab：照常移到下一欄
     ev.preventDefault();
     keyTimes = [];
@@ -469,7 +497,7 @@
   ['location', 'target', 'lot', 'serial', 'expiry'].forEach(function (k) {
     if (!el[k]) return;
     el[k].addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter') { ev.preventDefault(); afterChange(false); }
+      if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); afterChange(false); }
     });
     el[k].addEventListener('change', showNext);
   });
