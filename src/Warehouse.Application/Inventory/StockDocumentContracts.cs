@@ -27,11 +27,13 @@ public sealed record DocumentDetails(
 /// 新增明細：儲位碼、料號以文字輸入（掃碼或手輸，大小寫、全形會正規化）。
 /// 移庫：<see cref="TargetLocationCode"/> 必填；<see cref="TargetWarehouseCode"/> 空白＝與來源同倉，但目的儲位是 <c>WH:LOC:</c> QR 時用 QR 上的倉庫（M5-01）。
 /// <see cref="ReservationId"/>：出倉單依手動預留出庫時指定。
+/// <see cref="MergeIfSame"/>：掃碼「逐件累加」，相同的草稿行累加數量（M5）。
 /// </summary>
 public sealed record DocumentLineInput(
     string LocationCode, string ItemCode, decimal Quantity,
     string? LotNo = null, string? SerialNo = null, DateOnly? ExpiryDate = null,
-    string? TargetWarehouseCode = null, string? TargetLocationCode = null, Guid? ReservationId = null);
+    string? TargetWarehouseCode = null, string? TargetLocationCode = null, Guid? ReservationId = null,
+    bool MergeIfSame = false);
 
 /// <summary>
 /// 進倉、出倉、移庫單（M4-09～11，ADR-0015）。

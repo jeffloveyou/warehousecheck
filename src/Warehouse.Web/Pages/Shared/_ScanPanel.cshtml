@@ -1,0 +1,70 @@
+@model Warehouse.Web.Pages.Shared.ScanPanelModel
+@*
+    連續掃碼面板（M5-03，docs/04 §6）：條碼槍、PDA、手機相機共用。
+    行為在 wwwroot/js/scan-input.js（輸入佇列、焦點、回饋、相機）與 doc-scan.js（步驟與加入明細）。
+    沒有 JS 時面板維持隱藏，下方原本的表單照常可用（ADR-0003：搜尋＋點選必須能完成作業）。
+*@
+<div class="panel scan-panel" id="scan-panel" hidden
+     data-mode="@Model.Mode"
+     data-warehouse-id="@Model.WarehouseId"
+     data-resolve-url="@Model.ResolveUrl"
+     data-add-url="@Model.AddUrl">
+    <h2>連續掃碼</h2>
+    <div class="scan-bar">
+        <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
+               enterkeyhint="done" maxlength="200" placeholder="用條碼槍掃描，或輸入後按 Enter" aria-label="掃碼輸入" />
+        <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
+    </div>
+    <div class="scan-options">
+        <label><input type="checkbox" id="scan-accumulate" /> 逐件累加（每掃一次加入或累加數量）</label>
+        <label><input type="checkbox" id="scan-mute" /> 靜音</label>
+        <span id="scan-caps" class="bad" hidden>大寫鎖定開著（不影響比對）</span>
+    </div>
+    <div class="message warn" id="scan-focus-warning" hidden>
+        掃碼框不在焦點，條碼槍掃的字可能跑到別處。<button type="button" class="link" id="scan-refocus">點這裡回到掃碼框</button>
+    </div>
+    <div class="scan-camera-box" id="scan-camera-box" hidden>
+        <video id="scan-video" playsinline muted></video>
+        <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
+    </div>
+    <div class="message warn" id="scan-stale" hidden>這張單已被別人修改（表頭或狀態），請重新整理頁面後再修改表頭或過帳。</div>
+    <div class="scan-status" id="scan-status" role="status" aria-live="polite"></div>
+    <div class="scan-next" id="scan-next"></div>
+
+    <div class="form-grid scan-fields">
+        <label for="scan-location" id="scan-location-label">@Model.LocationLabel</label>
+        <input type="text" id="scan-location" autocomplete="off" maxlength="200" />
+        @if (Model.Mode == "transfer")
+        {
+            <label for="scan-target">目的儲位</label>
+            <input type="text" id="scan-target" autocomplete="off" maxlength="200" />
+        }
+        <label for="scan-item">物料</label>
+        <div>
+            <input type="text" id="scan-item" autocomplete="off" maxlength="200" />
+            <div class="muted" id="scan-item-info"></div>
+        </div>
+        <label for="scan-lot">批號</label>
+        <input type="text" id="scan-lot" autocomplete="off" maxlength="50" />
+        <label for="scan-serial">序號</label>
+        <input type="text" id="scan-serial" autocomplete="off" maxlength="50" />
+        @if (Model.ShowExpiry)
+        {
+            <label for="scan-expiry">有效期限</label>
+            <input type="date" id="scan-expiry" />
+        }
+        @if (Model.Mode == "outbound")
+        {
+            <label for="scan-reservation">預留</label>
+            <select id="scan-reservation"><option value="">（不指定）</option></select>
+        }
+        <label for="scan-quantity">數量（基本單位）</label>
+        <input type="text" id="scan-quantity" inputmode="decimal" autocomplete="off" maxlength="200" />
+    </div>
+    <div class="scan-hints" id="scan-hints"></div>
+    <div class="actions">
+        <button type="button" id="scan-add">加入明細</button>
+        <button type="button" class="secondary" id="scan-clear">清除（保留儲位）</button>
+    </div>
+    <ol class="scan-log" id="scan-log" reversed></ol>
+</div>
