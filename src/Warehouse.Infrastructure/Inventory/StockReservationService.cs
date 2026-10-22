@@ -99,7 +99,7 @@ public sealed class StockReservationService(
             return concurrent;
         }
         // 料號欄可以直接收掃到的物料 QR 或原廠條碼（M5-01）
-        var (items, display) = ScanCodes.Items(db, code);
+        var (items, display) = await ScanCodes.ItemsAsync(db, code, cancellationToken);
         var itemId = await items.Where(i => i.Status == ItemStatus.Active).Select(i => (Guid?)i.Id)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new DomainRuleException($"找不到有效的料號 {display}。");

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Search;
 using Warehouse.Domain.Items;
+using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Text;
 using Warehouse.Infrastructure.Persistence;
 
@@ -23,7 +24,8 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
     {
         var page = Paging.ClampPage(query.Page);
         var pageSize = query.PageSize < 1 ? ItemSearch.DefaultPageSize : Math.Min(query.PageSize, ItemSearch.MaxPageSize);
-        var raw = query.Text?.Trim() ?? string.Empty;
+        // 先去控制字元（掃碼尾碼、中間夾的 Tab／GS），與條碼登錄、掃碼解析同一套前處理（M5-01 審查 S6）
+        var raw = ScanInput.StripControl(query.Text);
         if (raw.Length > ItemSearch.MaxTextLength)
         {
             raw = raw[..ItemSearch.MaxTextLength];

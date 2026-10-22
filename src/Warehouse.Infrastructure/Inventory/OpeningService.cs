@@ -114,15 +114,17 @@ public sealed class OpeningService(
                 return ("opening.line_add", new { Location = location.Code, Empty = true });
             }
 
-            var (items, code) = ScanCodes.Items(db, input.ItemCode);
+            var (items, code) = await ScanCodes.ItemsAsync(db, input.ItemCode, cancellationToken);
             var item = await items.AsNoTracking()
                 .Select(i => new
                 {
-                    i.Id, i.Status, i.TrackingMode,
+                    i.Id, i.Status, i.TrackingMode, i.ItemCode,
                     DecimalPlaces = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => (int)u.DecimalPlaces).First(),
                 })
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new DomainRuleException($"找不到料號 {code}。");
+            // 掃條碼加入時，訊息與稽核一律記正式料號（M5-01 審查 S4）
+            code = item.ItemCode ?? code;
             if (item.Status != ItemStatus.Active)
             {
                 throw new DomainRuleException($"料號 {code} 不是有效狀態，不能建帳。");

@@ -75,6 +75,7 @@ public class ScanBarcodeTests
         var errors = await Task.WhenAll(items.Select(id => TryAsync(() => Index(s => s.AddAsync(id, ItemIndexKind.Barcode, code, Operator, Ct)))));
 
         Assert.Single(errors, e => e is null);
+        Assert.All(errors.Where(e => e is not null), e => Assert.Equal("index.barcode_taken", e));
         await using var db = MigratedDatabaseFixture.CreateContext();
         Assert.Equal(1, await db.ItemBarcodes.CountAsync(b => b.Text == code && b.IsActive, Ct));
     }
@@ -89,9 +90,19 @@ public class ScanBarcodeTests
             var (b, _) = await ActiveItemAsync();
             var text = Barcode();
 
-            await Task.WhenAll(
-                TryAsync(() => Index(s => s.AddAsync(a, ItemIndexKind.Barcode, text, Operator, Ct))),
-                TryAsync(() => Index(s => s.AddAsync(b, ItemIndexKind.Alias, text, Operator, Ct))));
+            // 兩個請求等起跑閘一起出發；單數輪先送別名、偶數輪先送條碼
+            using var gate = new SemaphoreSlim(0);
+            Task<string?> Start(Guid id, ItemIndexKind kind) => Task.Run(async () =>
+            {
+                await gate.WaitAsync(Ct);
+                return await TryAsync(() => Index(s => s.AddAsync(id, kind, text, Operator, Ct)));
+            });
+            var tasks = round % 2 == 0
+                ? new[] { Start(a, ItemIndexKind.Barcode), Start(b, ItemIndexKind.Alias) }
+                : new[] { Start(b, ItemIndexKind.Alias), Start(a, ItemIndexKind.Barcode) };
+            gate.Release(2);
+            var errors = await Task.WhenAll(tasks);
+            Assert.Equal("index.identifier_conflict", Assert.Single(errors, e => e is not null));
 
             await using var db = MigratedDatabaseFixture.CreateContext();
             var active = await db.ItemBarcodes.CountAsync(x => x.NormalizedText == text && x.IsActive, Ct)
@@ -193,8 +204,14 @@ public class ScanBarcodeTests
             var version = await db.Items.Where(i => i.Id == item).Select(i => EF.Property<uint>(i, "Version")).SingleAsync(Ct);
             await new ItemWorkflowService(db, TimeProvider.System).DeactivateAsync(item, version, null, ItemManager, Ct);
         }
-        Assert.Equal(ScanResultKind.Rejected, (await ResolveAsync(itemCode)).Kind);
-        Assert.Equal(ScanResultKind.Rejected, (await ResolveAsync(code)).Kind);
+        // 停用物料仍回傳（可出庫清空），由作業決定能不能用；進倉被服務拒絕、出倉草稿可以加（審查 S3）
+        var inactive = await ResolveAsync(itemCode);
+        Assert.Equal((ScanResultKind.Item, false), (inactive.Kind, inactive.Item!.IsActive));
+        Assert.False((await ResolveAsync(code)).Item!.IsActive);
+        var inbound = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w1, new StockDocumentHeader(null, null, null, null), Operator, Ct));
+        await Assert.ThrowsAsync<DomainRuleException>(() => Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("S-01", code, 1), Operator, Ct)));
+        var outbound = await Docs(s => s.CreateAsync(StockDocumentType.Outbound, w1, new StockDocumentHeader(null, null, null, null), Operator, Ct));
+        await Docs(s => s.AddLineAsync(outbound, new DocumentLineInput("S-01", code, 1), Operator, Ct));
     }
 
     // T-M5-01-13
@@ -258,7 +275,51 @@ public class ScanBarcodeTests
         Assert.Equal((item, HitReason.Barcode, 2), (hit.Id, hit.Reason, hit.Tier));
     }
 
-    private static string Barcode() => "47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
+    // T-M5-01-17（審查 S1：舊版程式不取鎖、不查條碼表時，資料庫 trigger 仍擋住別名＝條碼）
+    [Fact]
+    public async Task 資料庫直接新增與有效條碼相同的別名_被trigger拒絕()
+    {
+        var (a, _) = await ActiveItemAsync();
+        var (b, _) = await ActiveItemAsync();
+        var code = Barcode();
+        await Index(s => s.AddAsync(a, ItemIndexKind.Barcode, code, Operator, Ct));
+
+        await using var connection = new NpgsqlConnection(TestDatabase.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO item_aliases (id, item_id, text, normalized_text, created_by_id, created_by_name, created_at, is_active)
+            VALUES (gen_random_uuid(), @item, @text, @text, gen_random_uuid(), '舊版程式', now(), true)
+            """, connection);
+        command.Parameters.AddWithValue("item", b);
+        command.Parameters.AddWithValue("text", code);
+        var ex = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Ct));
+
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, ex.SqlState);
+        Assert.Contains("原廠條碼", ex.MessageText);
+    }
+
+    // T-M5-01-18（審查 M1：表單的數量是基本單位，外箱條碼不能直接當料號）
+    [Fact]
+    public async Task 包裝數量不是1的條碼_不能直接填在單據與期初的料號欄()
+    {
+        var (w1, _) = await WarehouseAsync("P-01");
+        var (item, itemCode) = await ActiveItemAsync();
+        var box = Barcode();
+        await Index(s => s.AddAsync(item, ItemIndexKind.Barcode, box, Operator, Ct, 12m));
+
+        var inbound = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w1, new StockDocumentHeader(null, null, null, null), Operator, Ct));
+        var error = await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("P-01", box, 1), Operator, Ct)));
+        Assert.Contains("包裝條碼", error.Message);
+        var opening = await Opening(s => s.CreateAsync(w1, null, Operator, Ct));
+        await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Opening(s => s.AddLineAsync(opening, new OpeningLineInput("P-01", box, null, null, null, 1), Operator, Ct)));
+
+        // 用正式料號仍可以；稽核記正式料號（審查 S4）
+        await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("P-01", itemCode, 12), Operator, Ct));
+    }
+
+    private static string Barcode() =>"47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
 
     private static async Task<string?> TryAsync(Func<Task> action)
     {

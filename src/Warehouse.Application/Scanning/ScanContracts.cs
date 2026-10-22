@@ -9,7 +9,7 @@ public enum ScanResultKind
     /// <summary>儲位（<c>WH:LOC:</c> QR，或指定倉庫時的儲位碼文字）。</summary>
     Location,
 
-    /// <summary>物料：正式料號、有效原廠條碼或有效專屬別名「完全相同」。</summary>
+    /// <summary>物料：正式料號、有效原廠條碼或有效專屬別名「完全相同」（物料是有效或已停用；待核准、已拒絕的物料回 Rejected）。</summary>
     Item,
 
     /// <summary>不是任何已登錄的識別碼：可能是批號、序號，或尚未登錄的條碼；畫面依目前步驟決定用途，不猜物料。</summary>
@@ -27,7 +27,10 @@ public enum ScanMatch
     Alias,
 }
 
-/// <summary>掃到的物料。<see cref="PackQuantity"/>：比中原廠條碼時是該條碼的包裝數量，其他情況為 1。</summary>
+/// <summary>
+/// 掃到的物料。<see cref="PackQuantity"/>：比中原廠條碼時是該條碼的包裝數量，其他情況為 1。
+/// <see cref="IsActive"/> 為 false 表示已停用：仍可出庫、移庫清空庫存，但不可進倉、期初、預留（由呼叫端依作業判斷，M5-01 審查 S3）。
+/// </summary>
 public sealed record ScanItem(
     Guid Id,
     string ItemCode,
@@ -37,7 +40,8 @@ public sealed record ScanItem(
     int DecimalPlaces,
     TrackingMode TrackingMode,
     ScanMatch MatchedBy,
-    decimal PackQuantity);
+    decimal PackQuantity,
+    bool IsActive);
 
 /// <summary>
 /// 掃碼解析結果。<see cref="Raw"/> 是原始輸入；<see cref="Value"/> 是去掉控制字元後的文字

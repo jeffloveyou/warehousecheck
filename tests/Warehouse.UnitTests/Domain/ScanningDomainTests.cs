@@ -14,6 +14,7 @@ public class ScanningDomainTests
     [InlineData("4710088430012\r\n", "4710088430012", null)]       // Enter 尾碼
     [InlineData("\t0012345\t", "0012345", null)]                    // Tab 尾碼，前導零保留
     [InlineData("  ABC  ", "ABC", null)]
+    [InlineData("0104712345678901\t10LOT\u001d", "010471234567890110LOT", null)]   // 中間夾 Tab、GS（審查 S6）
     [InlineData("A1", "A1", "太短")]                                 // 漏字
     [InlineData("\r\n", "", "沒有收到")]
     [InlineData(null, "", "沒有收到")]

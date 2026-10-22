@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Warehouse.Domain;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Scanning;
 using Warehouse.Infrastructure.Persistence;
@@ -23,10 +25,13 @@ internal static class ScanCodes
     }
 
     /// <summary>
-    /// 料號欄：正式料號（可帶 <c>WH:ITEM:</c> 前綴）或有效原廠條碼。回傳的查詢最多一筆
-    /// （料號唯一、有效條碼唯一，且條碼不可是料號格式）；<c>Display</c> 用於錯誤訊息。
+    /// 料號欄：正式料號（可帶 <c>WH:ITEM:</c> 前綴）或有效原廠條碼。回傳的查詢最多一筆；<c>Display</c> 用於錯誤訊息。
+    /// 包裝數量不是 1 的條碼（外箱條碼）在這裡拒絕：表單的數量欄是基本單位，直接收外箱條碼會把「1 箱」記成「1 個」
+    /// （M5-01 審查 M1）。外箱條碼請用連續掃碼面板，面板會依包裝數量換算後送出正式料號。
+    /// 條碼先單獨查出物料 ID，再用主鍵查物料，避免「料號 = x OR id IN (...)」讓 PostgreSQL 掃整張物料表（審查 I3）。
     /// </summary>
-    public static (IQueryable<Item> Query, string Display) Items(WarehouseDbContext db, string? input)
+    public static async Task<(IQueryable<Item> Query, string Display)> ItemsAsync(
+        WarehouseDbContext db, string? input, CancellationToken cancellationToken)
     {
         var scan = ScanCodeParser.Parse(input);
         if (scan.Kind == ScanCodeKind.Item)
@@ -35,7 +40,19 @@ internal static class ScanCodes
             return (db.Items.Where(i => i.ItemCode == code), code);
         }
         var text = scan.Normalized;
-        var barcodeItemIds = db.ItemBarcodes.Where(b => b.IsActive && b.NormalizedText == text).Select(b => b.ItemId);
-        return (db.Items.Where(i => i.ItemCode == text || barcodeItemIds.Contains(i.Id)), text);
+        var barcode = await db.ItemBarcodes.AsNoTracking()
+            .Where(b => b.IsActive && b.NormalizedText == text)
+            .Select(b => new { b.ItemId, b.PackQuantity })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (barcode is null)
+        {
+            return (db.Items.Where(i => i.ItemCode == text), text);
+        }
+        if (barcode.PackQuantity != 1m)
+        {
+            throw new DomainRuleException(
+                $"「{text}」是一次代表 {barcode.PackQuantity:0.####} 個基本單位的包裝條碼，這個欄位的數量是基本單位；請改用連續掃碼面板，或直接輸入料號。");
+        }
+        return (db.Items.Where(i => i.Id == barcode.ItemId), text);
     }
 }

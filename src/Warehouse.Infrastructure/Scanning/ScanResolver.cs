@@ -43,7 +43,7 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
             var byCode = await FindItemAsync(db.Items.Where(i => i.ItemCode == code), ScanMatch.ItemCode, 1m, cancellationToken);
             return byCode.Item is not null
                 ? new ScanResolution(ScanResultKind.Item, original, value, null, null, byCode.Item)
-                : Rejected(original, value, byCode.Inactive ? $"料號 {code} 不是有效物料（停用或尚未核准）。" : $"找不到料號 {code}。");
+                : Rejected(original, value, byCode.Unusable ? $"料號 {code} 尚未核准或已拒絕，不能使用。" : $"找不到料號 {code}。");
         }
 
         var normalized = scan.Normalized;
@@ -57,7 +57,7 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
                 db.Items.Where(i => i.Id == barcode.ItemId), ScanMatch.Barcode, barcode.PackQuantity, cancellationToken);
             return byBarcode.Item is not null
                 ? new ScanResolution(ScanResultKind.Item, original, value, null, null, byBarcode.Item)
-                : Rejected(original, value, "這個條碼登錄的物料已停用。");
+                : Rejected(original, value, "這個條碼登錄的物料尚未核准或已拒絕，不能使用。");
         }
 
         var aliasItemIds = db.ItemAliases.Where(a => a.IsActive && a.NormalizedText == normalized).Select(a => a.ItemId);
@@ -65,6 +65,11 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
         if (byAlias.Item is not null)
         {
             return new ScanResolution(ScanResultKind.Item, original, value, null, null, byAlias.Item);
+        }
+        if (byAlias.Unusable)
+        {
+            // 別名指向不能用的物料：明確拒絕，不落到「其他文字」被當成批號填入（M5-01 審查 S2）
+            return Rejected(original, value, "這個專屬別名對應的物料尚未核准或已拒絕，不能使用。");
         }
 
         // 沒有前綴的儲位碼（例 A-01-01）：只在指定倉庫時精確查詢
@@ -82,8 +87,11 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
         return new ScanResolution(ScanResultKind.Text, original, value, null, null, null);
     }
 
-    /// <summary>查有效物料的掃碼摘要；查到但不是有效狀態時 <c>Inactive</c> 為 true。</summary>
-    private async Task<(ScanItem? Item, bool Inactive)> FindItemAsync(
+    /// <summary>
+    /// 查物料的掃碼摘要。有效與已停用的物料都回傳（<see cref="ScanItem.IsActive"/>；停用物料仍可出庫清空，由呼叫端判斷）；
+    /// 待核准、已退回、已拒絕的物料不能用在任何作業，<c>Unusable</c> 為 true。
+    /// </summary>
+    private async Task<(ScanItem? Item, bool Unusable)> FindItemAsync(
         IQueryable<Item> items, ScanMatch match, decimal packQuantity, CancellationToken cancellationToken)
     {
         var row = await items.AsNoTracking()
@@ -97,13 +105,13 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
         {
             return (null, false);
         }
-        if (row.Status != ItemStatus.Active || row.ItemCode is null)
+        if (row.Status is not (ItemStatus.Active or ItemStatus.Inactive) || row.ItemCode is null)
         {
             return (null, true);
         }
         return (new ScanItem(
             row.Id, row.ItemCode, row.Name, row.Specification, row.Unit.Code, row.Unit.DecimalPlaces, row.TrackingMode,
-            match, packQuantity), false);
+            match, packQuantity, row.Status == ItemStatus.Active), false);
     }
 
     private static ScanResolution Rejected(string raw, string value, string message) =>

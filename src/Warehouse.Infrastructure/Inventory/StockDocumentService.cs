@@ -189,18 +189,20 @@ public sealed class StockDocumentService(
                 var targetWarehouseId = targetWarehouseCode is null
                     ? doc.WarehouseId
                     : await FindWarehouseIdAsync(targetWarehouseCode, cancellationToken);
-                target = await FindLocationAsync(targetWarehouseId, input.TargetLocationCode, cancellationToken);
+                target = await FindLocationAsync(targetWarehouseId, input.TargetLocationCode, cancellationToken, isTarget: true);
             }
 
-            var (items, code) = ScanCodes.Items(db, input.ItemCode);
+            var (items, code) = await ScanCodes.ItemsAsync(db, input.ItemCode, cancellationToken);
             var item = await items.AsNoTracking()
                 .Select(i => new
                 {
-                    i.Id, i.Status, i.TrackingMode,
+                    i.Id, i.Status, i.TrackingMode, i.ItemCode,
                     DecimalPlaces = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => (int)u.DecimalPlaces).First(),
                 })
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new DomainRuleException($"找不到料號 {code}。");
+            // 掃條碼加入時，訊息與稽核一律記正式料號（M5-01 審查 S4）
+            code = item.ItemCode ?? code;
             // 停用的物料仍可出庫、移庫（清空庫存），但不可再進倉
             if (item.Status != ItemStatus.Active && (doc.DocType == StockDocumentType.Inbound || item.Status != ItemStatus.Inactive))
             {
@@ -648,14 +650,17 @@ public sealed class StockDocumentService(
         return warehouse.Id;
     }
 
-    private async Task<Location> FindLocationAsync(Guid warehouseId, string locationCode, CancellationToken cancellationToken)
+    private async Task<Location> FindLocationAsync(
+        Guid warehouseId, string locationCode, CancellationToken cancellationToken, bool isTarget = false)
     {
         // 可直接收掃到的儲位 QR（M5-01）：QR 上的倉庫必須是這張單的倉庫
         var (code, qrWarehouseCode) = ScanCodes.Location(locationCode);
         if (qrWarehouseCode is not null
             && !await db.Warehouses.AnyAsync(w => w.Id == warehouseId && w.Code == qrWarehouseCode, cancellationToken))
         {
-            throw new DomainRuleException($"掃到的是倉庫 {qrWarehouseCode} 的儲位 QR，與這張單的倉庫不同。");
+            throw new DomainRuleException(isTarget
+                ? $"掃到的是倉庫 {qrWarehouseCode} 的儲位 QR，與填寫的目的倉庫不同。"
+                : $"掃到的是倉庫 {qrWarehouseCode} 的儲位 QR，與這張單的倉庫不同。");
         }
         var location = await db.Locations.AsNoTracking()
             .SingleOrDefaultAsync(l => l.WarehouseId == warehouseId && l.Code == code, cancellationToken)

@@ -25,7 +25,7 @@ public sealed record DocumentDetails(
 
 /// <summary>
 /// 新增明細：儲位碼、料號以文字輸入（掃碼或手輸，大小寫、全形會正規化）。
-/// 移庫：<see cref="TargetLocationCode"/> 必填；<see cref="TargetWarehouseCode"/> 空白＝與來源同倉。
+/// 移庫：<see cref="TargetLocationCode"/> 必填；<see cref="TargetWarehouseCode"/> 空白＝與來源同倉，但目的儲位是 <c>WH:LOC:</c> QR 時用 QR 上的倉庫（M5-01）。
 /// <see cref="ReservationId"/>：出倉單依手動預留出庫時指定。
 /// </summary>
 public sealed record DocumentLineInput(
