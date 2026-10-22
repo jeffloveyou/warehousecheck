@@ -27,7 +27,8 @@ for ($i = 1; $i -le $Count; $i++) {
     $user = '{0}{1:00}' -f $Prefix, $i
     $output = dotnet run --project (Join-Path $root 'src/Warehouse.Web') --no-build --no-launch-profile -- `
         users create --user $user --display "量測 $i" --role Operator 2>&1
-    $initial = ($output | Select-String '初始密碼：(.+)').Matches.Groups[1].Value
+    $match = $output | Select-String '初始密碼：(.+)'
+    $initial = if ($match) { $match.Matches[0].Groups[1].Value } else { $null }
     if (-not $initial) {
         Write-Host "$user：略過（$(($output | Select-Object -Last 1))）"
         continue
