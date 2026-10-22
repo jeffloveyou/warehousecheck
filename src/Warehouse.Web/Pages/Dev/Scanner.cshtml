@@ -1,0 +1,43 @@
+@page "/dev/scanner"
+@model Warehouse.Web.Pages.Dev.ScannerModel
+@{
+    ViewData["Title"] = "條碼槍／PDA 掃碼測試";
+}
+<h1>條碼槍／PDA 掃碼測試（M0-05）</h1>
+<p class="muted">游標停在掃碼框後連續掃描。每筆以 Enter 或 Tab 結尾；掃完按「送出結果」，結果會記到伺服器 log。</p>
+@Html.AntiForgeryToken()
+<div class="form-grid">
+    <label for="device">設備說明</label>
+    <input type="text" id="device" maxlength="100" placeholder="例：Win7 倉庫電腦＋某牌條碼槍" />
+    <label for="delay">模擬查詢延遲（ms）</label>
+    <input type="number" id="delay" value="200" min="0" max="1000" step="50" />
+    <label for="expected">預期清單（一行一筆）</label>
+    <div>
+        <textarea id="expected" rows="4"></textarea>
+        <button type="button" class="secondary" id="load-default">載入預設 50 筆</button>
+    </div>
+    <label for="scan-input">掃碼</label>
+    <input type="text" id="scan-input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="游標停在這裡掃描" />
+</div>
+<dl class="status">
+    <dt>已掃</dt><dd id="scan-count">0</dd>
+    <dt>處理中</dt><dd id="queue-count">0</dd>
+    <dt>每筆輸入耗時</dt><dd id="timing">-</dd>
+    <dt>結尾鍵</dt><dd id="terminators">-</dd>
+    <dt>比對</dt><dd id="compare">-</dd>
+</dl>
+<div class="actions">
+    <button type="button" id="report">送出結果</button>
+    <button type="button" class="secondary" id="reset">清除重來</button>
+    <span id="report-state" class="muted"></span>
+</div>
+<div class="table-wrap">
+    <table id="scan-list">
+        <thead><tr><th>#</th><th>內容</th><th>字數</th><th>輸入耗時</th><th>結尾</th><th>回應</th></tr></thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+@section Scripts {
+    <script src="/js/dev-scanner.js" asp-append-version="true"></script>
+}

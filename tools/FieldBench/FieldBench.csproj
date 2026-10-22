@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- M0-07／M0-13 現場量測工具（docs/04 §9.2）。不在 Warehouse.slnx、不進發布；結果寫到 results/（不進 Git）。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 與 poc/Poc.Bench 相同版本（M0-08 已核准） -->
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
+    <!-- seed 直接用系統的服務建立量測資料，與正式程式走同一條路 -->
+    <ProjectReference Include="..\..\src\Warehouse.Infrastructure\Warehouse.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
