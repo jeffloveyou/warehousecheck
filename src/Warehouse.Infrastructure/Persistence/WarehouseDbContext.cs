@@ -52,12 +52,21 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<StockReservation> StockReservations => Set<StockReservation>();
 
+    public DbSet<DocumentPurpose> DocumentPurposes => Set<DocumentPurpose>();
+
+    public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
+
     public DbSet<ItemLocation> ItemLocations => Set<ItemLocation>();
 
     public DbSet<LocationImage> LocationImages => Set<LocationImage>();
 
     /// <summary>期初單號 OB-000001 的流水號來源。</summary>
     public const string OpeningDocNoSequence = "opening_doc_no_seq";
+
+    /// <summary>進倉、出倉、移庫單號 IN-／OUT-／TR-000001 的流水號來源（各自獨立；交易失敗會跳號，可接受）。</summary>
+    public const string InboundDocNoSequence = "inbound_doc_no_seq";
+    public const string OutboundDocNoSequence = "outbound_doc_no_seq";
+    public const string TransferDocNoSequence = "transfer_doc_no_seq";
 
     /// <summary>申請單號 MR-000125 的流水號來源（PostgreSQL sequence，併發安全；交易失敗會跳號，可接受）。</summary>
     public const string RequestNoSequence = "item_request_no_seq";
@@ -93,6 +102,9 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
         modelBuilder.HasSequence<long>(RequestNoSequence);
         modelBuilder.HasSequence<long>(OpeningDocNoSequence);
+        modelBuilder.HasSequence<long>(InboundDocNoSequence);
+        modelBuilder.HasSequence<long>(OutboundDocNoSequence);
+        modelBuilder.HasSequence<long>(TransferDocNoSequence);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WarehouseDbContext).Assembly);
     }
 }

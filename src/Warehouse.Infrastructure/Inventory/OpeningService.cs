@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Warehouse.Application.Abstractions;
@@ -191,10 +189,10 @@ public sealed class OpeningService(
     private async Task ApproveCoreAsync(
         Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken)
     {
-        var key = NormalizeKey(idempotencyKey);
+        var key = DocumentSupport.NormalizeKey(idempotencyKey);
         // 內容含操作者：別人拿同一個鍵送同一張單，不會被當成「自己已經做過」（M3-03 審查 #5）
-        var requestHash = Hash($"{CommandType}|{documentId}|{expectedVersion}|{actor.Id}");
-        if (await AlreadyProcessedAsync(key, requestHash, cancellationToken))
+        var requestHash = DocumentSupport.Hash($"{CommandType}|{documentId}|{expectedVersion}|{actor.Id}");
+        if (await DocumentSupport.AlreadyProcessedAsync(db, key, CommandType, requestHash, cancellationToken))
         {
             return;
         }
@@ -203,7 +201,7 @@ public sealed class OpeningService(
         // 等鎖最多 5 秒，不無限等待（逾時轉成「請稍後再試」）
         await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
-        if (await AlreadyProcessedAsync(key, requestHash, cancellationToken))
+        if (await DocumentSupport.AlreadyProcessedAsync(db, key, CommandType, requestHash, cancellationToken))
         {
             return;
         }
@@ -262,14 +260,14 @@ public sealed class OpeningService(
         foreach (var line in postingLines.Where(l => l.LotNo is not null)
                      .OrderBy(l => l.ItemId).ThenBy(l => l.LotNo, StringComparer.Ordinal))
         {
-            lotIds[line.Id] = await ResolveLotAsync(line, now, cancellationToken);
+            lotIds[line.Id] = await DocumentSupport.ResolveLotAsync(db, line, now, cancellationToken);
         }
         var serialIds = new Dictionary<Guid, Guid>();
         foreach (var line in postingLines.Where(l => l.SerialNo is not null)
                      .OrderBy(l => l.ItemId).ThenBy(l => l.SerialNo, StringComparer.Ordinal))
         {
             Guid? lotOfSerial = lotIds.TryGetValue(line.Id, out var lot) ? lot : null; // 沒有批號是 null，不是 Guid.Empty
-            serialIds[line.Id] = await ResolveSerialAsync(line, lotOfSerial, now, cancellationToken);
+            serialIds[line.Id] = await DocumentSupport.ResolveSerialAsync(db, line, lotOfSerial, now, cancellationToken);
         }
 
         var changes = new List<StockChange>();
@@ -348,56 +346,6 @@ public sealed class OpeningService(
         return location;
     }
 
-    /// <summary>批號沒有就建立；已存在且有效期限不同時拒絕（避免同一批號兩個期限）。</summary>
-    private async Task<Guid> ResolveLotAsync(StockDocumentLine line, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var row = (await QueryAsync(db, """
-            INSERT INTO inventory_lots (id, item_id, lot_no, expiry_date, created_at) VALUES (@id, @item, @lot, @expiry, @now)
-            ON CONFLICT (item_id, lot_no) DO UPDATE SET expiry_date = COALESCE(inventory_lots.expiry_date, EXCLUDED.expiry_date)
-            RETURNING id, expiry_date
-            """,
-            r => (Id: r.GetGuid(0), Expiry: r.IsDBNull(1) ? (DateOnly?)null : DateOnly.FromDateTime(r.GetDateTime(1))),
-            cancellationToken, Param("id", Guid.NewGuid()), Param("item", line.ItemId!.Value), Param("lot", line.LotNo),
-            new NpgsqlParameter("expiry", NpgsqlTypes.NpgsqlDbType.Date) { Value = line.ExpiryDate is { } e ? e : DBNull.Value },
-            Param("now", now))).Single();
-        if (line.ExpiryDate is { } expiry && row.Expiry != expiry)
-        {
-            throw new DomainRuleException($"批號 {line.LotNo} 已存在，有效期限是 {row.Expiry:yyyy-MM-dd}，與明細不同。");
-        }
-        return row.Id;
-    }
-
-    /// <summary>序號沒有就建立；已存在但屬於不同批號時拒絕（序號與結存的批號必須一致，M3-03 審查 #8）。</summary>
-    private async Task<Guid> ResolveSerialAsync(StockDocumentLine line, Guid? lotId, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var row = (await QueryAsync(db, """
-            INSERT INTO item_serials (id, item_id, serial_no, lot_id, created_at) VALUES (@id, @item, @serial, @lot, @now)
-            ON CONFLICT (item_id, serial_no) DO UPDATE SET serial_no = EXCLUDED.serial_no
-            RETURNING id, lot_id
-            """, r => (Id: r.GetGuid(0), LotId: r.IsDBNull(1) ? (Guid?)null : r.GetGuid(1)), cancellationToken,
-            Param("id", Guid.NewGuid()), Param("item", line.ItemId!.Value), Param("serial", line.SerialNo),
-            Uuid("lot", lotId), Param("now", now))).Single();
-        if (row.LotId != lotId)
-        {
-            throw new DomainRuleException($"序號 {line.SerialNo} 已登記在其他批號下，請確認。");
-        }
-        return row.Id;
-    }
-
-    private async Task<bool> AlreadyProcessedAsync(string key, string requestHash, CancellationToken cancellationToken)
-    {
-        var existing = await db.ProcessedCommands.AsNoTracking().SingleOrDefaultAsync(c => c.Key == key, cancellationToken);
-        if (existing is null)
-        {
-            return false;
-        }
-        if (existing.CommandType != CommandType || existing.RequestHash != requestHash)
-        {
-            throw new ConflictException("idempotency.key_reused", "這個請求識別碼已用於其他操作，請重新整理頁面後再試。");
-        }
-        return true;
-    }
-
     private async Task SaveAsync(CancellationToken cancellationToken)
     {
         try
@@ -427,15 +375,4 @@ public sealed class OpeningService(
         }
     }
 
-    private static string NormalizeKey(string key)
-    {
-        var trimmed = key?.Trim() ?? string.Empty;
-        if (trimmed.Length is < 8 or > 100)
-        {
-            throw new DomainRuleException("缺少或不正確的請求識別碼（Idempotency-Key，8～100 字）。");
-        }
-        return trimmed;
-    }
-
-    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

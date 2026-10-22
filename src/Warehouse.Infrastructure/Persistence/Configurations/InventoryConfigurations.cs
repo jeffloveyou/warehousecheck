@@ -45,7 +45,7 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
     {
         builder.ToTable("stock_documents", t =>
         {
-            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening')");
+            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer')");
             t.HasCheckConstraint("ck_stock_documents_status", "status IN ('Draft', 'Submitted', 'Posted', 'Cancelled')");
             t.HasCheckConstraint("ck_stock_documents_posted",
                 "(status = 'Posted') = (posted_at IS NOT NULL AND approved_by_id IS NOT NULL)");
@@ -59,10 +59,17 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
         builder.Property(d => d.CreatedByName).HasMaxLength(100);
         builder.Property(d => d.ApprovedByName).HasMaxLength(100);
         builder.Property(d => d.ReturnComment).HasMaxLength(StockDocument.NoteMaxLength);
+        builder.Property(d => d.ExternalNo).HasMaxLength(StockDocument.ExternalNoMaxLength);
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(d => d.DocNo).IsUnique();
         builder.HasIndex(d => new { d.DocType, d.Status, d.CreatedAt });
         builder.HasOne<WarehouseSite>().WithMany().HasForeignKey(d => d.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<DocumentPurpose>().WithMany().HasForeignKey(d => d.PurposeId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<BusinessPartner>().WithMany().HasForeignKey(d => d.PartnerId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<StockDocument>().WithMany().HasForeignKey(d => d.ReversalOfDocumentId).OnDelete(DeleteBehavior.Restrict);
+        // 一張已過帳單只能有一張有效（未取消）的沖銷單
+        builder.HasIndex(d => d.ReversalOfDocumentId).IsUnique()
+            .HasFilter("reversal_of_document_id IS NOT NULL AND status <> 'Cancelled'").HasDatabaseName("ux_stock_documents_reversal");
         // Cascade 讓 EF 刪除草稿中移除的明細；單據本身由 trigger 禁止刪除，所以不會連帶刪掉已過帳的明細
         builder.HasMany(d => d.Lines).WithOne().HasForeignKey(l => l.DocumentId).OnDelete(DeleteBehavior.Cascade);
         builder.Navigation(d => d.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
@@ -77,6 +84,7 @@ public class StockDocumentLineConfiguration : IEntityTypeConfiguration<StockDocu
         {
             t.HasCheckConstraint("ck_stock_document_lines_quantity", "quantity >= 0");
             t.HasCheckConstraint("ck_stock_document_lines_empty_location", "item_id IS NOT NULL OR quantity = 0");
+            t.HasCheckConstraint("ck_stock_document_lines_target", "target_location_id IS NULL OR target_location_id <> location_id");
         });
         builder.HasKey(l => l.Id);
         builder.Property(l => l.Id).ValueGeneratedNever();
@@ -84,10 +92,12 @@ public class StockDocumentLineConfiguration : IEntityTypeConfiguration<StockDocu
         builder.Property(l => l.SerialNo).HasMaxLength(StockDocumentLine.CodeMaxLength);
         builder.Property(l => l.Quantity).HasPrecision(19, 4);
         builder.HasIndex(l => new { l.DocumentId, l.LineNo }).IsUnique();
-        builder.HasIndex(l => new { l.DocumentId, l.LocationId, l.ItemId, l.LotNo, l.SerialNo })
+        builder.HasIndex(l => new { l.DocumentId, l.LocationId, l.TargetLocationId, l.ItemId, l.LotNo, l.SerialNo })
             .IsUnique().AreNullsDistinct(false).HasDatabaseName("ux_stock_document_lines_key");
         builder.HasOne<Item>().WithMany().HasForeignKey(l => l.ItemId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Location>().WithMany().HasForeignKey(l => l.LocationId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Location>().WithMany().HasForeignKey(l => l.TargetLocationId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<StockReservation>().WithMany().HasForeignKey(l => l.ReservationId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<InventoryLot>().WithMany().HasForeignKey(l => l.LotId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<ItemSerial>().WithMany().HasForeignKey(l => l.SerialId).OnDelete(DeleteBehavior.Restrict);
     }

@@ -32,6 +32,14 @@ public interface IInventoryPostingService
     /// <summary>建立預留；倉庫可用量（扣除既有預留）不足時拒絕（<c>stock.insufficient</c>，負庫存物料也不例外）。回傳預留 ID。</summary>
     Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 一次建立多筆預留（所有鎖一次依序取得）；任何一筆不足就丟例外，呼叫端回滾後全部不建立。
+    /// <paramref name="forDocument"/>＝出倉單送審：停用物料可預留；允許負庫存的物料只預留目前可用的部分。回傳實際建立的預留 ID。
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ReserveManyAsync(
+        IReadOnlyList<ReservationRequest> requests, Actor actor, DateTimeOffset now, CancellationToken cancellationToken,
+        bool forDocument = false);
+
     /// <summary>釋放（取消）仍為 Open 的預留；已結束的預留回傳 false（重送不出錯）。</summary>
     Task<bool> ReleaseReservationAsync(Guid reservationId, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
 }

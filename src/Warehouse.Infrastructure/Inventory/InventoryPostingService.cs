@@ -86,52 +86,108 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         await BusyGuardAsync(() => ApplyCoreAsync(documentId, changes, actor, now.ToUniversalTime(), cancellationToken));
     }
 
-    public async Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+    public async Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken) =>
+        (await ReserveManyAsync([request], actor, now, cancellationToken)).Single();
+
+    /// <summary>
+    /// 一次建立多筆預留（例如出倉單送審，每個料號一筆）：所有鎖一次依鍵值排序取得，
+    /// 不會因為逐筆取鎖、順序不同而和過帳互相等待。任何一筆不足，全部不建立（呼叫端回滾）。
+    /// <paramref name="forDocument"/>＝出倉單送審（D-26）：
+    /// - 停用的物料也可以預留（停用物料可出倉清空庫存，M4-02 審查 #1）。
+    /// - 允許負庫存的物料只預留「目前可用的部分」（使用者 2026-10-22 決定），不足的部分在核准時依負庫存規則檢查；可用為 0 就不建立。
+    /// 回傳實際建立的預留 ID。
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> ReserveManyAsync(
+        IReadOnlyList<ReservationRequest> requests, Actor actor, DateTimeOffset now, CancellationToken cancellationToken,
+        bool forDocument = false)
     {
-        var (referenceType, note) = StockReservation.ValidateRequest(request.Quantity, request.ReferenceType, request.Note);
-        var id = Guid.NewGuid();
+        var validated = requests.Select(r => (Request: r, Id: Guid.NewGuid(),
+            Fields: StockReservation.ValidateRequest(r.Quantity, r.ReferenceType, r.Note))).ToList();
+        var created = new List<Guid>();
+        if (validated.Count == 0)
+        {
+            return created;
+        }
         await BusyGuardAsync(async () =>
         {
             await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
             // 鎖順序：倉庫 FOR SHARE → advisory（先倉庫再 advisory，避免與停用倉庫形成三方等待）
-            var warehouse = await LockWarehousesAsync([request.WarehouseId], cancellationToken);
+            var warehouses = await LockWarehousesAsync(requests.Select(r => r.WarehouseId), cancellationToken);
             // 另取料號鎖：負庫存物料的全倉可用量檢查（出庫端持有料號鎖）必須看得到這筆預留；物料設定在取鎖後才讀
             await AdvisoryLocks.LockStockAsync(db,
-                [AdvisoryLocks.StockKey(request.ItemId, request.WarehouseId), AdvisoryLocks.StockItemKey(request.ItemId)], cancellationToken);
-            var item = (await LoadItemsAsync([request.ItemId], cancellationToken))[request.ItemId];
-            if (!item.Active)
+                requests.SelectMany(r => new[] { AdvisoryLocks.StockKey(r.ItemId, r.WarehouseId), AdvisoryLocks.StockItemKey(r.ItemId) }),
+                cancellationToken);
+            var items = await LoadItemsAsync(requests.Select(r => r.ItemId).Distinct().ToArray(), cancellationToken);
+            var pairs = requests.Select(r => (r.ItemId, r.WarehouseId)).Distinct().ToList();
+
+            // 負庫存物料（送審時）：可預留量 = min(倉庫可用量, 全倉可用量 + 下限)，不小於 0
+            var cappedItems = forDocument ? items.Values.Where(i => i.AllowNegative).Select(i => i.Id).ToHashSet() : [];
+            var room = new Dictionary<(Guid Item, Guid Warehouse), decimal>();
+            if (cappedItems.Count > 0)
             {
-                throw new DomainRuleException($"物料 {item.Code} 不是有效狀態，不能預留。");
-            }
-            RequireScale(request.Quantity, item);
-            await ExecuteAsync(db, """
-                INSERT INTO stock_reservations (id, item_id, warehouse_id, quantity, remaining_quantity, reference_type,
-                    reference_id, note, status, created_by_id, created_by_name, created_at)
-                VALUES (@id, @item, @warehouse, @qty, @qty, @type, @ref, @note, 'Open', @actor, @actor_name, @now)
-                """, cancellationToken,
-                Param("id", id), Param("item", request.ItemId), Param("warehouse", request.WarehouseId),
-                Param("qty", request.Quantity), Param("type", referenceType), Uuid("ref", request.ReferenceId),
-                Param("note", note), Param("actor", actor.Id), Param("actor_name", actor.Name), Param("now", now.ToUniversalTime()));
-            // 預留不能預留不存在的庫存：下限一律 0（負庫存物料也一樣，ADR-0004 決策二第 3 點）
-            var available = (await QueryAvailableAsync([(request.ItemId, request.WarehouseId)], cancellationToken)).Single().Value;
-            if (available < 0)
-            {
-                throw Insufficient(item.Code, warehouse[request.WarehouseId].Code, available + request.Quantity, request.Quantity);
-            }
-            // 負庫存物料另要維持全倉合計 ≥ −下限（已持有料號鎖，M4-01 審查 #3）
-            if (item.AllowNegative)
-            {
-                var total = (await QueryAsync(db, ItemAvailableSql, r => r.GetDecimal(1), cancellationToken,
-                    Param("items", new[] { request.ItemId }))).Single();
-                if (total < -item.NegativeLimit)
+                var itemRoom = (await QueryAsync(db, ItemAvailableSql, r => (Id: r.GetGuid(0), Available: r.GetDecimal(1)), cancellationToken,
+                    Param("items", cappedItems.ToArray()))).ToDictionary(x => x.Id, x => x.Available + items[x.Id].NegativeLimit);
+                foreach (var (pair, available) in await QueryAvailableAsync(pairs.Where(p => cappedItems.Contains(p.ItemId)).ToList(), cancellationToken))
                 {
-                    throw NegativeLimit(item);
+                    room[pair] = Math.Max(0, Math.Min(available, itemRoom[pair.Item]));
                 }
             }
-            AuditLog.Add(db, actor, now, "reservation.create", "stock_reservation", id.ToString(), null,
-                new { ItemCode = item.Code, WarehouseCode = warehouse[request.WarehouseId].Code, request.Quantity, referenceType, request.ReferenceId, note });
+
+            foreach (var (request, id, (referenceType, note)) in validated)
+            {
+                var item = items[request.ItemId];
+                if (!item.Active && !forDocument)
+                {
+                    throw new DomainRuleException($"物料 {item.Code} 不是有效狀態，不能預留。");
+                }
+                RequireScale(request.Quantity, item);
+                var quantity = request.Quantity;
+                var pair = (request.ItemId, request.WarehouseId);
+                if (room.TryGetValue(pair, out var left))
+                {
+                    quantity = Math.Min(quantity, left);
+                    room[pair] = left - quantity;
+                    if (quantity <= 0)
+                    {
+                        continue;
+                    }
+                }
+                await ExecuteAsync(db, """
+                    INSERT INTO stock_reservations (id, item_id, warehouse_id, quantity, remaining_quantity, reference_type,
+                        reference_id, note, status, created_by_id, created_by_name, created_at)
+                    VALUES (@id, @item, @warehouse, @qty, @qty, @type, @ref, @note, 'Open', @actor, @actor_name, @now)
+                    """, cancellationToken,
+                    Param("id", id), Param("item", request.ItemId), Param("warehouse", request.WarehouseId),
+                    Param("qty", quantity), Param("type", referenceType), Uuid("ref", request.ReferenceId),
+                    Param("note", note), Param("actor", actor.Id), Param("actor_name", actor.Name), Param("now", now.ToUniversalTime()));
+                AuditLog.Add(db, actor, now, "reservation.create", "stock_reservation", id.ToString(), null,
+                    new { ItemCode = item.Code, WarehouseCode = warehouses[request.WarehouseId].Code, Quantity = quantity, Requested = request.Quantity, referenceType, request.ReferenceId, note });
+                created.Add(id);
+            }
+            // 預留不能預留不存在的庫存：下限一律 0（負庫存物料也一樣，ADR-0004 決策二第 3 點）
+            foreach (var (pair, available) in await QueryAvailableAsync(pairs, cancellationToken))
+            {
+                if (available < 0)
+                {
+                    var requested = requests.Where(r => (r.ItemId, r.WarehouseId) == pair).Sum(r => r.Quantity);
+                    throw Insufficient(items[pair.Item].Code, warehouses[pair.Warehouse].Code, available + requested, requested);
+                }
+            }
+            // 負庫存物料另要維持全倉合計 ≥ −下限（已持有料號鎖，M4-01 審查 #3）
+            var negativeItems = items.Values.Where(i => i.AllowNegative).Select(i => i.Id).ToArray();
+            if (negativeItems.Length > 0)
+            {
+                foreach (var (id, total) in await QueryAsync(db, ItemAvailableSql, r => (r.GetGuid(0), r.GetDecimal(1)), cancellationToken,
+                             Param("items", negativeItems)))
+                {
+                    if (total < -items[id].NegativeLimit)
+                    {
+                        throw NegativeLimit(items[id]);
+                    }
+                }
+            }
         });
-        return id;
+        return created;
     }
 
     public async Task<bool> ReleaseReservationAsync(Guid reservationId, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)

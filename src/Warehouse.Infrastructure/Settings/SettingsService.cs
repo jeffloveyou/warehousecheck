@@ -79,7 +79,19 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             Flag(SettingKeys.AllowSelfApproveOpening, Defaults.AllowSelfApproveOpening),
             Flag(SettingKeys.LocationNotesEnabled, Defaults.LocationNotesEnabled),
             Flag(SettingKeys.LocationAttributesEnabled, Defaults.LocationAttributesEnabled),
-            Flag(SettingKeys.LocationImagesEnabled, Defaults.LocationImagesEnabled));
+            Flag(SettingKeys.LocationImagesEnabled, Defaults.LocationImagesEnabled))
+        {
+            DocumentApprovalEnabled = Flag(SettingKeys.DocumentApprovalEnabled, Defaults.DocumentApprovalEnabled),
+            AllowSelfApproveDocuments = Flag(SettingKeys.AllowSelfApproveDocuments, Defaults.AllowSelfApproveDocuments),
+            DocumentPurposeEnabled = Flag(SettingKeys.DocumentPurposeEnabled, Defaults.DocumentPurposeEnabled),
+            DocumentPurposeRequired = Flag(SettingKeys.DocumentPurposeRequired, Defaults.DocumentPurposeRequired),
+            DocumentPartnerEnabled = Flag(SettingKeys.DocumentPartnerEnabled, Defaults.DocumentPartnerEnabled),
+            DocumentPartnerRequired = Flag(SettingKeys.DocumentPartnerRequired, Defaults.DocumentPartnerRequired),
+            DocumentExternalNoEnabled = Flag(SettingKeys.DocumentExternalNoEnabled, Defaults.DocumentExternalNoEnabled),
+            DocumentExternalNoRequired = Flag(SettingKeys.DocumentExternalNoRequired, Defaults.DocumentExternalNoRequired),
+            DocumentNoteEnabled = Flag(SettingKeys.DocumentNoteEnabled, Defaults.DocumentNoteEnabled),
+            DocumentNoteRequired = Flag(SettingKeys.DocumentNoteRequired, Defaults.DocumentNoteRequired),
+        };
     }
 
     /// <summary>每個鍵的（開表單時的值、送出的值、資料庫目前的值）。</summary>
@@ -90,5 +102,15 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.LocationNotesEnabled, original.LocationNotesEnabled, updated.LocationNotesEnabled, current.LocationNotesEnabled),
         (SettingKeys.LocationAttributesEnabled, original.LocationAttributesEnabled, updated.LocationAttributesEnabled, current.LocationAttributesEnabled),
         (SettingKeys.LocationImagesEnabled, original.LocationImagesEnabled, updated.LocationImagesEnabled, current.LocationImagesEnabled),
+        (SettingKeys.DocumentApprovalEnabled, original.DocumentApprovalEnabled, updated.DocumentApprovalEnabled, current.DocumentApprovalEnabled),
+        (SettingKeys.AllowSelfApproveDocuments, original.AllowSelfApproveDocuments, updated.AllowSelfApproveDocuments, current.AllowSelfApproveDocuments),
+        (SettingKeys.DocumentPurposeEnabled, original.DocumentPurposeEnabled, updated.DocumentPurposeEnabled, current.DocumentPurposeEnabled),
+        (SettingKeys.DocumentPurposeRequired, original.DocumentPurposeRequired, updated.DocumentPurposeRequired, current.DocumentPurposeRequired),
+        (SettingKeys.DocumentPartnerEnabled, original.DocumentPartnerEnabled, updated.DocumentPartnerEnabled, current.DocumentPartnerEnabled),
+        (SettingKeys.DocumentPartnerRequired, original.DocumentPartnerRequired, updated.DocumentPartnerRequired, current.DocumentPartnerRequired),
+        (SettingKeys.DocumentExternalNoEnabled, original.DocumentExternalNoEnabled, updated.DocumentExternalNoEnabled, current.DocumentExternalNoEnabled),
+        (SettingKeys.DocumentExternalNoRequired, original.DocumentExternalNoRequired, updated.DocumentExternalNoRequired, current.DocumentExternalNoRequired),
+        (SettingKeys.DocumentNoteEnabled, original.DocumentNoteEnabled, updated.DocumentNoteEnabled, current.DocumentNoteEnabled),
+        (SettingKeys.DocumentNoteRequired, original.DocumentNoteRequired, updated.DocumentNoteRequired, current.DocumentNoteRequired),
     ];
 }

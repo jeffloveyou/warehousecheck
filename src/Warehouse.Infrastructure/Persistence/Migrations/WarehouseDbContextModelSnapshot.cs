@@ -22,9 +22,15 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("inbound_doc_no_seq");
+
             modelBuilder.HasSequence("item_request_no_seq");
 
             modelBuilder.HasSequence("opening_doc_no_seq");
+
+            modelBuilder.HasSequence("outbound_doc_no_seq");
+
+            modelBuilder.HasSequence("transfer_doc_no_seq");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
@@ -218,6 +224,212 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("user_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Inventory.BusinessPartner", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PartnerType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("partner_type");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_business_partners");
+
+                    b.HasIndex("PartnerType", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_business_partners_partner_type_code");
+
+                    b.HasIndex("PartnerType", "Name")
+                        .HasDatabaseName("ix_business_partners_partner_type_name");
+
+                    b.ToTable("business_partners", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_business_partners_type", "partner_type IN ('Vendor', 'Customer', 'Department')");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.DocumentPurpose", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("direction");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_purposes");
+
+                    b.HasIndex("Direction", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_purposes_direction_code");
+
+                    b.ToTable("document_purposes", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_document_purposes_direction", "direction IN ('In', 'Out')");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000001"),
+                            Code = "PURCHASE",
+                            Direction = "In",
+                            IsActive = true,
+                            Name = "採購入庫",
+                            SortOrder = 10
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000002"),
+                            Code = "PRODUCTION",
+                            Direction = "In",
+                            IsActive = true,
+                            Name = "生產入庫",
+                            SortOrder = 20
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000003"),
+                            Code = "RETURN-MATERIAL",
+                            Direction = "In",
+                            IsActive = true,
+                            Name = "退料入庫",
+                            SortOrder = 30
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000004"),
+                            Code = "CUSTOMER-RETURN",
+                            Direction = "In",
+                            IsActive = true,
+                            Name = "客戶退貨",
+                            SortOrder = 40
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000005"),
+                            Code = "OTHER-IN",
+                            Direction = "In",
+                            IsActive = true,
+                            Name = "其他入庫",
+                            SortOrder = 90
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000011"),
+                            Code = "PRODUCTION",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "生產領料",
+                            SortOrder = 10
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000012"),
+                            Code = "REPAIR",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "維修領用",
+                            SortOrder = 20
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000013"),
+                            Code = "SCRAP",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "報廢",
+                            SortOrder = 30
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000014"),
+                            Code = "VENDOR-RETURN",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "退貨給廠商",
+                            SortOrder = 40
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000015"),
+                            Code = "SALES",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "銷售出貨",
+                            SortOrder = 50
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000016"),
+                            Code = "OTHER-OUT",
+                            Direction = "Out",
+                            IsActive = true,
+                            Name = "其他出庫",
+                            SortOrder = 90
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Inventory.InventoryLot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -401,19 +613,36 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("doc_type");
 
+                    b.Property<string>("ExternalNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("external_no");
+
                     b.Property<string>("Note")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("note");
 
+                    b.Property<Guid?>("PartnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("partner_id");
+
                     b.Property<DateTimeOffset?>("PostedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("posted_at");
+
+                    b.Property<Guid?>("PurposeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("purpose_id");
 
                     b.Property<string>("ReturnComment")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("return_comment");
+
+                    b.Property<Guid?>("ReversalOfDocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reversal_of_document_id");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -442,6 +671,17 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_stock_documents_doc_no");
 
+                    b.HasIndex("PartnerId")
+                        .HasDatabaseName("ix_stock_documents_partner_id");
+
+                    b.HasIndex("PurposeId")
+                        .HasDatabaseName("ix_stock_documents_purpose_id");
+
+                    b.HasIndex("ReversalOfDocumentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_documents_reversal")
+                        .HasFilter("reversal_of_document_id IS NOT NULL AND status <> 'Cancelled'");
+
                     b.HasIndex("WarehouseId")
                         .HasDatabaseName("ix_stock_documents_warehouse_id");
 
@@ -454,7 +694,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_stock_documents_status", "status IN ('Draft', 'Submitted', 'Posted', 'Cancelled')");
 
-                            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening')");
+                            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer')");
                         });
                 });
 
@@ -498,6 +738,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(19,4)")
                         .HasColumnName("quantity");
 
+                    b.Property<Guid?>("ReservationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reservation_id");
+
                     b.Property<Guid?>("SerialId")
                         .HasColumnType("uuid")
                         .HasColumnName("serial_id");
@@ -506,6 +750,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("serial_no");
+
+                    b.Property<Guid?>("TargetLocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_location_id");
 
                     b.HasKey("Id")
                         .HasName("pk_stock_document_lines");
@@ -519,24 +767,32 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.HasIndex("LotId")
                         .HasDatabaseName("ix_stock_document_lines_lot_id");
 
+                    b.HasIndex("ReservationId")
+                        .HasDatabaseName("ix_stock_document_lines_reservation_id");
+
                     b.HasIndex("SerialId")
                         .HasDatabaseName("ix_stock_document_lines_serial_id");
+
+                    b.HasIndex("TargetLocationId")
+                        .HasDatabaseName("ix_stock_document_lines_target_location_id");
 
                     b.HasIndex("DocumentId", "LineNo")
                         .IsUnique()
                         .HasDatabaseName("ix_stock_document_lines_document_id_line_no");
 
-                    b.HasIndex("DocumentId", "LocationId", "ItemId", "LotNo", "SerialNo")
+                    b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo")
                         .IsUnique()
                         .HasDatabaseName("ux_stock_document_lines_key");
 
-                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("DocumentId", "LocationId", "ItemId", "LotNo", "SerialNo"), false);
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo"), false);
 
                     b.ToTable("stock_document_lines", null, t =>
                         {
                             t.HasCheckConstraint("ck_stock_document_lines_empty_location", "item_id IS NOT NULL OR quantity = 0");
 
                             t.HasCheckConstraint("ck_stock_document_lines_quantity", "quantity >= 0");
+
+                            t.HasCheckConstraint("ck_stock_document_lines_target", "target_location_id IS NULL OR target_location_id <> location_id");
                         });
                 });
 
@@ -2032,6 +2288,24 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockDocument", b =>
                 {
+                    b.HasOne("Warehouse.Domain.Inventory.BusinessPartner", null)
+                        .WithMany()
+                        .HasForeignKey("PartnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_documents_business_partners_partner_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.DocumentPurpose", null)
+                        .WithMany()
+                        .HasForeignKey("PurposeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_documents_document_purposes_purpose_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalOfDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_documents_stock_documents_reversal_of_document_id");
+
                     b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -2068,11 +2342,23 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_stock_document_lines_inventory_lots_lot_id");
 
+                    b.HasOne("Warehouse.Domain.Inventory.StockReservation", null)
+                        .WithMany()
+                        .HasForeignKey("ReservationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_document_lines_stock_reservations_reservation_id");
+
                     b.HasOne("Warehouse.Domain.Inventory.ItemSerial", null)
                         .WithMany()
                         .HasForeignKey("SerialId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_stock_document_lines_item_serials_serial_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.Location", null)
+                        .WithMany()
+                        .HasForeignKey("TargetLocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_document_lines_locations_target_location_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockMovement", b =>
