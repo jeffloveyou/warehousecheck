@@ -26,58 +26,23 @@
     <dt>核准過帳</dt><dd>@d.ApprovedByName @(d.PostedAt is { } p ? Display.Time(p) : "")</dd>
 </dl>
 
-<h2>明細（@d.Lines.Count 行）</h2>
-<div class="table-wrap">
-    <table id="opening-lines">
-        <thead><tr><th>#</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>數量</th><th></th></tr></thead>
-        <tbody>
-            @foreach (var l in d.Lines)
-            {
-                <tr>
-                    <td>@l.LineNo</td>
-                    <td>@l.LocationCode</td>
-                    @if (l.ItemId is null)
-                    {
-                        <td colspan="6" class="muted">整個儲位確認為空</td>
-                    }
-                    else
-                    {
-                        <td>@l.ItemCode</td>
-                        <td>@l.ItemName</td>
-                        <td>@l.LotNo</td>
-                        <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
-                        <td>@l.SerialNo</td>
-                        <td>@Display.Qty(l.Quantity) @l.UnitCode</td>
-                    }
-                    <td>
-                        @if (Model.CanEdit)
-                        {
-                            <form method="post" asp-page-handler="RemoveLine" class="inline">
-                                <input type="hidden" name="lineId" value="@l.Id" />
-                                <button type="submit" class="link">刪除</button>
-                            </form>
-                        }
-                    </td>
-                </tr>
-            }
-            @if (d.Lines.Count == 0)
-            {
-                <tr><td colspan="9" class="muted">尚無明細。</td></tr>
-            }
-        </tbody>
-    </table>
-</div>
+@* 掃碼面板放在明細表上面：明細很多時（尤其手機）不必捲到最下面才能掃 *@
+@if (Model.CanEdit)
+{
+    <partial name="_ScanPanel" model="Model.ScanPanel" />
+}
+<partial name="_OpeningLines" model="Model" />
 
 @if (Model.CanEdit)
 {
     <form method="post" asp-page-handler="AddLine" class="panel" id="opening-line-form">
-        <h2>新增明細</h2>
+        <h2>新增明細（手動輸入、確認空儲位）</h2>
         <div class="form-grid">
             <label for="Line_LocationCode">儲位碼 *</label>
-            <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="40" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
+            <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="200" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
             <label for="Line_ItemCode">料號</label>
             <div>
-                <input type="text" id="Line_ItemCode" name="Line.ItemCode" value="@Model.Line.ItemCode" maxlength="20" placeholder="例 EL-000125" />
+                <input type="text" id="Line_ItemCode" name="Line.ItemCode" value="@Model.Line.ItemCode" maxlength="200" placeholder="例 EL-000125，或掃物料 QR、單件條碼" />
                 <a href="/Search" target="_blank" rel="noopener">查料號</a>
             </div>
             <label for="Line_Quantity">數量（基本單位）</label>
@@ -94,7 +59,7 @@
         <div class="actions"><button type="submit" id="opening-add-line">加入</button></div>
     </form>
     <form method="get" class="filters" id="suggest-form">
-        <input type="text" name="Suggest" value="@Model.Suggest" maxlength="20" placeholder="料號" aria-label="查建議儲位的料號" />
+        <input type="text" name="Suggest" value="@Model.Suggest" maxlength="200" placeholder="料號（可掃碼）" aria-label="查建議儲位的料號" data-scan-field autocomplete="off" />
         <button type="submit" class="secondary" id="suggest-submit">查建議儲位</button>
         @if (Model.Suggestions is { } suggestions)
         {
@@ -145,3 +110,11 @@
     <p><a href="/Stock?documentId=@d.Id">查看這張單產生的異動</a></p>
 }
 <p><a href="/Opening">回期初單清單</a></p>
+@section Scripts {
+    @if (Model.CanEdit)
+    {
+        <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/doc-scan.js" asp-append-version="true"></script>
+        <script src="~/js/scan-field.js" asp-append-version="true"></script>
+    }
+}

@@ -1,0 +1,50 @@
+@model Warehouse.Web.Pages.Opening.DetailsModel
+@*
+    期初明細表（M5-03 從 Details.cshtml 拆出）：整頁顯示與掃碼面板「加入明細」後的重繪共用同一份。
+*@
+@{
+    var d = Model.Doc;
+}
+<div id="opening-lines-section" data-scan-lines data-version="@Model.Version">
+<h2>明細（@d.Lines.Count 行）</h2>
+<div class="table-wrap">
+    <table id="opening-lines">
+        <thead><tr><th>#</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>數量</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var l in d.Lines)
+            {
+                <tr>
+                    <td>@l.LineNo</td>
+                    <td>@l.LocationCode</td>
+                    @if (l.ItemId is null)
+                    {
+                        <td colspan="6" class="muted">整個儲位確認為空</td>
+                    }
+                    else
+                    {
+                        <td>@l.ItemCode</td>
+                        <td>@l.ItemName</td>
+                        <td>@l.LotNo</td>
+                        <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
+                        <td>@l.SerialNo</td>
+                        <td>@Display.Qty(l.Quantity) @l.UnitCode</td>
+                    }
+                    <td>
+                        @if (Model.CanEdit)
+                        {
+                            <form method="post" asp-page-handler="RemoveLine" class="inline">
+                                <input type="hidden" name="lineId" value="@l.Id" />
+                                <button type="submit" class="link">刪除</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (d.Lines.Count == 0)
+            {
+                <tr><td colspan="9" class="muted">尚無明細。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+</div>

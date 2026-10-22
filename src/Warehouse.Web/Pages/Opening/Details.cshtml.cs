@@ -6,10 +6,13 @@ using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
+using Warehouse.Application.Scanning;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
+using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Text;
+using Warehouse.Web.Pages.Shared;
 
 namespace Warehouse.Web.Pages.Opening;
 
@@ -89,6 +92,76 @@ public class DetailsModel(
             return Line.EmptyLocation ? $"已將儲位 {Line.LocationCode.Trim()} 標記為空。" : "已新增明細。";
         }, cancellationToken);
 
+    /// <summary>連續掃碼面板（M5-03）：期初的步驟同進倉（物料 → 批號／序號 → 儲位 → 數量）。</summary>
+    public ScanPanelModel ScanPanel => new(
+        "opening", Doc.WarehouseId,
+        Url.Page("/Opening/Details", "ScanResolve", new { id = Doc.Id })!,
+        Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!);
+
+    /// <summary>掃碼面板解析一筆掃碼（GET，回傳 JSON）；物料另附建議儲位。只做精確比對。</summary>
+    public async Task<IActionResult> OnGetScanResolveAsync(
+        Guid id, string? code, [FromServices] IScanResolver resolver, CancellationToken cancellationToken)
+    {
+        if (await openings.GetAsync(id, cancellationToken) is not { } doc)
+        {
+            return NotFound();
+        }
+        var result = await resolver.ResolveAsync(code, doc.WarehouseId, cancellationToken);
+        object? extra = null;
+        if (result.Item is { } item)
+        {
+            var suggestions = await itemLocations.SuggestAsync(item.Id, doc.WarehouseId, cancellationToken);
+            extra = new { suggestions = suggestions.Select(s => new { location = s.LocationCode, reason = s.Reason.ToString(), quantity = s.QuantityHere }) };
+        }
+        return new JsonResult(ScanJson.From(result, extra));
+    }
+
+    /// <summary>
+    /// 掃碼面板加入期初明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
+    /// 成功回傳重繪的明細表（HTML）；規則錯誤回 400 JSON。「確認空儲位」仍用下方表單。
+    /// </summary>
+    public async Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.ItemCode))
+            {
+                throw new DomainRuleException("請先掃描物料。");
+            }
+            await openings.AddLineAsync(id, new OpeningLineInput(
+                request.LocationCode ?? string.Empty, request.ItemCode, request.LotNo, request.SerialNo, request.ExpiryDate,
+                request.Quantity, request.Merge), User.ToActor(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
+        }
+        return await LoadAsync(id, cancellationToken) ? Partial("_OpeningLines", this) : NotFound();
+    }
+
+    /// <summary>掃碼面板送出的期初明細（JSON）。</summary>
+    public sealed class ScanLineRequest
+    {
+        public string? LocationCode { get; set; }
+
+        public string? ItemCode { get; set; }
+
+        public decimal Quantity { get; set; }
+
+        public string? LotNo { get; set; }
+
+        public string? SerialNo { get; set; }
+
+        public DateOnly? ExpiryDate { get; set; }
+
+        /// <summary>逐件累加：相同的草稿行累加數量。</summary>
+        public bool Merge { get; set; }
+    }
+
     public Task<IActionResult> OnPostRemoveLineAsync(Guid id, Guid lineId, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.OpeningEdit, async actor =>
         {
@@ -167,11 +240,15 @@ public class DetailsModel(
         {
             Uncounted = (await stock.GetUncountedLocationsAsync(doc.WarehouseId, 1, cancellationToken)).Items;
             if (!string.IsNullOrWhiteSpace(Suggest)
-                && await items.FindIdByItemCodeAsync(TextNormalizer.Normalize(Suggest), cancellationToken) is { } itemId)
+                && await items.FindIdByItemCodeAsync(SuggestCode(), cancellationToken) is { } itemId)
             {
                 Suggestions = await itemLocations.SuggestAsync(itemId, doc.WarehouseId, cancellationToken);
             }
         }
         return true;
     }
+
+    /// <summary>查建議儲位的料號：可以是物料 QR（WH:ITEM:）或料號文字。</summary>
+    private string SuggestCode() =>
+        ScanCodeParser.Parse(Suggest) is { Kind: ScanCodeKind.Item, ItemCode: { } code } ? code : TextNormalizer.Normalize(Suggest);
 }

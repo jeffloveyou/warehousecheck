@@ -1,0 +1,133 @@
+@page
+@model Warehouse.Web.Pages.Scan.IndexModel
+@using Warehouse.Application.Scanning
+@{
+    ViewData["Title"] = "掃碼查料";
+    var r = Model.Result;
+}
+<h1>掃碼查料</h1>
+<p class="muted">掃物料 QR、原廠條碼或儲位 QR，查看庫存。只做精確比對；找不到時請用<a href="/Search">搜尋</a>。</p>
+<form method="get" class="panel scan-panel" id="scan-lookup-form">
+    <div class="scan-bar">
+        <input type="text" id="scan-input" name="code" class="scan-input" value="" autocomplete="off" autocapitalize="characters" spellcheck="false"
+               enterkeyhint="search" maxlength="200" placeholder="用條碼槍掃描，或輸入後按 Enter" aria-label="掃碼輸入" />
+        <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
+        <noscript><button type="submit">查詢</button></noscript>
+    </div>
+    <div class="scan-options">
+        <label><input type="checkbox" id="scan-mute" /> 靜音</label>
+        <span id="scan-caps" class="bad" hidden>大寫鎖定開著（不影響比對）</span>
+    </div>
+    <div class="message warn" id="scan-focus-warning" hidden>
+        掃碼框不在焦點，條碼槍掃的字可能跑到別處。<button type="button" class="link" id="scan-refocus">點這裡回到掃碼框</button>
+    </div>
+    <div class="scan-camera-box" id="scan-camera-box" hidden>
+        <video id="scan-video" playsinline muted></video>
+        <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
+    </div>
+</form>
+
+<div id="scan-result" data-scan-result data-kind="@(r?.Kind.ToString() ?? "")">
+    @if (TempData["Message"] is string message)
+    {
+        <div class="message info" id="page-message">@message</div>
+    }
+    @if (Model.Error is not null)
+    {
+        <div class="message error" id="page-error">@Model.Error</div>
+    }
+    @if (r is not null)
+    {
+        <p class="muted">掃到：<code>@r.Value</code></p>
+        @if (r.Kind == ScanResultKind.Rejected)
+        {
+            <div class="message error" id="scan-rejected">@r.Message</div>
+        }
+        @if (r.Item is { } item)
+        {
+            <div class="panel" id="scan-item">
+                <h2><a href="/Items/Details/@item.Id">@item.ItemCode</a> @item.Name</h2>
+                <p>
+                    @item.Specification
+                    <span class="muted">（單位 @item.UnitCode，@Display.Of(item.TrackingMode)@(item.IsActive ? "" : "，已停用")）</span>
+                </p>
+                @if (item.MatchedBy == ScanMatch.Barcode && item.PackQuantity != 1)
+                {
+                    <p class="message warn">這是外箱條碼：一次代表 @Display.Qty(item.PackQuantity) @item.UnitCode。</p>
+                }
+            </div>
+        }
+        @if (r.Location is { } location)
+        {
+            <div class="panel" id="scan-location">
+                <h2>儲位 @location.WarehouseCode @location.Code @location.Name</h2>
+                <p>狀態：@Display.Of(location.Status) <a href="/Warehouses/Location/@location.Id">儲位詳情</a></p>
+            </div>
+        }
+        @if (r.Kind == ScanResultKind.Text)
+        {
+            <div class="message warn" id="scan-unknown">
+                「@r.Value」不是已登錄的料號、原廠條碼或儲位。
+                <a href="/Search?q=@Uri.EscapeDataString(r.Value)">用這段文字搜尋</a>
+            </div>
+            @if (Model.CanRegister)
+            {
+                <form method="post" asp-page-handler="Register" asp-route-code="@r.Value" class="panel" id="scan-register-form">
+                    <h2>登錄為原廠條碼</h2>
+                    <p class="muted">輸入（或掃描物料 QR）這個條碼所屬物料的正式料號。登錯會讓之後掃碼對到錯的物料，請先核對包裝與料號。</p>
+                    <div class="form-grid">
+                        <label for="RegisterItemCode">正式料號 <span class="required-mark">*</span></label>
+                        <input type="text" id="RegisterItemCode" name="RegisterItemCode" required maxlength="200" autocomplete="off" placeholder="例 EL-000125" />
+                        <label for="RegisterPackQuantity">包裝數量</label>
+                        <input type="number" id="RegisterPackQuantity" name="RegisterPackQuantity" min="0" step="any" placeholder="一個包裝幾個基本單位，空白＝1" />
+                    </div>
+                    <div class="actions"><button type="submit" id="scan-register">登錄</button></div>
+                </form>
+            }
+        }
+        @if (Model.Balances is { } balances)
+        {
+            <h2>結存（共 @balances.TotalCount 筆）</h2>
+            <div class="table-wrap">
+                <table id="scan-balances">
+                    <thead><tr><th>倉庫</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>狀態</th><th>數量</th></tr></thead>
+                    <tbody>
+                        @foreach (var b in balances.Items)
+                        {
+                            <tr>
+                                <td>@b.WarehouseCode</td>
+                                <td>@b.LocationCode</td>
+                                <td>@b.ItemCode</td>
+                                <td>@b.ItemName</td>
+                                <td>@b.LotNo</td>
+                                <td>@(b.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
+                                <td>@b.SerialNo</td>
+                                <td>@(b.LocationAvailable ? Display.Of(b.Status) : "儲位待驗／停用（不可用）")</td>
+                                <td class="num">@Display.Qty(b.Quantity) @b.UnitCode</td>
+                            </tr>
+                        }
+                        @if (balances.Items.Count == 0)
+                        {
+                            <tr><td colspan="9" class="muted">沒有結存。</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="pager">
+                @if (balances.Page > 1)
+                {
+                    <a href="@Model.PageUrl(balances.Page - 1)">上一頁</a>
+                }
+                <span>第 @balances.Page / @balances.TotalPages 頁</span>
+                @if (balances.Page < balances.TotalPages)
+                {
+                    <a href="@Model.PageUrl(balances.Page + 1)">下一頁</a>
+                }
+            </div>
+        }
+    }
+</div>
+@section Scripts {
+    <script src="~/js/scan-input.js" asp-append-version="true"></script>
+    <script src="~/js/scan-page.js" asp-append-version="true"></script>
+}

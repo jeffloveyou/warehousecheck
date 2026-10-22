@@ -14,6 +14,11 @@
         <a id="nav-home" href="/">系統狀態</a>
         @if (User.Identity?.IsAuthenticated == true)
         {
+            <a id="nav-scan" href="/Scan">掃碼</a>
+            @* 窄螢幕（手機）時其他連結收進「選單」，不需要 JS（checkbox＋CSS，Chrome 109 可用） *@
+            <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-label="展開選單" />
+            <label for="nav-toggle" class="nav-toggle-label">☰ 選單</label>
+            <span class="nav-links">
             <a id="nav-search" href="/Search">搜尋</a>
             <a id="nav-items" href="/Items">物料</a>
             <a id="nav-warehouses" href="/Warehouses">倉庫</a>
@@ -36,6 +41,7 @@
             {
                 <a id="nav-settings" href="/Settings">設定</a>
             }
+            </span>
             <span class="nav-user">
                 @(User.FindFirst(ActorClaims.DisplayName)?.Value ?? User.Identity.Name)
                 <a href="/Account/ChangePassword">改密碼</a>
