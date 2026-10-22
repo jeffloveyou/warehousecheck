@@ -189,9 +189,11 @@ async Task<int> BrowserAsync()
             var codes = (await page.InputValueAsync("#expected")).Split('\n').Where(s => s.Length > 0).Where(s => s.All(c => c < 128)).ToList();
             await page.EvaluateAsync("codes => document.getElementById('expected').value = codes.join('\\n')", codes);
             await page.FocusAsync("#scan-input");
-            foreach (var code in codes)
+            // --caps-sim：前 10 筆送小寫，模擬大寫鎖定時的條碼槍（應計入「只差大小寫」而不是變形）
+            var capsSim = options.GetOrNull("caps-sim") is not null;
+            foreach (var (code, index) in codes.Select((c, i) => (c, i)))
             {
-                await page.Keyboard.TypeAsync(code, new() { Delay = 10 });
+                await page.Keyboard.TypeAsync(capsSim && index < 10 ? code.ToLowerInvariant() : code, new() { Delay = 10 });
                 await page.Keyboard.PressAsync("Enter");
             }
             await page.WaitForFunctionAsync("() => document.getElementById('queue-count').textContent === '0'", null, new() { Timeout = 60000 });
