@@ -27,7 +27,7 @@ public class IndexModel(
     [BindProperty(SupportsGet = true)]
     public Guid? DocumentId { get; set; }
 
-    [BindProperty(SupportsGet = true, Name = "page")]
+    [BindProperty(SupportsGet = true, Name = "p")] // 不能用 "page"：Razor Pages 把它當成頁面名稱
     public int PageNumber { get; set; } = 1;
 
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
@@ -88,5 +88,5 @@ public class IndexModel(
         }
     }
 
-    public string PageUrl(int page) => Url.Page("/Stock/Index", new { WarehouseId, LocationCode, ItemCode, DocumentId, page })!;
+    public string PageUrl(int page) => Url.Page("/Stock/Index", new { WarehouseId, LocationCode, ItemCode, DocumentId, p = page })!;
 }
