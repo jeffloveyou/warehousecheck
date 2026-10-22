@@ -35,6 +35,15 @@ public static class Policies
     /// <summary>核准、退回期初單：倉庫主管（另依 D-07 設定檢查是否可自核）。</summary>
     public const string OpeningApprove = "Opening.Approve";
 
+    /// <summary>建立、修改、送審、確認、取消進出倉與移庫單：作業員、倉庫主管（M4-09）。</summary>
+    public const string DocumentEdit = "Stock.Document.Edit";
+
+    /// <summary>核准、退回進出倉與移庫單：倉庫主管（自核依設定）。</summary>
+    public const string DocumentApprove = "Stock.Document.Approve";
+
+    /// <summary>維護用途類型與往來對象（廠商、客戶、部門）：倉庫主管、物料管理員（M4-10）。</summary>
+    public const string PartnersManage = "MasterData.Partners";
+
     /// <summary>系統設定：系統管理員。</summary>
     public const string SettingsManage = "Settings.Manage";
 
@@ -54,6 +63,9 @@ public static class Policies
             .AddPolicy(StockRead, p => p.RequireAuthenticatedUser())
             .AddPolicy(OpeningEdit, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
             .AddPolicy(OpeningApprove, p => p.RequireRole(Roles.WarehouseManager))
+            .AddPolicy(DocumentEdit, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
+            .AddPolicy(DocumentApprove, p => p.RequireRole(Roles.WarehouseManager))
+            .AddPolicy(PartnersManage, p => p.RequireRole(Roles.WarehouseManager, Roles.ItemManager))
             .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin));
         return services;
     }

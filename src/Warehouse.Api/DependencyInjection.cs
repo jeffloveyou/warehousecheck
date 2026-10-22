@@ -37,6 +37,7 @@ public static class DependencyInjection
         api.MapSearchEndpoints();
         api.MapWarehouseEndpoints();
         api.MapStockEndpoints();
+        api.MapStockDocumentEndpoints();
         endpoints.MapFileEndpoints();
 
         // live：不執行任何檢查，只代表處理程序可回應

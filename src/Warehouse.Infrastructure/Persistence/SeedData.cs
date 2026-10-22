@@ -1,3 +1,5 @@
+using Warehouse.Domain.Inventory;
+
 namespace Warehouse.Infrastructure.Persistence;
 
 /// <summary>
@@ -29,5 +31,21 @@ public static class SeedData
         (new Guid("0b1f6a10-0002-4c3a-9a00-000000000004"), "SF", "半成品", 40),
         (new Guid("0b1f6a10-0002-4c3a-9a00-000000000005"), "FG", "成品", 50),
         (new Guid("0b1f6a10-0002-4c3a-9a00-000000000006"), "CS", "耗材", 60),
+    ];
+
+    /// <summary>進出倉用途類型預設清單（M4-10）；之後由使用者在主檔維護（停用、改名、新增）。</summary>
+    public static readonly IReadOnlyList<(Guid Id, PurposeDirection Direction, string Code, string Name, int SortOrder)> Purposes =
+    [
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000001"), PurposeDirection.In, "PURCHASE", "採購入庫", 10),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000002"), PurposeDirection.In, "PRODUCTION", "生產入庫", 20),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000003"), PurposeDirection.In, "RETURN-MATERIAL", "退料入庫", 30),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000004"), PurposeDirection.In, "CUSTOMER-RETURN", "客戶退貨", 40),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000005"), PurposeDirection.In, "OTHER-IN", "其他入庫", 90),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000011"), PurposeDirection.Out, "PRODUCTION", "生產領料", 10),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000012"), PurposeDirection.Out, "REPAIR", "維修領用", 20),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000013"), PurposeDirection.Out, "SCRAP", "報廢", 30),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000014"), PurposeDirection.Out, "VENDOR-RETURN", "退貨給廠商", 40),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000015"), PurposeDirection.Out, "SALES", "銷售出貨", 50),
+        (new Guid("0b1f6a10-0003-4c3a-9a00-000000000016"), PurposeDirection.Out, "OTHER-OUT", "其他出庫", 90),
     ];
 }

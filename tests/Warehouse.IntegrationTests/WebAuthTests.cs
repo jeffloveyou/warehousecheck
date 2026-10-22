@@ -578,6 +578,74 @@ public partial class WebAuthTests
         Assert.Contains("期初", stockPage);
     }
 
+    // T-M4-02-10：進出倉單 API：作業員建單確認（需冪等鍵、重送 204）、核准限主管、主檔維護限主管與物料管理員
+    [Fact]
+    public async Task 進出倉單API_確認需冪等鍵_重送204_權限正確()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var operatorName = NewUserName();
+        var managerName = NewUserName();
+        await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+        await WebSession.CreateUserAsync(factory, managerName, Password, Roles.WarehouseManager);
+        var op = WebSession.Create(factory);
+        var manager = WebSession.Create(factory);
+        await op.LoginAsync(operatorName, Password);
+        await manager.LoginAsync(managerName, Password);
+        var code = "T" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        await manager.PostFormAsync("/Warehouses", "/Warehouses?handler=Save", new Dictionary<string, string> { ["Code"] = code, ["Name"] = "單據 API" });
+        var warehouseId = (await op.Client.GetFromJsonAsync<JsonElement>("/api/warehouses", Ct)).EnumerateArray()
+            .Single(w => w.GetProperty("code").GetString() == code).GetProperty("id").GetGuid();
+        await manager.PostFormAsync($"/Warehouses/Locations?warehouseId={warehouseId}", $"/Warehouses/Locations?handler=Create&WarehouseId={warehouseId}",
+            new Dictionary<string, string> { ["Form.Code"] = "A-01" });
+        var itemCode = await ApprovedItemCodeAsync(factory, "單據 API 物料 " + code);
+        var purposes = await op.Client.GetFromJsonAsync<JsonElement>("/api/master/purposes?direction=In", Ct);
+        var purchase = purposes.EnumerateArray().Single(p => p.GetProperty("code").GetString() == "PURCHASE").GetProperty("id").GetGuid();
+
+        var created = await op.Client.PostAsJsonAsync("/api/stock/documents", new { type = "Inbound", warehouseId, purposeId = purchase }, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var docId = await created.Content.ReadFromJsonAsync<Guid>(Ct);
+        Assert.Equal(HttpStatusCode.Created, (await op.Client.PostAsJsonAsync($"/api/stock/documents/{docId}/lines",
+            new { locationCode = "a-01", itemCode, quantity = 6 }, Ct)).StatusCode);
+        var version = (await op.Client.GetFromJsonAsync<JsonElement>($"/api/stock/documents/{docId}", Ct)).GetProperty("version").GetUInt32();
+
+        HttpRequestMessage Post(string action, string? key)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"/api/stock/documents/{docId}/{action}") { Content = JsonContent.Create(new { version }) };
+            if (key is not null)
+            {
+                request.Headers.Add("Idempotency-Key", key);
+            }
+            return request;
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await op.Client.SendAsync(Post("confirm", null), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.Client.SendAsync(Post("approve", "key-" + Guid.NewGuid()), Ct)).StatusCode);
+        var key = "key-" + Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.NoContent, (await op.Client.SendAsync(Post("confirm", key), Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await op.Client.SendAsync(Post("confirm", key), Ct)).StatusCode);
+        var balances = await op.Client.GetFromJsonAsync<JsonElement>($"/api/stock/balances?warehouseId={warehouseId}", Ct);
+        Assert.Equal(6m, balances.GetProperty("items")[0].GetProperty("quantity").GetDecimal());
+
+        var partner = new { type = "Vendor", code = "v-" + code, name = "API 廠商" };
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.Client.PostAsJsonAsync("/api/master/partners", partner, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await manager.Client.PostAsJsonAsync("/api/master/partners", partner, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await manager.Client.PostAsJsonAsync("/api/master/partners", partner, Ct)).StatusCode);
+    }
+
+    /// <summary>以服務直接建立並核准一個有效物料（不經畫面），回傳料號。</summary>
+    private static async Task<string> ApprovedItemCodeAsync(WarehouseWebFactory factory, string name)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WarehouseDbContext>();
+        var workflow = new Warehouse.Infrastructure.Items.ItemWorkflowService(db, TimeProvider.System);
+        var actor = new Actor(Guid.NewGuid(), "物料管理員", IsItemManager: true);
+        var item = await workflow.SubmitAsync(Guid.NewGuid(),
+            new Warehouse.Application.Items.ItemDraft(name, El, Pcs, Warehouse.Domain.Items.TrackingMode.None, null, null, null), actor, Ct);
+        var itemVersion = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+            db.Items.Where(i => i.Id == item.ItemId).Select(i => Microsoft.EntityFrameworkCore.EF.Property<uint>(i, "Version")), Ct);
+        await workflow.ApproveAsync(item.ItemId, itemVersion, [], null, actor, Ct);
+        return db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).Single();
+    }
+
     // T-M3-08-05
     [Fact]
     public async Task 倉位圖片_主管在頁面上傳_登入者可看縮圖_未登入與作業員上傳被擋()
