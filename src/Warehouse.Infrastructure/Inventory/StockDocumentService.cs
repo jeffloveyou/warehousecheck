@@ -213,11 +213,13 @@ public sealed class StockDocumentService(
                 RequireSelectable(await db.StockReservations.AsNoTracking().SingleOrDefaultAsync(r => r.Id == reservationId, cancellationToken),
                     doc, item.Id);
             }
-            doc.AddMovementLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, source.Id, target?.Id,
-                input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.ReservationId);
-            return ("document.line_add", new
+            var line = doc.AddMovementLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, source.Id, target?.Id,
+                input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.ReservationId, input.MergeIfSame);
+            var merged = line.Id != lineId;
+            lineId = line.Id;
+            return (merged ? "document.line_merge" : "document.line_add", new
             {
-                LineId = lineId, Location = source.Code, Target = target?.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
+                LineId = lineId, LineQuantity = line.Quantity, Location = source.Code, Target = target?.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
                 input.ReservationId,
             });
         });

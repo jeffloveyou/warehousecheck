@@ -64,65 +64,13 @@
     </form>
 }
 
-<h2>明細（@d.Lines.Count 行）</h2>
-<div class="table-wrap">
-    <table id="document-lines">
-        <thead>
-            <tr>
-                <th>#</th><th>儲位</th>
-                @if (isTransfer)
-                {
-                    <th>→ 目的</th>
-                }
-                <th>料號</th><th>品名</th><th>批號</th><th>序號</th><th>有效期限</th><th>數量</th><th>單位</th><th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var l in d.Lines)
-            {
-                <tr>
-                    <td>@l.LineNo</td>
-                    <td>@l.LocationCode</td>
-                    @if (isTransfer)
-                    {
-                        <td>@l.TargetWarehouseCode @l.TargetLocationCode</td>
-                    }
-                    <td>@l.ItemCode</td>
-                    <td>
-                        @l.ItemName
-                        @if (l.ReservationId is { } reservationId)
-                        {
-                            <br /><span class="muted">預留 @reservationId</span>
-                        }
-                    </td>
-                    <td>@l.LotNo</td>
-                    <td>@l.SerialNo</td>
-                    <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
-                    <td class="num">@Display.Qty(l.Quantity)</td>
-                    <td>@l.UnitCode</td>
-                    <td>
-                        @if (Model.CanEdit)
-                        {
-                            <form method="post" asp-page-handler="RemoveLine" class="inline">
-                                <input type="hidden" name="lineId" value="@l.Id" />
-                                <button type="submit" class="link">刪除</button>
-                            </form>
-                        }
-                    </td>
-                </tr>
-            }
-            @if (d.Lines.Count == 0)
-            {
-                <tr><td colspan="@(isTransfer ? 11 : 10)" class="muted">尚無明細。</td></tr>
-            }
-        </tbody>
-    </table>
-</div>
+<partial name="_DocumentLines" model="Model" />
 
 @if (Model.CanEdit)
 {
+    <partial name="_ScanPanel" model="Model.ScanPanel" />
     <div class="panel" id="document-add-line-panel">
-        <h2>新增明細</h2>
+        <h2>新增明細（搜尋＋點選）</h2>
         <form method="get" class="filters" id="item-search-form">
             <input type="text" name="ItemQuery" value="@Model.ItemQuery" maxlength="100" placeholder="輸入或掃描料號，按 Enter 搜尋" aria-label="搜尋料號" autocomplete="off" />
             <button type="submit" class="secondary" id="item-search-submit">搜尋</button>
@@ -360,4 +308,9 @@
 <p><a href="/Documents">回進出倉單清單</a></p>
 @section Scripts {
     <script src="~/js/documents.js" asp-append-version="true"></script>
+    @if (Model.CanEdit)
+    {
+        <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/doc-scan.js" asp-append-version="true"></script>
+    }
 }

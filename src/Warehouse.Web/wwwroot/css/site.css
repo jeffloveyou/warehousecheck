@@ -74,3 +74,26 @@ input[type=file] { max-width: 100%; }
     .doc-actions input[type=text] { width: 100%; }
 }
 .chip { display: inline-block; padding: 2px 8px; margin: 2px; border: 1px solid #ccd; border-radius: 12px; background: #f3f5f7; }
+/* M5-03：連續掃碼面板（scan-input.js、doc-scan.js） */
+.scan-panel { border-color: #243447; }
+.scan-bar { display: flex; gap: 8px; align-items: center; }
+.scan-bar .scan-input { flex: 1; font-size: 18px; padding: 8px 10px; min-height: 44px; border: 2px solid #243447; }
+.scan-bar button { min-height: 44px; }
+.scan-options { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
+.scan-options label { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+.scan-status { margin: 8px 0 4px; padding: 6px 10px; border-radius: 3px; font-weight: bold; min-height: 1.6em; }
+.scan-status.scan-ok { background: #e6f4ea; color: #0d652d; }
+.scan-status.scan-bad { background: #fde8e7; color: #8c1d18; }
+.scan-status.scan-warn { background: #fef7e0; color: #7a5900; }
+.scan-next { margin: 4px 0 10px; color: #243447; }
+.scan-fields { margin-bottom: 8px; }
+.scan-hints { margin: 6px 0; }
+.scan-hints .chip { min-height: 32px; line-height: 26px; }
+.scan-log { margin: 8px 0 0; padding-left: 24px; max-height: 180px; overflow-y: auto; font-size: 13px; }
+.scan-log li.bad { color: #b3261e; }
+.scan-camera-box video { width: 100%; max-width: 480px; background: #000; border-radius: 4px; }
+#scan-panel[hidden], #scan-panel [hidden] { display: none; }
+@media (max-width: 600px) {
+    .scan-bar { flex-wrap: wrap; }
+    .scan-bar button, .actions button { min-height: 44px; }
+}

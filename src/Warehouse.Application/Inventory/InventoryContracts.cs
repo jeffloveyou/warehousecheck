@@ -64,9 +64,11 @@ public sealed record OpeningDetails(
 /// <summary>
 /// 新增明細：以儲位碼、料號輸入（掃碼或手輸都可以；大小寫、全形會正規化）。
 /// <see cref="ItemCode"/> 空白 = 整個儲位確認為空。
+/// <see cref="MergeIfSame"/>：掃碼「逐件累加」，相同的草稿行累加數量（M5）。
 /// </summary>
 public sealed record OpeningLineInput(
-    string LocationCode, string? ItemCode, string? LotNo, string? SerialNo, DateOnly? ExpiryDate, decimal Quantity);
+    string LocationCode, string? ItemCode, string? LotNo, string? SerialNo, DateOnly? ExpiryDate, decimal Quantity,
+    bool MergeIfSame = false);
 
 /// <summary>
 /// 期初建帳（M3-03，FR-04）。流程：草稿 → 送出 → 核准（＝過帳）；可退回、取消。

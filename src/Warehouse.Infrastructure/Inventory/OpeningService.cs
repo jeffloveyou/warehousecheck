@@ -130,8 +130,8 @@ public sealed class OpeningService(
                 throw new DomainRuleException($"料號 {code} 不是有效狀態，不能建帳。");
             }
             doc.AddLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, location.Id,
-                input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity);
-            return ("opening.line_add", new { Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity });
+                input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.MergeIfSame);
+            return ("opening.line_add", new { Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity, input.MergeIfSame });
         });
 
     public Task RemoveLineAsync(Guid documentId, Guid lineId, Actor actor, CancellationToken cancellationToken) =>

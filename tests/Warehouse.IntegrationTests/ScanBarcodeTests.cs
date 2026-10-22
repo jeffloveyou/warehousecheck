@@ -319,7 +319,38 @@ public class ScanBarcodeTests
         await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("P-01", itemCode, 12), Operator, Ct));
     }
 
-    private static string Barcode() =>"47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
+    // T-M5-03-06：逐件累加只合併完全相同的草稿行（批號、有效期限都相同）；序號物料每個序號一行
+    [Fact]
+    public async Task 逐件累加_只合併完全相同的行_序號不合併_期初也適用()
+    {
+        var (w1, _) = await WarehouseAsync("M-01", "M-02");
+        var (_, lotCode) = await ActiveItemAsync(TrackingMode.Lot);
+        var (_, serialCode) = await ActiveItemAsync(TrackingMode.Serial);
+        var doc = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w1, new StockDocumentHeader(null, null, null, null), Operator, Ct));
+
+        DocumentLineInput Lot(string location, string lot, decimal qty, DateOnly? expiry = null) =>
+            new(location, lotCode, qty, lot, ExpiryDate: expiry, MergeIfSame: true);
+        var first = await Docs(s => s.AddLineAsync(doc, Lot("M-01", "l1", 2), Operator, Ct));
+        Assert.Equal(first, await Docs(s => s.AddLineAsync(doc, Lot("M-01", "L1", 3), Operator, Ct)));
+        await Docs(s => s.AddLineAsync(doc, Lot("M-02", "L1", 1), Operator, Ct));
+        await Docs(s => s.AddLineAsync(doc, Lot("M-01", "L2", 1), Operator, Ct));
+        await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Docs(s => s.AddLineAsync(doc, Lot("M-01", "L1", 1, new DateOnly(2027, 1, 1)), Operator, Ct)));
+        await Docs(s => s.AddLineAsync(doc, new DocumentLineInput("M-01", serialCode, 1, SerialNo: "s1", MergeIfSame: true), Operator, Ct));
+        await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Docs(s => s.AddLineAsync(doc, new DocumentLineInput("M-01", serialCode, 1, SerialNo: "S1", MergeIfSame: true), Operator, Ct)));
+
+        var lines = (await Docs(s => s.GetAsync(doc, Ct)))!.Lines;
+        Assert.Equal(4, lines.Count);
+        Assert.Equal(5m, lines.Single(l => l.Id == first).Quantity);
+
+        var opening = await Opening(s => s.CreateAsync(w1, null, Operator, Ct));
+        await Opening(s => s.AddLineAsync(opening, new OpeningLineInput("M-01", lotCode, "L1", null, null, 4, MergeIfSame: true), Operator, Ct));
+        await Opening(s => s.AddLineAsync(opening, new OpeningLineInput("M-01", lotCode, "L1", null, null, 6, MergeIfSame: true), Operator, Ct));
+        Assert.Equal(10m, Assert.Single((await Opening(s => s.GetAsync(opening, Ct)))!.Lines).Quantity);
+    }
+
+    private static string Barcode() => "47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
 
     private static async Task<string?> TryAsync(Func<Task> action)
     {

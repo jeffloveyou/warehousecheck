@@ -6,6 +6,7 @@ using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.MasterData;
+using Warehouse.Application.Scanning;
 using Warehouse.Application.Search;
 using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
@@ -13,6 +14,7 @@ using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Text;
+using Warehouse.Web.Pages.Shared;
 
 namespace Warehouse.Web.Pages.Documents;
 
@@ -232,6 +234,124 @@ public class DetailsModel(
             await attachments.RemoveAsync(id, attachmentId, actor, cancellationToken);
             return "已移除附件。";
         }, cancellationToken);
+
+    /// <summary>連續掃碼面板（M5-03）的設定：步驟依單據類型；解析與加入明細都打本頁的 handler。</summary>
+    public ScanPanelModel ScanPanel => new(
+        Doc.DocType switch
+        {
+            StockDocumentType.Inbound => "inbound",
+            StockDocumentType.Outbound => "outbound",
+            _ => "transfer",
+        },
+        Doc.WarehouseId,
+        Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
+        Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!);
+
+    /// <summary>
+    /// 掃碼面板解析一筆掃碼（GET，回傳 JSON）。只做精確比對（<see cref="IScanResolver"/>），物料另附本倉結存或建議儲位、可選的手動預留。
+    /// <paramref name="target"/>：移庫單正在等目的儲位，此時允許其他倉庫的儲位 QR。
+    /// </summary>
+    public async Task<IActionResult> OnGetScanResolveAsync(
+        Guid id, string? code, bool target, [FromServices] IScanResolver resolver, CancellationToken cancellationToken)
+    {
+        if (await documents.GetAsync(id, cancellationToken) is not { } doc)
+        {
+            return NotFound();
+        }
+        var anyWarehouse = target && doc.DocType == StockDocumentType.Transfer && ScanCodeParser.Parse(code).Kind == ScanCodeKind.Location;
+        var result = await resolver.ResolveAsync(code, anyWarehouse ? null : doc.WarehouseId, cancellationToken);
+        object? extra = null;
+        if (result.Item is { } item)
+        {
+            if (doc.DocType == StockDocumentType.Inbound)
+            {
+                var suggestions = await itemLocations.SuggestAsync(item.Id, doc.WarehouseId, cancellationToken);
+                extra = new { suggestions = suggestions.Select(s => new { location = s.LocationCode, reason = s.Reason.ToString(), quantity = s.QuantityHere }) };
+            }
+            else
+            {
+                var balances = await stock.GetBalancesAsync(doc.WarehouseId, null, item.Id, 1, cancellationToken);
+                var open = doc.DocType == StockDocumentType.Outbound
+                    ? (await reservations.ListAsync(item.ItemCode, doc.WarehouseId, ReservationStatus.Open, 1, cancellationToken, selectableOnly: true))
+                        .Items.Where(r => r.ReferenceType != "StockDocument").ToList()
+                    : [];
+                extra = new
+                {
+                    balances = balances.Items.Select(b => new
+                    {
+                        location = b.LocationCode, lot = b.LotNo, serial = b.SerialNo, quantity = b.Quantity, available = b.LocationAvailable,
+                    }),
+                    balanceTotal = balances.TotalCount,
+                    reservations = open.Select(r => new
+                    {
+                        id = r.Id, remaining = r.RemainingQuantity, by = r.CreatedByName, expiresAt = r.ExpiresAt is { } ex ? Display.Time(ex) : null,
+                    }),
+                };
+            }
+        }
+        return new JsonResult(ScanJson.From(result, extra));
+    }
+
+    /// <summary>
+    /// 掃碼面板加入明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
+    /// 成功回傳重繪的明細表（HTML）並在標頭帶新的單據版本；規則錯誤回 400 JSON。網路錯誤時畫面不自動重送（避免累加兩次）。
+    /// </summary>
+    public async Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            var doc = await documents.GetAsync(id, cancellationToken)
+                ?? throw new NotFoundException("document.not_found", "找不到單據。");
+            var isTransfer = doc.DocType == StockDocumentType.Transfer;
+            var lineId = await documents.AddLineAsync(id, new DocumentLineInput(
+                request.LocationCode ?? string.Empty, request.ItemCode ?? string.Empty, request.Quantity,
+                request.LotNo, request.SerialNo,
+                doc.DocType == StockDocumentType.Inbound ? request.ExpiryDate : null,
+                isTransfer ? request.TargetWarehouseCode : null,
+                isTransfer ? request.TargetLocationCode : null,
+                doc.DocType == StockDocumentType.Outbound ? request.ReservationId : null,
+                request.Merge), User.ToActor(), cancellationToken);
+            if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))
+            {
+                return NotFound();
+            }
+            Response.Headers["X-Line-Id"] = lineId.ToString();
+            return Partial("_DocumentLines", this);
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
+        }
+    }
+
+    /// <summary>掃碼面板送出的明細（JSON）。</summary>
+    public sealed class ScanLineRequest
+    {
+        public string? LocationCode { get; set; }
+
+        public string? ItemCode { get; set; }
+
+        public decimal Quantity { get; set; }
+
+        public string? LotNo { get; set; }
+
+        public string? SerialNo { get; set; }
+
+        public DateOnly? ExpiryDate { get; set; }
+
+        public string? TargetWarehouseCode { get; set; }
+
+        public string? TargetLocationCode { get; set; }
+
+        public Guid? ReservationId { get; set; }
+
+        /// <summary>逐件累加：相同的草稿行累加數量。</summary>
+        public bool Merge { get; set; }
+    }
 
     /// <summary>候選料號的連結：以該料號的正式料號重新搜尋，會精確命中並帶入。</summary>
     public string CandidateUrl(string itemCode) => Url.Page("/Documents/Details", new { id = Doc.Id, ItemQuery = itemCode })!;
