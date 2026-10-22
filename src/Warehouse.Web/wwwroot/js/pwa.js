@@ -20,18 +20,31 @@
   var accepted = false;
   var warned = false;
 
-  function prompt(worker) {
+  // 每次有新的等待中版本就重設按鈕；按下時送給「目前」等待中的版本（原本那個可能已被更新的版本取代，PR 4 審查 4）
+  function prompt(reg) {
     if (!banner || !button) return;
     banner.hidden = false;
+    button.disabled = false;
+    warned = false;
+    if (note) note.textContent = '';
     button.onclick = function () {
+      // 送出中：不能放棄（請求可能已被伺服器接受，重新載入後會以為沒加入而重掃），請等它完成（PR 4 審查 5）
+      if (window.WhScanBusy && window.WhScanBusy()) {
+        if (note) note.textContent = '正在送出明細，請等完成後再按更新。';
+        return;
+      }
       if (window.WhScanDirty && window.WhScanDirty() && !warned) {
         warned = true;
         if (note) note.textContent = '掃碼面板上還有未加入的資料。請先按「加入明細」或「清除」；確定要放棄，再按一次更新。';
         return;
       }
+      if (!reg.waiting) {
+        if (note) note.textContent = '新版本已不在等待中，請稍候或重新整理頁面。';
+        return;
+      }
       accepted = true;
       button.disabled = true;
-      worker.postMessage('skipWaiting');
+      reg.waiting.postMessage('skipWaiting');
     };
   }
 
@@ -42,12 +55,12 @@
 
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('/sw.js').then(function (reg) {
-      if (reg.waiting && navigator.serviceWorker.controller) prompt(reg.waiting);
+      if (reg.waiting && navigator.serviceWorker.controller) prompt(reg);
       reg.addEventListener('updatefound', function () {
         var worker = reg.installing;
         if (!worker) return;
         worker.addEventListener('statechange', function () {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) prompt(worker);
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) prompt(reg);
         });
       });
       // 畫面長時間開著（例如 PDA）：回到前景時檢查是否有新版，最多每 30 分鐘一次

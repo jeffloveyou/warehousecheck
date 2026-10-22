@@ -19,7 +19,8 @@
         <h1>目前無法連到伺服器</h1>
         <p class="warn">系統不支援離線作業：離線時不能查庫存、不能送出任何單據。剛才若正在送出，請連線後到單據頁確認是否已加入，<strong>不要直接重送</strong>。</p>
         <p>請確認手機或電腦已連上公司網路（Wi-Fi），再按重新整理。</p>
-        <p><button type="button" onclick="location.reload()">重新整理</button></p>
+        <p><button type="button" id="offline-reload">重新整理</button></p>
+        <script src="/js/offline.js"></script>
     </main>
 </body>
 </html>

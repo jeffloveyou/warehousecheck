@@ -326,8 +326,9 @@ Check((await pwa.ContentAsync()).Contains("目前無法連到伺服器"), "離�
 var apiOffline = await pwa.EvaluateAsync<string>("async () => { try { await fetch('/api/scan?code=ABC'); return 'served'; } catch (e) { return 'failed'; } }");
 Check(apiOffline == "failed", "離線時 /api 請求失敗（沒有被快取回應）");
 await pwaContext.SetOfflineAsync(false);
-var cachedUrls = await pwa.EvaluateAsync<string[]>("async () => { const c = await caches.open((await caches.keys())[0]); return (await c.keys()).map(r => new URL(r.url).pathname); }");
-Check(cachedUrls.All(u => u == "/offline.html" || Regex.IsMatch(u, "^/(css|js|lib|icons)/")), "快取裡只有離線頁與靜態檔：" + string.Join(",", cachedUrls));
+var cachedUrls = await pwa.EvaluateAsync<string[]>("async () => { await fetch('/js/camera-scan.js'); const c = await caches.open((await caches.keys())[0]); return (await c.keys()).map(r => { const u = new URL(r.url); return u.pathname + u.search; }); }");
+Check(cachedUrls.All(u => u is "/offline.html" or "/js/offline.js" || u.StartsWith("/icons/", StringComparison.Ordinal) || Regex.IsMatch(u, @"^/(css|js|lib)/[^?]+\?v=")),
+    "快取裡只有離線頁、圖示與帶版本參數的靜態檔（沒有版本參數的 camera-scan.js 不快取）：" + string.Join(",", cachedUrls));
 await pwaContext.CloseAsync();
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));

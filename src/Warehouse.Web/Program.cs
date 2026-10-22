@@ -95,7 +95,7 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapWarehouseApi();
-app.MapServiceWorker();
+app.MapServiceWorker(app.Configuration);
 app.MapRazorPages();
 
 app.Run();
