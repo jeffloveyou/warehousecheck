@@ -538,6 +538,75 @@ public partial class WebAuthTests
         Assert.Contains("期初", stockPage);
     }
 
+    // T-M3-08-05
+    [Fact]
+    public async Task 倉位圖片_主管在頁面上傳_登入者可看縮圖_未登入與作業員上傳被擋()
+    {
+        var attachments = Path.Combine(Path.GetTempPath(), "warehouse-web-attachments-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString,
+                settings: new Dictionary<string, string> { ["Storage:AttachmentsDirectory"] = attachments });
+            var managerName = NewUserName();
+            var operatorName = NewUserName();
+            await WebSession.CreateUserAsync(factory, managerName, Password, Roles.WarehouseManager);
+            await WebSession.CreateUserAsync(factory, operatorName, Password, Roles.Operator);
+            var manager = WebSession.Create(factory);
+            var op = WebSession.Create(factory);
+            await manager.LoginAsync(managerName, Password);
+            await op.LoginAsync(operatorName, Password);
+            var code = "G" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+            await manager.PostFormAsync("/Warehouses", "/Warehouses?handler=Save", new Dictionary<string, string> { ["Code"] = code, ["Name"] = "圖片" });
+            var warehouseId = (await manager.Client.GetFromJsonAsync<JsonElement>("/api/warehouses", Ct)).EnumerateArray()
+                .Single(w => w.GetProperty("code").GetString() == code).GetProperty("id").GetGuid();
+            await manager.PostFormAsync($"/Warehouses/Locations?warehouseId={warehouseId}", $"/Warehouses/Locations?handler=Create&WarehouseId={warehouseId}",
+                new Dictionary<string, string> { ["Form.Code"] = "P-01" });
+            var locationId = (await manager.Client.GetFromJsonAsync<JsonElement>($"/api/scan?code=WH:LOC:{code}:P-01", Ct))
+                .GetProperty("location").GetProperty("id").GetGuid();
+            var page = $"/Warehouses/Location/{locationId}";
+
+            async Task<HttpResponseMessage> UploadAsync(WebSession who)
+            {
+                var html = await who.GetStringAsync(page);
+                var token = TokenPattern().Match(html).Groups[1].Value;
+                using var bitmap = new SkiaSharp.SKBitmap(400, 300);
+                using var data = SkiaSharp.SKImage.FromBitmap(bitmap).Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+                var form = new MultipartFormDataContent
+                {
+                    { new StringContent(System.Net.WebUtility.HtmlDecode(token)), "__RequestVerificationToken" },
+                    { new ByteArrayContent(data.ToArray()), "Photo", "偽裝.jpg" },
+                };
+                return await who.Client.PostAsync(page + "?handler=Upload", form, Ct);
+            }
+
+            var uploaded = await UploadAsync(manager);
+            Assert.Equal(HttpStatusCode.Redirect, uploaded.StatusCode);
+            var imageId = ImagePattern().Match(await op.GetStringAsync(page)).Groups[1].Value;
+            Assert.NotEmpty(imageId);
+            var thumb = await op.Client.GetAsync($"/files/location-images/{imageId}/thumb", Ct);
+            Assert.Equal(("image/jpeg", true), (thumb.Content.Headers.ContentType!.MediaType, thumb.Headers.CacheControl!.Private));
+            Assert.Contains("loading=\"lazy\"", await op.GetStringAsync(page));
+
+            var anonymous = await WebSession.Create(factory).Client.GetAsync($"/files/location-images/{imageId}/large", Ct);
+            Assert.Equal(HttpStatusCode.Redirect, anonymous.StatusCode);
+            Assert.StartsWith("/Account/Login", anonymous.Headers.Location!.OriginalString);
+            Assert.StartsWith("/Account/AccessDenied", (await UploadAsync(op)).Headers.Location!.OriginalString);
+        }
+        finally
+        {
+            if (Directory.Exists(attachments))
+            {
+                Directory.Delete(attachments, recursive: true);
+            }
+        }
+    }
+
+    [GeneratedRegex("name=\"__RequestVerificationToken\" type=\"hidden\" value=\"([^\"]+)\"")]
+    private static partial Regex TokenPattern();
+
+    [GeneratedRegex("/files/location-images/([0-9a-f-]{36})/thumb")]
+    private static partial Regex ImagePattern();
+
     private static string NewUserName() => "u" + Guid.NewGuid().ToString("N")[..10];
 
     [GeneratedRegex("name=\"RequestId\" value=\"([0-9a-f-]+)\"")]

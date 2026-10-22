@@ -1,6 +1,7 @@
 @page "{id:guid}"
 @model Warehouse.Web.Pages.Opening.DetailsModel
 @using Warehouse.Domain.Inventory
+@using Warehouse.Application.Warehousing
 @{
     var d = Model.Doc;
     ViewData["Title"] = d.DocNo;
@@ -91,6 +92,23 @@
             <label><input type="checkbox" name="Line.EmptyLocation" value="true" checked="@Model.Line.EmptyLocation" /> 這個儲位確認為空（不填物料）</label>
         </div>
         <div class="actions"><button type="submit" id="opening-add-line">加入</button></div>
+    </form>
+    <form method="get" class="filters" id="suggest-form">
+        <input type="text" name="Suggest" value="@Model.Suggest" maxlength="20" placeholder="料號" aria-label="查建議儲位的料號" />
+        <button type="submit" class="secondary" id="suggest-submit">查建議儲位</button>
+        @if (Model.Suggestions is { } suggestions)
+        {
+            <span id="suggestions">
+                @if (suggestions.Count == 0)
+                {
+                    <span class="muted">沒有建議（尚未設定常用倉位、也沒有庫存）。</span>
+                }
+                @foreach (var s in suggestions)
+                {
+                    <span class="chip">@s.LocationCode（@(s.Reason switch { SuggestionReason.Default => "預設", SuggestionReason.Frequent => "常用", _ => "有庫存" })@(s.QuantityHere > 0 ? $"，現有 {Display.Qty(s.QuantityHere)}" : "")）</span>
+                }
+            </span>
+        }
     </form>
     @if (Model.Uncounted.Count > 0)
     {

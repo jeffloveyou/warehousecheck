@@ -8,7 +8,7 @@
       <Root>\config\appsettings.Production.json  連線字串等（只給 Administrators、SYSTEM、服務帳號讀）
       <Root>\data\、<Root>\logs\          服務帳號可寫；data\keys 為 A/B 共用的 Data Protection 金鑰（M0-12）
     服務帳號使用虛擬帳號 NT SERVICE\<ServiceName>（不是 LocalSystem，權限最小）。
-    服務專屬環境變數：ASPNETCORE_ENVIRONMENT=Production、ASPNETCORE_URLS、WAREHOUSE_CONFIG_DIR、DataProtection__KeysDirectory。
+    服務專屬環境變數：ASPNETCORE_ENVIRONMENT=Production、ASPNETCORE_URLS、WAREHOUSE_CONFIG_DIR、DataProtection__KeysDirectory、Storage__AttachmentsDirectory（倉位圖片，Production 必填）。
     A/B 兩個實例：-ServiceName WarehouseA -Port 5080、-ServiceName WarehouseB -Port 5081（M0-12，通常由 switch-release.ps1 呼叫）。
 .PARAMETER ConnectionStringFile
     第一次安裝、config 檔尚不存在時使用：內含連線字串的文字檔，讀取後立即刪除（避免密碼出現在命令列）。
@@ -88,7 +88,8 @@ try {
         'ASPNETCORE_ENVIRONMENT=Production',
         "ASPNETCORE_URLS=http://localhost:$Port",
         "WAREHOUSE_CONFIG_DIR=$configDir",
-        "DataProtection__KeysDirectory=$keysDir")
+        "DataProtection__KeysDirectory=$keysDir",
+        "Storage__AttachmentsDirectory=$(Join-Path $Root 'data\attachments')")
     Write-Host "已建立服務 $ServiceName（帳號 $account，埠 $Port）"
 
     # 4. 服務帳號權限（虛擬帳號要等服務建立後才存在）：config 讀；data（含 keys）、logs 可寫；releases 可讀與執行

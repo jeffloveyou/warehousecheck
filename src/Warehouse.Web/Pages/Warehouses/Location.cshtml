@@ -32,6 +32,44 @@
 </dl>
 <p><a href="/Warehouses/Locations?warehouseId=@l.WarehouseId">回儲位清單</a></p>
 
+@if (Model.Settings.LocationImagesEnabled)
+{
+    <h2>圖片</h2>
+    <div class="image-grid" id="location-images">
+        @foreach (var image in Model.Images)
+        {
+            <figure>
+                <a href="/files/location-images/@image.Id/large" target="_blank" rel="noopener">
+                    @* 延遲載入：捲動到附近才下載；寬高先給，版面不會跳動 *@
+                    <img src="/files/location-images/@image.Id/thumb" loading="lazy" alt="儲位圖片" width="160"
+                         height="@(Math.Max(1, image.Height * 160 / Math.Max(1, image.Width)))" />
+                </a>
+                <figcaption class="muted">@image.UploadedByName @Display.Time(image.UploadedAt)
+                    @if (Model.CanManage)
+                    {
+                        <form method="post" asp-page-handler="DeactivateImage" class="inline">
+                            <input type="hidden" name="imageId" value="@image.Id" />
+                            <button type="submit" class="link">停用</button>
+                        </form>
+                    }
+                </figcaption>
+            </figure>
+        }
+        @if (Model.Images.Count == 0)
+        {
+            <p class="muted">尚無圖片。</p>
+        }
+    </div>
+    @if (Model.CanManage)
+    {
+        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data" class="panel filters" id="image-upload-form">
+            <input type="file" name="Photo" accept="image/jpeg,image/png,image/webp" aria-label="選擇圖片" required />
+            <button type="submit" id="image-upload">上傳</button>
+            <span class="muted">JPEG／PNG／WebP，10 MB 以內；系統會自動縮圖，每個儲位最多 10 張。</span>
+        </form>
+    }
+}
+
 @if (Model.CanManage)
 {
     <form method="post" asp-page-handler="Update" class="panel" id="location-edit-form">

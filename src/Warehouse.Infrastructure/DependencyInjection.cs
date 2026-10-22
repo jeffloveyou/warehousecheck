@@ -8,6 +8,7 @@ using Warehouse.Application.MasterData;
 using Warehouse.Application.Search;
 using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
+using Warehouse.Infrastructure.Files;
 using Warehouse.Infrastructure.Inventory;
 using Warehouse.Infrastructure.Items;
 using Warehouse.Infrastructure.MasterData;
@@ -20,9 +21,18 @@ namespace Warehouse.Infrastructure;
 
 public static class DependencyInjection
 {
-    /// <summary>註冊 DbContext（PostgreSQL）與 Infrastructure 實作。</summary>
-    public static IServiceCollection AddWarehouseInfrastructure(this IServiceCollection services, string connectionString)
+    /// <summary>
+    /// 註冊 DbContext（PostgreSQL）與 Infrastructure 實作。
+    /// <paramref name="attachmentsDirectory"/>：附件目錄（設定 Storage:AttachmentsDirectory）；未設定時用
+    /// %LOCALAPPDATA%\Warehouse\attachments（開發機），正式環境由安裝腳本設定到 data 目錄（與發布目錄分開）。
+    /// </summary>
+    public static IServiceCollection AddWarehouseInfrastructure(
+        this IServiceCollection services, string connectionString, string? attachmentsDirectory = null)
     {
+        var attachments = string.IsNullOrWhiteSpace(attachmentsDirectory)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Warehouse", "attachments")
+            : attachmentsDirectory;
+        services.AddSingleton<IFileStore>(new LocalFileStore(attachments));
         services.AddDbContext<WarehouseDbContext>(o => o.UseNpgsql(connectionString));
         services.AddScoped<IDatabaseStatus, DatabaseStatus>();
         services.TryAddSingleton(TimeProvider.System);
@@ -36,6 +46,8 @@ public static class DependencyInjection
         services.AddScoped<IOpeningService, OpeningService>();
         services.AddScoped<IStockQueryService, StockQueryService>();
         services.AddScoped<IMasterDataService, MasterDataService>();
+        services.AddScoped<IItemLocationService, ItemLocationService>();
+        services.AddScoped<ILocationImageService, LocationImageService>();
         return services;
     }
 }

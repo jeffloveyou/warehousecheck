@@ -13,7 +13,8 @@ public class DevPagesTests
     public async Task 非開發環境_開發用頁面回傳404(string path)
     {
         var ct = TestContext.Current.CancellationToken;
-        await using var factory = new WarehouseWebFactory(TestDatabase.UnreachableConnectionString, environment: "Production");
+        await using var factory = new WarehouseWebFactory(TestDatabase.UnreachableConnectionString, environment: "Production",
+            settings: new Dictionary<string, string> { ["Storage:AttachmentsDirectory"] = Path.GetTempPath() }); // 正式環境必須設定附件目錄
         using var client = factory.CreateClient();
 
         using var response = await client.GetAsync(path, ct);

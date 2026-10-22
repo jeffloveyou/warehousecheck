@@ -5,6 +5,7 @@ using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Items;
+using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Items;
 
@@ -15,9 +16,42 @@ namespace Warehouse.Web.Pages.Items;
 /// （只隱藏按鈕擋不住直接送出的請求）。每個動作都帶回讀取時的版本（xmin），別人先改過會顯示衝突。
 /// </summary>
 public class DetailsModel(
-    IItemQueryService queries, IItemWorkflowService workflow, IItemIndexService index, IAuthorizationService authorization)
+    IItemQueryService queries, IItemWorkflowService workflow, IItemIndexService index, IAuthorizationService authorization,
+    IItemLocationService itemLocations, IWarehouseService warehouses)
     : PageModel
 {
+    /// <summary>預設／常用倉位（M3-07）。</summary>
+    public IReadOnlyList<ItemLocationRow> ItemLocations { get; private set; } = [];
+
+    public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
+
+    public bool CanManageLocations { get; private set; }
+
+    public async Task<IActionResult> OnPostAddItemLocationAsync(
+        Guid id, Guid warehouseId, string locationCode, bool isDefault, CancellationToken cancellationToken) =>
+        !await CanManageLocationsAsync() ? Forbid() : await RunAsync(id, async actor =>
+        {
+            await itemLocations.AddAsync(id, warehouseId, locationCode ?? string.Empty, isDefault, actor, cancellationToken);
+            return "已新增常用倉位。";
+        }, cancellationToken);
+
+    public async Task<IActionResult> OnPostDefaultItemLocationAsync(Guid id, Guid itemLocationId, CancellationToken cancellationToken) =>
+        !await CanManageLocationsAsync() ? Forbid() : await RunAsync(id, async actor =>
+        {
+            await itemLocations.SetDefaultAsync(id, itemLocationId, actor, cancellationToken);
+            return "已設為預設倉位。";
+        }, cancellationToken);
+
+    public async Task<IActionResult> OnPostRemoveItemLocationAsync(Guid id, Guid itemLocationId, CancellationToken cancellationToken) =>
+        !await CanManageLocationsAsync() ? Forbid() : await RunAsync(id, async actor =>
+        {
+            await itemLocations.RemoveAsync(id, itemLocationId, actor, cancellationToken);
+            return "已移除常用倉位。";
+        }, cancellationToken);
+
+    private async Task<bool> CanManageLocationsAsync() =>
+        (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded;
+
     public ItemDetails Item { get; private set; } = null!;
 
     public IReadOnlyList<DuplicateCandidate> Candidates { get; private set; } = [];
@@ -156,6 +190,12 @@ public class DetailsModel(
         Item = item;
         Version = item.Version;
         Indexes = await index.ListAsync(id, cancellationToken);
+        ItemLocations = await itemLocations.ListAsync(id, cancellationToken);
+        CanManageLocations = item.Status == ItemStatus.Active && await CanManageLocationsAsync();
+        if (CanManageLocations)
+        {
+            Warehouses = (await warehouses.ListWarehousesAsync(cancellationToken)).Where(w => w.IsActive).ToList();
+        }
         // 待核准時列出重複候選，供管理員核准前確認、或拒絕時選擇「重複於」
         if (item.Status == ItemStatus.PendingApproval && IsManager)
         {
