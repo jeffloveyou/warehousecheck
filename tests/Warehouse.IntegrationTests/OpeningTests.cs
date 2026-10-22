@@ -70,6 +70,27 @@ public class OpeningTests
         _ = code;
     }
 
+    // T-M0-05-10：條碼槍在大寫鎖定時送出小寫；批號、序號一律存成大寫，只差大小寫視為同一個（使用者 2026-10-22 決定）
+    [Fact]
+    public async Task 小寫批號序號_存成大寫_只差大小寫視為重複()
+    {
+        var (warehouse, _) = await WarehouseAsync("U-01", "U-02");
+        var lot = await ItemAsync(TrackingMode.Lot);
+        var serial = await ItemAsync(TrackingMode.Serial);
+        var doc = await Opening(s => s.CreateAsync(warehouse, null, Operator, Ct));
+        await AddAsync(doc, Operator, "U-01", lot, "lot-2026a", null, 3);
+        await AddAsync(doc, Operator, "U-02", serial, null, "sn-abc01", 1);
+        await Assert.ThrowsAsync<DomainRuleException>(() => AddAsync(doc, Operator, "U-01", lot, "LOT-2026A", null, 1));
+        await Assert.ThrowsAsync<DomainRuleException>(() => AddAsync(doc, Operator, "U-02", serial, null, "SN-ABC01", 1));
+        await Opening(async s => await s.SubmitAsync(doc, await VersionAsync(doc), Operator, Ct));
+
+        await ApproveAsync(doc, Manager);
+
+        var balances = (await Stock(s => s.GetBalancesAsync(warehouse, null, null, 1, Ct))).Items;
+        Assert.Equal("LOT-2026A", balances.Single(b => b.ItemId == lot).LotNo);
+        Assert.Equal("SN-ABC01", balances.Single(b => b.ItemId == serial).SerialNo);
+    }
+
     // T-M3-03-02：冪等
     [Fact]
     public async Task 同一冪等鍵重送只過帳一次_同鍵不同內容被拒()

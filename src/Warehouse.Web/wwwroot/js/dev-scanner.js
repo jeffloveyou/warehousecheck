@@ -22,24 +22,33 @@
     return expectedBox.value.split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
   }
 
-  // 多重集合比對：預期但沒掃到＝遺失；掃到但不在預期＝變形或多掃；位置不同＝順序錯
+  // 多重集合比對：預期但沒掃到＝遺失；掃到但不在預期＝變形或多掃；位置不同＝順序錯。
+  // 只差大小寫（大寫鎖定造成）另外計數：系統比對料號、儲位、批號、序號都不分大小寫，不算錯誤。
+  // 一筆裡出現兩次以上「WH:」＝兩個條碼黏在一起（中間的 Enter 遺失或被吃掉）。
   function summary() {
     var expected = expectedList();
     var remaining = {};
     expected.forEach(function (e) { remaining[e] = (remaining[e] || 0) + 1; });
-    var unexpected = [];
+    var notExact = [];
     var seen = {};
     var duplicates = 0;
     scans.forEach(function (s) {
       if (seen[s.v]) { duplicates++; }
       seen[s.v] = true;
-      if (remaining[s.v] > 0) { remaining[s.v]--; } else { unexpected.push(s.v); }
+      if (remaining[s.v] > 0) { remaining[s.v]--; } else { notExact.push(s.v); }
     });
+    var caseOnly = 0;
+    var unexpected = [];
+    notExact.forEach(function (v) {
+      var match = Object.keys(remaining).filter(function (k) { return remaining[k] > 0 && k.toUpperCase() === v.toUpperCase(); })[0];
+      if (match) { remaining[match]--; caseOnly++; } else { unexpected.push(v); }
+    });
+    var merged = scans.filter(function (s) { return (s.v.toUpperCase().match(/WH:/g) || []).length > 1; }).length;
     var missing = [];
     Object.keys(remaining).forEach(function (k) { for (var i = 0; i < remaining[k]; i++) { missing.push(k); } });
     var orderErrors = 0;
     for (var i = 0; i < Math.min(expected.length, scans.length); i++) {
-      if (scans[i].v !== expected[i]) { orderErrors++; }
+      if (scans[i].v.toUpperCase() !== expected[i].toUpperCase()) { orderErrors++; }
     }
     var times = scans.map(function (s) { return s.ms; });
     return {
@@ -47,6 +56,8 @@
       expectedCount: expected.length,
       missing: missing,
       unexpected: unexpected,
+      caseOnly: caseOnly,
+      merged: merged,
       orderErrors: orderErrors,
       duplicates: duplicates,
       avgMs: times.length ? Math.round(times.reduce(function (a, b) { return a + b; }, 0) / times.length) : 0,
@@ -64,8 +75,8 @@
     text('timing', s.count ? '平均 ' + s.avgMs + ' ms，最長 ' + s.maxMs + ' ms' : '-');
     text('terminators', 'Enter ' + s.enter + '、Tab ' + s.tab);
     text('compare', s.expectedCount === 0 ? '（未貼預期清單）'
-      : '遺失 ' + s.missing.length + '、不在清單（變形）' + s.unexpected.length + '、順序不同 ' + s.orderErrors
-        + '、重複 ' + s.duplicates + '、回應錯誤 ' + s.failedResponses);
+      : '遺失 ' + s.missing.length + '、不在清單（變形）' + s.unexpected.length + '、只差大小寫 ' + s.caseOnly
+        + '、兩筆黏在一起 ' + s.merged + '、順序不同 ' + s.orderErrors + '、重複 ' + s.duplicates + '、回應錯誤 ' + s.failedResponses);
   }
 
   function addRow(scan) {
@@ -113,6 +124,11 @@
   });
 
   input.addEventListener('keydown', function (ev) {
+    if (ev.getModifierState) {
+      var caps = ev.getModifierState('CapsLock');
+      text('caps-lock', caps ? '開（英文字會變小寫，系統比對不受影響）' : '關');
+      document.getElementById('caps-lock').className = caps ? 'bad' : '';
+    }
     if (ev.key !== 'Enter' && ev.key !== 'Tab') { return; }
     ev.preventDefault(); // Tab 不讓焦點跳走，Enter 不送出表單
     var value = input.value.trim();
