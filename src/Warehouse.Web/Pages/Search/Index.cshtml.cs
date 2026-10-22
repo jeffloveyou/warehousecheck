@@ -23,7 +23,7 @@ public class IndexModel(IItemSearchService search, IAuthorizationService authori
     [BindProperty(SupportsGet = true)]
     public bool IncludeInactive { get; set; }
 
-    [BindProperty(SupportsGet = true, Name = "page")]
+    [BindProperty(SupportsGet = true, Name = "p")] // 不能用 "page"：Razor Pages 把它當成頁面名稱
     public int PageNumber { get; set; } = 1;
 
     public PagedResult<ItemSearchHit>? Result { get; private set; }
@@ -44,5 +44,5 @@ public class IndexModel(IItemSearchService search, IAuthorizationService authori
         }
     }
 
-    public string PageUrl(int page) => Url.Page("/Search/Index", new { Q, IncludeInactive, page })!;
+    public string PageUrl(int page) => Url.Page("/Search/Index", new { Q, IncludeInactive, p = page })!;
 }

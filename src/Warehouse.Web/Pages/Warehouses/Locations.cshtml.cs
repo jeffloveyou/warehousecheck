@@ -26,7 +26,7 @@ public class LocationsModel(
     [BindProperty(SupportsGet = true)]
     public LocationStatus? Status { get; set; }
 
-    [BindProperty(SupportsGet = true, Name = "page")]
+    [BindProperty(SupportsGet = true, Name = "p")] // 不能用 "page"：Razor Pages 把它當成頁面名稱
     public int PageNumber { get; set; } = 1;
 
     [BindProperty]
@@ -71,7 +71,7 @@ public class LocationsModel(
         return Page();
     }
 
-    public string PageUrl(int page) => Url.Page("/Warehouses/Locations", new { WarehouseId, q = Keyword, Status, page })!;
+    public string PageUrl(int page) => Url.Page("/Warehouses/Locations", new { WarehouseId, q = Keyword, Status, p = page })!;
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {

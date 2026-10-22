@@ -22,6 +22,46 @@ public partial class WebAuthTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    // T-UI-PAGING-01：Razor Pages 把 "page" 當成頁面名稱，分頁參數改用 "p"（Win7 試用回報「下一頁沒作用」）
+    [Fact]
+    public async Task 分頁_下一頁連結帶頁碼_第二頁內容不同()
+    {
+        var token = "分頁" + Guid.NewGuid().ToString("N")[..6];
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var workflow = new Warehouse.Infrastructure.Items.ItemWorkflowService(db, TimeProvider.System);
+            var manager = new Actor(Guid.NewGuid(), "分頁測試", IsItemManager: true);
+            for (var n = 0; n < 25; n++)
+            {
+                var item = await workflow.SubmitAsync(Guid.NewGuid(),
+                    new Warehouse.Application.Items.ItemDraft($"{token} 物料 {n:00}", El, Pcs, Warehouse.Domain.Items.TrackingMode.None, null, null, null), manager, Ct);
+                var version = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(
+                    db.Items.Where(i => i.Id == item.ItemId).Select(i => Microsoft.EntityFrameworkCore.EF.Property<uint>(i, "Version")), Ct);
+                await workflow.ApproveAsync(item.ItemId, version, [], null, manager, Ct);
+            }
+        }
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var userName = NewUserName();
+        await WebSession.CreateUserAsync(factory, userName, Password, Roles.Operator);
+        var web = WebSession.Create(factory);
+        await web.LoginAsync(userName, Password);
+
+        foreach (var first in new[] { "/Search?Q=" + Uri.EscapeDataString(token), "/Items?q=" + Uri.EscapeDataString(token) })
+        {
+            var page1 = await web.GetStringAsync(first);
+            var next = WebUtility.HtmlDecode(NextPagePattern().Match(page1).Groups[1].Value);
+            Assert.Contains("p=2", next);
+            var page2 = await web.GetStringAsync(next);
+            Assert.NotEqual(FirstItemPattern().Match(page1).Groups[1].Value, FirstItemPattern().Match(page2).Groups[1].Value);
+        }
+    }
+
+    [GeneratedRegex("<a href=\"([^\"]+)\"[^>]*>下一頁</a>")]
+    private static partial Regex NextPagePattern();
+
+    [GeneratedRegex("href=\"/Items/Details/([0-9a-f-]{36})\"")]
+    private static partial Regex FirstItemPattern();
+
     // T-SEC-01、T-M1-03-08
     [Fact]
     public async Task 未登入_API回401_頁面轉登入_健康檢查與狀態頁仍可匿名()
