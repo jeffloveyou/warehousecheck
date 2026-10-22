@@ -140,7 +140,16 @@ public class DetailsModel(
         {
             return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
         }
-        return await LoadAsync(id, cancellationToken) ? Partial("_OpeningLines", this) : NotFound();
+        // 只讀明細表需要的資料（不算未清點儲位、不查建議儲位），與進出倉單相同（M5-03 審查 S3）
+        if (await openings.GetAsync(id, cancellationToken) is not { } current)
+        {
+            return NotFound();
+        }
+        Doc = current;
+        Version = current.Version;
+        var actor = User.ToActor();
+        CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        return Partial("_OpeningLines", this);
     }
 
     /// <summary>掃碼面板送出的期初明細（JSON）。</summary>

@@ -371,6 +371,24 @@ public class ScanBarcodeTests
         Assert.Equal(55m, line.Quantity);
     }
 
+    // T-M5-03-20（PR 3 審查 M1）：條碼不可與任何倉庫的儲位碼相同；新增儲位也不可與有效條碼相同
+    [Fact]
+    public async Task 條碼與儲位碼互斥()
+    {
+        var locationCode = "LOC-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        await WarehouseAsync(locationCode);
+        var (item, _) = await ActiveItemAsync();
+        var taken = await Assert.ThrowsAsync<ConflictException>(() =>
+            Index(s => s.AddAsync(item, ItemIndexKind.Barcode, locationCode.ToLowerInvariant(), Operator, Ct)));
+        Assert.Equal("index.identifier_conflict", taken.ErrorCode);
+
+        var (other, _) = await ActiveItemAsync();
+        var barcode = "LB" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        await Index(s => s.AddAsync(other, ItemIndexKind.Barcode, barcode, Operator, Ct));
+        var error = await Assert.ThrowsAsync<DomainRuleException>(() => WarehouseAsync(barcode));
+        Assert.Contains("原廠條碼", error.Message);
+    }
+
     private static string Barcode() => "47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
 
     private static async Task<string?> TryAsync(Func<Task> action)

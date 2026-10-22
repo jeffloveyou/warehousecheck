@@ -27,7 +27,10 @@
     </div>
 </form>
 
+@* 常駐的朗讀區：結果區整塊替換後，scan-page.js 把摘要複製到這裡，報讀軟體才會唸出新結果 *@
+<p class="visually-hidden" role="status" id="scan-live">@Model.Summary</p>
 <div id="scan-result" data-scan-result data-kind="@(r?.Kind.ToString() ?? "")">
+    <p class="visually-hidden" id="scan-summary">@Model.Summary</p>
     @if (TempData["Message"] is string message)
     {
         <div class="message info" id="page-message">@message</div>
@@ -66,10 +69,24 @@
         }
         @if (r.Kind == ScanResultKind.Text)
         {
-            <div class="message warn" id="scan-unknown">
-                「@r.Value」不是已登錄的料號、原廠條碼或儲位。
-                <a href="/Search?q=@Uri.EscapeDataString(r.Value)">用這段文字搜尋</a>
-            </div>
+            @if (Model.MatchingLocations.Count > 0)
+            {
+                <div class="message info" id="scan-location-code">
+                    「@r.Value」是儲位碼：
+                    @foreach (var m in Model.MatchingLocations)
+                    {
+                        <a href="/Scan?code=@Uri.EscapeDataString(m.QrContent)">@m.WarehouseCode 倉 @m.Code</a>
+                    }
+                    。儲位標籤建議印成 QR（WH:LOC:倉庫碼:儲位碼），掃一次就知道是哪個倉庫。
+                </div>
+            }
+            else
+            {
+                <div class="message warn" id="scan-unknown">
+                    「@r.Value」不是已登錄的料號、原廠條碼或儲位。
+                    <a href="/Search?q=@Uri.EscapeDataString(r.Value)">用這段文字搜尋</a>
+                </div>
+            }
             @if (Model.CanRegister)
             {
                 <form method="post" asp-page-handler="Register" asp-route-code="@r.Value" class="panel" id="scan-register-form">
@@ -90,7 +107,7 @@
             <h2>結存（共 @balances.TotalCount 筆）</h2>
             <div class="table-wrap">
                 <table id="scan-balances">
-                    <thead><tr><th>倉庫</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>狀態</th><th>數量</th></tr></thead>
+                    <thead><tr><th>倉庫</th><th>儲位</th><th>料號</th><th>品名</th><th>批號</th><th>有效期限</th><th>序號</th><th>狀態</th><th>帳面數量（未扣預留）</th></tr></thead>
                     <tbody>
                         @foreach (var b in balances.Items)
                         {

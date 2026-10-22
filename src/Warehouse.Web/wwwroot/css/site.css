@@ -99,7 +99,11 @@ input[type=file] { max-width: 100%; }
 }
 /* M5-03：導覽列（窄螢幕收進「選單」）、單欄掃碼提示 */
 .nav-links { display: contents; }
-.nav-toggle, .nav-toggle-label { display: none; }
+.visually-hidden, .nav-toggle { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); border: 0; white-space: nowrap; }
+.nav-toggle-label { display: none; }
+/* 選單用 checkbox：視覺隱藏但仍可用鍵盤（Tab 到它、空白鍵展開），焦點框畫在旁邊的「選單」上 */
+.nav-toggle:focus-visible + .nav-toggle-label { outline: 2px solid #ffd54f; outline-offset: 2px; }
+@media (min-width: 601px) { .nav-toggle { display: none; } }
 #nav-scan { font-weight: bold; }
 .scan-field-info { font-size: 13px; margin-top: 2px; }
 @media (max-width: 600px) {

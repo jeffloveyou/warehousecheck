@@ -203,6 +203,15 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
     {
         if (kind == ItemIndexKind.Barcode)
         {
+            // 與任何倉庫的儲位碼相同也不行：單據面板掃到沒有前綴的儲位標籤時，會先比中條碼而變成物料（M5-03 審查 M1）
+            var locationHolder = await db.Locations.AsNoTracking()
+                .Where(l => l.Code == normalized)
+                .Join(db.Warehouses, l => l.WarehouseId, w => w.Id, (l, w) => w.Code)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (locationHolder is not null)
+            {
+                throw new ConflictException("index.identifier_conflict", $"這段文字是倉庫 {locationHolder} 的儲位碼，不能登錄為原廠條碼。");
+            }
             var barcodeHolder = await db.ItemBarcodes.AsNoTracking()
                 .Where(b => b.IsActive && b.NormalizedText == normalized)
                 .Join(db.Items, b => b.ItemId, i => i.Id, (b, i) => new { i.Id, Label = (i.ItemCode ?? i.RequestNo) + " " + i.Name })

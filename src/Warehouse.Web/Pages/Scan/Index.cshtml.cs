@@ -7,6 +7,7 @@ using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
 using Warehouse.Application.Scanning;
+using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Scanning;
 
@@ -19,7 +20,7 @@ namespace Warehouse.Web.Pages.Scan;
 /// </summary>
 public class IndexModel(
     IScanResolver resolver, IStockQueryService stock, IItemIndexService index, IItemQueryService items,
-    IAuthorizationService authorization) : PageModel
+    IAuthorizationService authorization, IWarehouseService warehouses) : PageModel
 {
     [BindProperty(SupportsGet = true)]
     public string? Code { get; set; }
@@ -30,6 +31,9 @@ public class IndexModel(
     public ScanResolution? Result { get; private set; }
 
     public PagedResult<BalanceRow>? Balances { get; private set; }
+
+    /// <summary>沒有前綴的文字剛好是某些倉庫的儲位碼（掃到沒有 WH:LOC: 前綴的儲位標籤）。</summary>
+    public IReadOnlyList<LocationRow> MatchingLocations { get; private set; } = [];
 
     /// <summary>掃到未登錄的條碼，且使用者可以登錄原廠條碼。</summary>
     public bool CanRegister { get; private set; }
@@ -55,6 +59,18 @@ public class IndexModel(
         {
             return Forbid();
         }
+        // 伺服器端重新判斷能不能登錄（不信任網址上的 code）：必須是不認得的 ASCII 文字，且不是任何儲位碼（M5-03 審查 M1）
+        await LoadAsync(cancellationToken);
+        if (!CanRegister)
+        {
+            Error = "這個內容不能登錄為原廠條碼（已是料號、條碼、儲位碼，或含中文等字元）。";
+            return Page();
+        }
+        if (ModelState.TryGetValue(nameof(RegisterPackQuantity), out var packState) && packState.Errors.Count > 0)
+        {
+            Error = "包裝數量格式錯誤，請輸入數字。";
+            return Page();
+        }
         try
         {
             var scan = ScanCodeParser.Parse(RegisterItemCode);
@@ -73,6 +89,17 @@ public class IndexModel(
         await LoadAsync(cancellationToken);
         return Page();
     }
+
+    /// <summary>結果的一行摘要（報讀軟體朗讀、也方便手機一眼看懂）。</summary>
+    public string Summary => Result switch
+    {
+        null => string.Empty,
+        { Item: { } item } => $"物料 {item.ItemCode} {item.Name}，{Balances?.TotalCount ?? 0} 筆結存",
+        { Location: { } location } => $"儲位 {location.WarehouseCode} {location.Code}，{Balances?.TotalCount ?? 0} 筆結存",
+        { Kind: ScanResultKind.Text } when MatchingLocations.Count > 0 => $"{Result.Value} 是儲位碼",
+        { Kind: ScanResultKind.Text } => $"{Result.Value} 不是已登錄的料號、條碼或儲位",
+        _ => Result.Message ?? "無法辨識",
+    };
 
     public string PageUrl(int page) => Url.Page("/Scan/Index", new { code = Code, p = page })!;
 
@@ -93,7 +120,17 @@ public class IndexModel(
         }
         else if (Result.Kind == ScanResultKind.Text)
         {
-            CanRegister = ScanInput.IsPrintableAscii(Result.Value)
+            // 沒有指定倉庫時，解析不會猜儲位碼；這裡跨倉精確查一次，讓人知道它是儲位，而不是未登錄的條碼
+            var matches = new List<LocationRow>();
+            foreach (var warehouse in await warehouses.ListWarehousesAsync(cancellationToken))
+            {
+                if (await warehouses.GetLocationByCodeAsync(warehouse.Code, Result.Value, cancellationToken) is { } match)
+                {
+                    matches.Add(match);
+                }
+            }
+            MatchingLocations = matches;
+            CanRegister = matches.Count == 0 && ScanInput.IsPrintableAscii(Result.Value)
                 && (await authorization.AuthorizeAsync(User, Policies.ItemsIndex)).Succeeded;
         }
     }

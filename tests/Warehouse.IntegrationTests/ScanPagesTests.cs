@@ -111,6 +111,57 @@ public partial class ScanPagesTests
         Assert.Contains("/js/scan-field.js", reservations);
     }
 
+    // T-M5-03-18（PR 3 審查 M1）：沒有前綴的儲位碼在查料頁顯示為儲位，不能登錄成原廠條碼（竄改網址也不行）
+    [Fact]
+    public async Task 查料頁的儲位碼文字_顯示為儲位且不能登錄成條碼()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var (_, _, itemCode) = await SeedAsync(factory);
+
+        var html = await op.GetStringAsync("/Scan?code=s-01");
+        Assert.Contains("id=\"scan-location-code\"", html);
+        Assert.DoesNotContain("id=\"scan-register-form\"", html);
+        var forged = await op.PostFormAsync("/Scan", "/Scan?handler=Register&code=S-01",
+            new Dictionary<string, string> { ["RegisterItemCode"] = itemCode });
+        Assert.Equal(HttpStatusCode.OK, forged.StatusCode);
+        Assert.Contains("不能登錄為原廠條碼", await forged.Content.ReadAsStringAsync(Ct));
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WarehouseDbContext>();
+        Assert.False(await db.ItemBarcodes.AnyAsync(b => b.NormalizedText == "S-01", Ct));
+    }
+
+    // T-M5-03-19（PR 3 審查 S8）：期初掃碼加入，別人的草稿與已送出的單都被拒（寫入前，回 400 訊息）
+    [Fact]
+    public async Task 期初掃碼加入_別人的草稿與已送出的單被拒()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var owner = await LoginAsync(factory, Roles.Operator);
+        var other = await LoginAsync(factory, Roles.Operator);
+        var (_, warehouseId, itemCode) = await SeedAsync(factory);
+        var url = (await owner.PostFormAsync("/Opening", "/Opening?handler=Create",
+            new Dictionary<string, string> { ["WarehouseId"] = warehouseId.ToString() })).Headers.Location!.OriginalString;
+
+        async Task<HttpResponseMessage> AddAsync(WebSession who)
+        {
+            var token = WebUtility.HtmlDecode(TokenPattern().Match(await who.GetStringAsync(url)).Groups[1].Value);
+            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=ScanAddLine")
+            {
+                Content = JsonContent.Create(new { locationCode = "S-01", itemCode, quantity = 1m }),
+            };
+            request.Headers.Add("RequestVerificationToken", token);
+            return await who.Client.SendAsync(request, Ct);
+        }
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(other)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AddAsync(owner)).StatusCode);
+        var page = await owner.GetStringAsync(url);
+        var version = Regex.Match(page, "name=\"Version\" value=\"([0-9]+)\"").Groups[1].Value;
+        Assert.Equal(HttpStatusCode.Redirect,
+            (await owner.PostFormAsync(url, url + "?handler=Submit", new Dictionary<string, string> { ["Version"] = version })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(owner)).StatusCode);
+    }
+
     private static async Task<WebSession> LoginAsync(WarehouseWebFactory factory, string role)
     {
         var name = "sp" + Guid.NewGuid().ToString("N")[..10];

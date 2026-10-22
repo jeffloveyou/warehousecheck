@@ -23,6 +23,8 @@
       if (!fresh || !old) throw new Error('查詢結果格式不正確');
       old.parentNode.replaceChild(fresh, old);
       history.replaceState(null, '', url);
+      var summary = fresh.querySelector('#scan-summary');
+      if (summary && $('scan-live')) $('scan-live').textContent = summary.textContent;
       var kind = fresh.getAttribute('data-kind');
       window.WhScan.feedback(kind === 'Item' || kind === 'Location' ? 'ok' : kind === 'Text' ? 'warn' : 'error');
     } catch (e) {

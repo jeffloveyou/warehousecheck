@@ -303,8 +303,9 @@ foreach (var url in new[] { "/Scan", "/Opening", "/Reservations" })
     Check(!await mobile.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：" + url);
 }
 Check(!await mobile.IsVisibleAsync("#nav-items") && await mobile.IsVisibleAsync("#nav-scan"), "手機寬：選單收起、掃碼連結常駐");
-await mobile.ClickAsync("label[for='nav-toggle']");
-Check(await mobile.IsVisibleAsync("#nav-items"), "手機寬：按「選單」展開其他連結");
+await mobile.FocusAsync("#nav-toggle");
+await mobile.Keyboard.PressAsync("Space");
+Check(await mobile.IsVisibleAsync("#nav-items"), "手機寬：用鍵盤（焦點在選單、按空白鍵）展開其他連結");
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
