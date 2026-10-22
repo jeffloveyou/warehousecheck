@@ -254,6 +254,41 @@ await WaitIdleAsync(page);
 Check(await page.InputValueAsync("#scan-location") == "A-01", "焦點在頁面空白處時，掃碼內容仍由掃碼框接住");
 await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "1-scan-panel.png"), FullPage = true });
 
+// 8b. 期初單：同一個面板（物料 → 儲位 → 數量）；「查建議儲位」欄 Enter 先解析成正式料號，不直接送出
+await page.GotoAsync(baseUrl + "/Opening");
+await page.SelectOptionAsync("#opening-create-form select[name='WarehouseId']", warehouseId.ToString());
+await page.ClickAsync("#opening-create");
+await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+Check(await page.IsVisibleAsync("#scan-panel"), "期初單顯示連續掃碼面板");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[4]);
+await WaitIdleAsync(page);
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
+await WaitIdleAsync(page);
+await page.FillAsync("#scan-quantity", "7");
+await page.PressAsync("#scan-quantity", "Enter");
+await WaitIdleAsync(page);
+var openingLines = await page.InnerTextAsync("#opening-lines");
+Check(openingLines.Contains(itemCodes[4]) && openingLines.Contains("7"), "期初單掃碼加入明細（頁面沒有重新載入）");
+await page.FillAsync("input[name='Suggest']", "wh:item:" + itemCodes[4].ToLowerInvariant());
+await page.PressAsync("input[name='Suggest']", "Enter");
+await page.WaitForTimeoutAsync(800);
+Check(await page.InputValueAsync("input[name='Suggest']") == itemCodes[4] && page.Url.Contains("/Opening/Details/") && !page.Url.Contains("Suggest="),
+    "單欄掃碼：Enter 先解析成正式料號、沒有送出表單");
+
+// 8c. 掃碼查料頁：連掃物料、儲位，結果區換成對應內容，網址同步
+await page.GotoAsync(baseUrl + "/Scan");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[2]);
+await page.WaitForSelectorAsync("[data-scan-result][data-kind='Item']");
+Check((await page.InnerTextAsync("#scan-item")).Contains(itemCodes[2]) && page.Url.Contains("code="), "掃碼查料：物料摘要與網址");
+Check(await page.IsVisibleAsync("#scan-balances"), "掃碼查料：顯示各儲位結存");
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-02");
+await page.WaitForSelectorAsync("[data-scan-result][data-kind='Location']");
+Check((await page.InnerTextAsync("#scan-balances")).Contains(itemCodes[2]) || (await page.InnerTextAsync("#scan-balances")).Contains("沒有結存"), "掃碼查料：儲位內容");
+await ScanAsync(page, "UNKNOWN3" + suffix);
+await page.WaitForSelectorAsync("[data-scan-result][data-kind='Text']");
+Check(await page.IsVisibleAsync("#scan-register-form"), "掃碼查料：未登錄條碼可登錄（作業員）");
+await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "3-scan-lookup.png"), FullPage = true });
+
 // 9. 不載入相機程式（T-PERF-05）
 Check(!requests.Any(r => r.Contains("camera-scan.js") || r.Contains("jsQR")), "鍵盤掃碼全程沒有載入相機程式");
 
@@ -262,6 +297,15 @@ var mobile = await LoginAsync(390);
 await mobile.GotoAsync(baseUrl + "/Documents/Details/" + docId);
 Check(!await mobile.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：進倉單");
 await mobile.ScreenshotAsync(new() { Path = Path.Combine(shots, "2-mobile.png"), FullPage = true });
+foreach (var url in new[] { "/Scan", "/Opening", "/Reservations" })
+{
+    await mobile.GotoAsync(baseUrl + url);
+    Check(!await mobile.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：" + url);
+}
+Check(!await mobile.IsVisibleAsync("#nav-items") && await mobile.IsVisibleAsync("#nav-scan"), "手機寬：選單收起、掃碼連結常駐");
+await mobile.FocusAsync("#nav-toggle");
+await mobile.Keyboard.PressAsync("Space");
+Check(await mobile.IsVisibleAsync("#nav-items"), "手機寬：用鍵盤（焦點在選單、按空白鍵）展開其他連結");
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");

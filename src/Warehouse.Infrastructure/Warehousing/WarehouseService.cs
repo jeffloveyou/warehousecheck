@@ -145,6 +145,12 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         }
         var now = clock.GetUtcNow();
         var location = Location.Create(Guid.NewGuid(), warehouseId, TextNormalizer.Normalize(input.Code), input.Details, now);
+        // 儲位碼不可與有效原廠條碼相同（掃到時會先比中條碼，M5-03 審查 M1）。
+        // 新增儲位只有倉庫主管、次數很少，不另外加鎖；同時新增的極少數情況由條碼登錄端的檢查補上。
+        if (await db.ItemBarcodes.AnyAsync(b => b.IsActive && b.NormalizedText == location.Code, cancellationToken))
+        {
+            throw new DomainRuleException($"儲位碼 {location.Code} 已是某個物料的原廠條碼，請改用其他儲位碼。");
+        }
         db.Locations.Add(location);
         AuditLog.Add(db, actor, now, "location.create", "location", location.Id.ToString(), null,
             new { WarehouseCode = warehouse.Code, location.Code, input.Details });

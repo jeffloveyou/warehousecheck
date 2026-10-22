@@ -64,15 +64,19 @@
     </form>
 }
 
+@* 掃碼面板放在明細表上面：明細很多時（尤其手機）不必捲到最下面才能掃 *@
+@if (Model.CanEdit)
+{
+    <partial name="_ScanPanel" model="Model.ScanPanel" />
+}
 <partial name="_DocumentLines" model="Model" />
 
 @if (Model.CanEdit)
 {
-    <partial name="_ScanPanel" model="Model.ScanPanel" />
     <div class="panel" id="document-add-line-panel">
         <h2>新增明細（搜尋＋點選）</h2>
         <form method="get" class="filters" id="item-search-form">
-            <input type="text" name="ItemQuery" value="@Model.ItemQuery" maxlength="100" placeholder="輸入或掃描料號，按 Enter 搜尋" aria-label="搜尋料號" autocomplete="off" />
+            <input type="text" name="ItemQuery" value="@Model.ItemQuery" maxlength="200" placeholder="輸入或掃描料號，按 Enter 搜尋" aria-label="搜尋料號" autocomplete="off" />
             <button type="submit" class="secondary" id="item-search-submit">搜尋</button>
             <a href="/Search" target="_blank" rel="noopener">進階搜尋</a>
         </form>
@@ -155,9 +159,9 @@
         <form method="post" asp-page-handler="AddLine" id="document-line-form">
             <div class="form-grid">
                 <label for="Line_LocationCode">@(isInbound ? "入庫儲位碼" : "來源儲位碼") <span class="required-mark">*</span></label>
-                <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="40" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
+                <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="200" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
                 <label for="Line_ItemCode">料號 <span class="required-mark">*</span></label>
-                <input type="text" id="Line_ItemCode" name="Line.ItemCode" value="@Model.Line.ItemCode" required maxlength="20" placeholder="先用上方搜尋帶入，或直接輸入正式料號" />
+                <input type="text" id="Line_ItemCode" name="Line.ItemCode" value="@Model.Line.ItemCode" required maxlength="200" placeholder="先用上方搜尋帶入，或直接輸入正式料號" />
                 <label for="Line_Quantity">數量（基本單位） <span class="required-mark">*</span></label>
                 <input type="number" id="Line_Quantity" name="Line.Quantity" value="@(Model.Line.Quantity == 0 ? "" : Display.Qty(Model.Line.Quantity))" min="0" step="any" required />
                 <label for="Line_LotNo">批號</label>
@@ -174,7 +178,7 @@
                     <label for="Line_TargetWarehouseCode">目的倉庫碼</label>
                     <input type="text" id="Line_TargetWarehouseCode" name="Line.TargetWarehouseCode" value="@Model.Line.TargetWarehouseCode" maxlength="8" placeholder="空白＝同倉；掃別倉儲位 QR 時用 QR 上的倉庫" />
                     <label for="Line_TargetLocationCode">目的儲位碼 <span class="required-mark">*</span></label>
-                    <input type="text" id="Line_TargetLocationCode" name="Line.TargetLocationCode" value="@Model.Line.TargetLocationCode" maxlength="40" />
+                    <input type="text" id="Line_TargetLocationCode" name="Line.TargetLocationCode" value="@Model.Line.TargetLocationCode" maxlength="200" placeholder="可掃別倉儲位 QR" />
                 }
                 @if (isOutbound)
                 {

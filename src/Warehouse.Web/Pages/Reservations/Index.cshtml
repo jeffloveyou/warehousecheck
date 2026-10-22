@@ -41,7 +41,7 @@
         <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
         <div class="form-grid">
             <label for="Create_ItemCode">料號 <span class="required-mark">*</span></label>
-            <input type="text" id="Create_ItemCode" name="Create.ItemCode" value="@Model.Create.ItemCode" required maxlength="20" placeholder="輸入或掃描料號" />
+            <input type="text" id="Create_ItemCode" name="Create.ItemCode" value="@Model.Create.ItemCode" required maxlength="200" placeholder="輸入或掃描料號、物料 QR、單件條碼" autocomplete="off" data-scan-field data-scan-next="Create_WarehouseId" />
             <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
             <select id="Create_WarehouseId" name="Create.WarehouseId" required>
                 <option value="">選擇倉庫</option>
@@ -140,3 +140,10 @@
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
 </div>
+@section Scripts {
+    @if (Model.CanManage)
+    {
+        <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/scan-field.js" asp-append-version="true"></script>
+    }
+}
