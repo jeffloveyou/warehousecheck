@@ -4,17 +4,36 @@ using Warehouse.Domain.Items;
 
 namespace Warehouse.Application.Inventory;
 
-/// <summary>一筆結存變化：哪個物料、儲位、批號、序號、狀態，增加多少（M3 只有增加；M4 加扣減與負庫存規則）。</summary>
+/// <summary>
+/// 一筆結存變化：哪個物料、儲位、批號、序號、狀態，增加（正）或扣減（負）多少。
+/// <see cref="ReservationId"/>：依預留出庫時指定（只用於扣減），同交易沖銷 min(扣減量, 預留剩餘量)，超出部分當一般出庫。
+/// </summary>
 public sealed record StockChange(
-    Guid LineId, Guid ItemId, Guid LocationId, Guid? LotId, Guid? SerialId, StockStatus Status, decimal Delta);
+    Guid LineId, Guid ItemId, Guid LocationId, Guid? LotId, Guid? SerialId, StockStatus Status, decimal Delta,
+    Guid? ReservationId = null);
+
+/// <summary>建立倉庫層級預留（ADR-0004 決策二）。<see cref="ReferenceType"/> 例如 <c>Manual</c>、<c>StockDocument</c>。</summary>
+public sealed record ReservationRequest(
+    Guid ItemId, Guid WarehouseId, decimal Quantity, string ReferenceType, Guid? ReferenceId, string? Note);
 
 /// <summary>
-/// 過帳服務：**唯一**可以改變 stock_balances 的地方（AGENTS.md 第六節、ADR-0014）。
-/// 必須在呼叫端已開啟的資料庫交易內呼叫；結存更新與異動帳在同一交易寫入。
+/// 過帳服務：**唯一**可以改變 stock_balances 與 stock_reservations 的地方（AGENTS.md 第六節、ADR-0014、ADR-0004）。
+/// 必須在呼叫端已開啟的資料庫交易內呼叫；鎖、結存、異動帳、預留與可用量檢查都在同一交易完成，任何錯誤整筆回滾。
+/// 呼叫端若要鎖儲位（例如檢查期初），必須在批號／序號 upsert 之前、依 id 排序 FOR UPDATE（鎖順序見 ADR-0004「併發控制」）。
 /// </summary>
 public interface IInventoryPostingService
 {
+    /// <summary>
+    /// 套用結存變化。錯誤：<c>stock.insufficient</c>（結存或倉庫可用量不足）、<c>stock.negative_limit</c>（超過負庫存下限）、
+    /// <c>stock.busy</c>（等鎖逾時或死結，可重試）；儲位停用、倉庫停用、序號重複為 <c>domain_rule</c>。
+    /// </summary>
     Task ApplyAsync(Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>建立預留；倉庫可用量（扣除既有預留）不足時拒絕（<c>stock.insufficient</c>，負庫存物料也不例外）。回傳預留 ID。</summary>
+    Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>釋放（取消）仍為 Open 的預留；已結束的預留回傳 false（重送不出錯）。</summary>
+    Task<bool> ReleaseReservationAsync(Guid reservationId, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public sealed record OpeningRow(

@@ -97,7 +97,7 @@ public class StockDocumentLineConfiguration : IEntityTypeConfiguration<StockDocu
 /// stock_balances：
 /// - ux_stock_balances_dimension：物料＋儲位＋批號＋序號＋狀態唯一（NULLS NOT DISTINCT，過帳的 ON CONFLICT 依此合併）。
 /// - ux_stock_balances_serial_in_stock：同一序號只能在一個地方數量 &gt; 0（序號不可同時在兩個儲位）。
-/// - 序號結存只能是 0 或 1；M3 不允許負數（M4 負庫存例外會調整這條 CHECK，ADR-0004）。
+/// - 序號結存只能是 0 或 1；負數只限允許負庫存的物料、不低於下限（trigger trg_stock_balances_floor，ADR-0004）。
 /// </summary>
 public class StockBalanceConfiguration : IEntityTypeConfiguration<StockBalance>
 {
@@ -106,8 +106,10 @@ public class StockBalanceConfiguration : IEntityTypeConfiguration<StockBalance>
         builder.ToTable("stock_balances", t =>
         {
             t.HasCheckConstraint("ck_stock_balances_status", "stock_status IN ('Available', 'Quarantine')");
-            t.HasCheckConstraint("ck_stock_balances_non_negative", "quantity >= 0");
-            t.HasCheckConstraint("ck_stock_balances_serial_quantity", "serial_id IS NULL OR quantity IN (0, 1)");
+            // 下限改由 AFTER trigger trg_stock_balances_floor 檢查（依物料負庫存設定，M4_01，ADR-0004 決策一第 6 點）
+            // 序號結存只能是 0 或 1：上限與整數用 CHECK；不可為負由 trigger 保證（序號物料不能開負庫存）。
+            // 不寫成 IN (0, 1)：INSERT … ON CONFLICT 會先以「預定插入列」（扣減量 −1）檢查 CHECK，序號出庫會被誤拒
+            t.HasCheckConstraint("ck_stock_balances_serial_quantity", "serial_id IS NULL OR (quantity <= 1 AND quantity = trunc(quantity))");
         });
         builder.HasKey(b => b.Id);
         builder.Property(b => b.Id).ValueGeneratedNever();
@@ -150,6 +152,38 @@ public class StockMovementConfiguration : IEntityTypeConfiguration<StockMovement
         builder.HasOne<Location>().WithMany().HasForeignKey(m => m.LocationId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<InventoryLot>().WithMany().HasForeignKey(m => m.LotId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<ItemSerial>().WithMany().HasForeignKey(m => m.SerialId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>
+/// stock_reservations（ADR-0004 決策二）：剩餘量介於 0 與預留量之間；Consumed 時剩餘量必為 0；結束的預留要有結束時間。
+/// 可用量計算以 (item_id, warehouse_id) 的 Open 部分索引查詢。
+/// </summary>
+public class StockReservationConfiguration : IEntityTypeConfiguration<StockReservation>
+{
+    public void Configure(EntityTypeBuilder<StockReservation> builder)
+    {
+        builder.ToTable("stock_reservations", t =>
+        {
+            t.HasCheckConstraint("ck_stock_reservations_quantity", "quantity > 0 AND remaining_quantity >= 0 AND remaining_quantity <= quantity");
+            t.HasCheckConstraint("ck_stock_reservations_status", "status IN ('Open', 'Consumed', 'Released')");
+            t.HasCheckConstraint("ck_stock_reservations_consumed", "status <> 'Consumed' OR remaining_quantity = 0");
+            t.HasCheckConstraint("ck_stock_reservations_closed", "(status = 'Open') = (closed_at IS NULL)");
+        });
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Id).ValueGeneratedNever();
+        builder.Property(r => r.Quantity).HasPrecision(19, 4);
+        builder.Property(r => r.RemainingQuantity).HasPrecision(19, 4);
+        builder.Property(r => r.ReferenceType).HasMaxLength(StockReservation.ReferenceTypeMaxLength);
+        builder.Property(r => r.Note).HasMaxLength(StockReservation.NoteMaxLength);
+        builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.CreatedByName).HasMaxLength(100);
+        builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+        builder.HasIndex(r => new { r.ItemId, r.WarehouseId }).HasFilter("status = 'Open'")
+            .HasDatabaseName("ix_stock_reservations_open");
+        builder.HasIndex(r => new { r.ReferenceType, r.ReferenceId });
+        builder.HasOne<Item>().WithMany().HasForeignKey(r => r.ItemId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<WarehouseSite>().WithMany().HasForeignKey(r => r.WarehouseId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

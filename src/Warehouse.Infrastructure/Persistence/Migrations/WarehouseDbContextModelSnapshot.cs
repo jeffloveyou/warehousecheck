@@ -354,9 +354,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.ToTable("stock_balances", null, t =>
                         {
-                            t.HasCheckConstraint("ck_stock_balances_non_negative", "quantity >= 0");
-
-                            t.HasCheckConstraint("ck_stock_balances_serial_quantity", "serial_id IS NULL OR quantity IN (0, 1)");
+                            t.HasCheckConstraint("ck_stock_balances_serial_quantity", "serial_id IS NULL OR (quantity <= 1 AND quantity = trunc(quantity))");
 
                             t.HasCheckConstraint("ck_stock_balances_status", "stock_status IN ('Available', 'Quarantine')");
                         });
@@ -567,6 +565,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("document_id");
 
+                    b.Property<bool>("IsNegative")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_negative");
+
                     b.Property<Guid>("ItemId")
                         .HasColumnType("uuid")
                         .HasColumnName("item_id");
@@ -628,6 +630,100 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_stock_movements_delta", "quantity_delta <> 0");
 
                             t.HasCheckConstraint("ck_stock_movements_status", "stock_status IN ('Available', 'Quarantine')");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.StockReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by_name");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("note");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("quantity");
+
+                    b.Property<Guid?>("ReferenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_id");
+
+                    b.Property<string>("ReferenceType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("reference_type");
+
+                    b.Property<decimal>("RemainingQuantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("remaining_quantity");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stock_reservations");
+
+                    b.HasIndex("WarehouseId")
+                        .HasDatabaseName("ix_stock_reservations_warehouse_id");
+
+                    b.HasIndex("ItemId", "WarehouseId")
+                        .HasDatabaseName("ix_stock_reservations_open")
+                        .HasFilter("status = 'Open'");
+
+                    b.HasIndex("ReferenceType", "ReferenceId")
+                        .HasDatabaseName("ix_stock_reservations_reference_type_reference_id");
+
+                    b.ToTable("stock_reservations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_reservations_closed", "(status = 'Open') = (closed_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_stock_reservations_consumed", "status <> 'Consumed' OR remaining_quantity = 0");
+
+                            t.HasCheckConstraint("ck_stock_reservations_quantity", "quantity > 0 AND remaining_quantity >= 0 AND remaining_quantity <= quantity");
+
+                            t.HasCheckConstraint("ck_stock_reservations_status", "status IN ('Open', 'Consumed', 'Released')");
                         });
                 });
 
@@ -2020,6 +2116,23 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("SerialId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_stock_movements_item_serials_serial_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.StockReservation", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_reservations_items_item_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_reservations_warehouses_warehouse_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Items.Item", b =>

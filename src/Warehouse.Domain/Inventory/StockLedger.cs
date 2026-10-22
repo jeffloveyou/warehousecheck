@@ -93,9 +93,73 @@ public sealed class StockMovement
 
     public decimal BalanceAfter { get; private set; }
 
+    /// <summary>這筆異動後結存為負（負庫存例外，ADR-0004）；待補帳清單與稽核的來源。</summary>
+    public bool IsNegative { get; private set; }
+
     public DateTimeOffset OccurredAt { get; private set; }
 
     public Guid ActorId { get; private set; }
 
     public string ActorName { get; private set; } = string.Empty;
+}
+
+/// <summary>預留狀態：Open＝仍占用可用量；Consumed＝已全部沖銷（依預留出庫）；Released＝取消或退回時釋放。</summary>
+public enum ReservationStatus
+{
+    Open,
+    Consumed,
+    Released,
+}
+
+/// <summary>
+/// 倉庫層級預留（stock_reservations，ADR-0004 決策二）：料號＋倉庫＋數量，不指定儲位、批號、序號。
+/// 可用量 = Σ 可用結存 − Σ Open 預留的剩餘量。**只能由過帳服務以 SQL 寫入**（建立、沖銷、釋放都要取同一把鎖）。
+/// </summary>
+public sealed class StockReservation
+{
+    public const int ReferenceTypeMaxLength = 30;
+    public const int NoteMaxLength = 200;
+
+    private StockReservation()
+    {
+    }
+
+    /// <summary>建立預留前的輸入檢查（數量 &gt; 0、來源必填、長度上限）；回傳去空白後的來源與說明。</summary>
+    public static (string ReferenceType, string? Note) ValidateRequest(decimal quantity, string? referenceType, string? note)
+    {
+        if (quantity <= 0)
+        {
+            throw new DomainRuleException("預留數量必須大於 0。");
+        }
+        return (Rules.Required(referenceType, ReferenceTypeMaxLength, "預留來源"), Rules.Optional(note, NoteMaxLength, "預留說明"));
+    }
+
+    public Guid Id { get; private set; }
+
+    public Guid ItemId { get; private set; }
+
+    public Guid WarehouseId { get; private set; }
+
+    /// <summary>建立時的預留量。</summary>
+    public decimal Quantity { get; private set; }
+
+    /// <summary>尚未沖銷的數量；0 時狀態為 Consumed。</summary>
+    public decimal RemainingQuantity { get; private set; }
+
+    /// <summary>來源類型，例如 <c>Manual</c>、<c>StockDocument</c>（待核准出倉單，ADR-0004 決策三）。</summary>
+    public string ReferenceType { get; private set; } = string.Empty;
+
+    public Guid? ReferenceId { get; private set; }
+
+    public string? Note { get; private set; }
+
+    public ReservationStatus Status { get; private set; }
+
+    public Guid CreatedById { get; private set; }
+
+    public string CreatedByName { get; private set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    public DateTimeOffset? ClosedAt { get; private set; }
 }
