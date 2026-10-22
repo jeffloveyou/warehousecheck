@@ -28,6 +28,9 @@ public enum HitReason
 
     /// <summary>第 5 層：每個查詢詞都出現在某個欄位或索引裡（部分符合）。</summary>
     Partial = 7,
+
+    /// <summary>第 2 層：有效原廠條碼完全相同（M5-01；與專屬別名同層，兩者互斥）。</summary>
+    Barcode = 8,
 }
 
 /// <summary>

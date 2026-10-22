@@ -224,7 +224,7 @@
                 @if (isTransfer)
                 {
                     <label for="Line_TargetWarehouseCode">目的倉庫碼</label>
-                    <input type="text" id="Line_TargetWarehouseCode" name="Line.TargetWarehouseCode" value="@Model.Line.TargetWarehouseCode" maxlength="8" placeholder="空白＝同一個倉庫" />
+                    <input type="text" id="Line_TargetWarehouseCode" name="Line.TargetWarehouseCode" value="@Model.Line.TargetWarehouseCode" maxlength="8" placeholder="空白＝同倉；掃別倉儲位 QR 時用 QR 上的倉庫" />
                     <label for="Line_TargetLocationCode">目的儲位碼 <span class="required-mark">*</span></label>
                     <input type="text" id="Line_TargetLocationCode" name="Line.TargetLocationCode" value="@Model.Line.TargetLocationCode" maxlength="40" />
                 }

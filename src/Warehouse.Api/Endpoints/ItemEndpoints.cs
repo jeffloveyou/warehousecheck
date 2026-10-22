@@ -28,7 +28,8 @@ public sealed record RejectItemRequest(uint Version, string Comment, Guid? Dupli
 
 public sealed record ApproveItemResponse(string ItemCode);
 
-public sealed record AddIndexRequest(string Text);
+/// <summary>新增索引。<see cref="PackQuantity"/>、<see cref="Symbology"/> 只用於原廠條碼（包裝數量預設 1）。</summary>
+public sealed record AddIndexRequest(string Text, decimal? PackQuantity = null, string? Symbology = null);
 
 public sealed record AddIndexResponse(Guid EntryId);
 
@@ -51,10 +52,10 @@ public static class ItemEndpoints
         items.MapPost("/{id:guid}/return", ReturnAsync).RequireAuthorization(Policies.ItemsReview);
         items.MapPost("/{id:guid}/reject", RejectAsync).RequireAuthorization(Policies.ItemsReview);
 
-        // 搜尋索引（M2）：kind 為 aliases（專屬別名）或 keywords（共用關鍵字）
+        // 搜尋索引（M2）：kind 為 aliases（專屬別名）、keywords（共用關鍵字）或 barcodes（原廠條碼，M5-01）
         items.MapGet("/{id:guid}/index", (IItemIndexService index, Guid id, CancellationToken ct) => index.ListAsync(id, ct));
         // 兩組固定路由各自帶入種類（路由比對不分大小寫，不能靠解析網址字串判斷種類，M2 審查 R2）
-        foreach (var (segment, kind) in new[] { ("aliases", ItemIndexKind.Alias), ("keywords", ItemIndexKind.Keyword) })
+        foreach (var (segment, kind) in new[] { ("aliases", ItemIndexKind.Alias), ("keywords", ItemIndexKind.Keyword), ("barcodes", ItemIndexKind.Barcode) })
         {
             items.MapPost($"/{{id:guid}}/{segment}",
                     (IItemIndexService index, Guid id, AddIndexRequest request, HttpContext context, CancellationToken ct) =>
@@ -71,7 +72,8 @@ public static class ItemEndpoints
         IItemIndexService index, Guid id, ItemIndexKind kind, AddIndexRequest request, HttpContext context,
         CancellationToken cancellationToken)
     {
-        var entryId = await index.AddAsync(id, kind, request.Text, context.User.ToActor(), cancellationToken);
+        var entryId = await index.AddAsync(
+            id, kind, request.Text, context.User.ToActor(), cancellationToken, request.PackQuantity ?? 1m, request.Symbology);
         return TypedResults.Created($"/api/items/{id}/index", new AddIndexResponse(entryId));
     }
 

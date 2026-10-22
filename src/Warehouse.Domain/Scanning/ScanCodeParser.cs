@@ -17,10 +17,14 @@ public enum ScanCodeKind
 }
 
 /// <summary>解析結果。<see cref="Raw"/> 保留原始輸入，畫面可顯示「掃到：…」。</summary>
-public sealed record ScanCode(ScanCodeKind Kind, string Raw, string? WarehouseCode, string? LocationCode, string? ItemCode);
+public sealed record ScanCode(ScanCodeKind Kind, string Raw, string? WarehouseCode, string? LocationCode, string? ItemCode)
+{
+    /// <summary>正規化後的文字（全形轉半形、大寫、去控制字元與頭尾空白），供精確比對原廠條碼、別名。</summary>
+    public string Normalized { get; init; } = string.Empty;
+}
 
 /// <summary>
-/// 掃碼內容解析（M3-04；M5-01 會擴充為相機、HID、PDA 共用的統一 Parser）。
+/// 掃碼內容解析（M3-04；M5-01 起為相機、HID、PDA 共用的統一 Parser；前處理見 <see cref="ScanInput"/>，資料庫比對見 IScanResolver）。
 /// 輸入先經 <see cref="TextNormalizer.Normalize"/>：全形、大小寫、前後空白都不影響（HID 掃碼槍常帶尾端空白或換行）。
 /// 只有完全符合格式時才判定為儲位或物料；其他一律當成搜尋文字，不猜測。
 /// </summary>
@@ -32,20 +36,20 @@ public static partial class ScanCodeParser
     public static ScanCode Parse(string? raw)
     {
         var original = raw ?? string.Empty;
-        var text = TextNormalizer.Normalize(original);
+        var text = TextNormalizer.Normalize(ScanInput.StripControl(original));
 
         var location = LocationPattern().Match(text);
         if (location.Success)
         {
-            return new ScanCode(ScanCodeKind.Location, original, location.Groups["wh"].Value, location.Groups["loc"].Value, null);
+            return new ScanCode(ScanCodeKind.Location, original, location.Groups["wh"].Value, location.Groups["loc"].Value, null) { Normalized = text };
         }
         var item = ItemPattern().Match(text);
         // 沒有 WH:ITEM: 前綴的 MR-000125 是申請單號，不是料號：交給搜尋處理（M3-01 審查 #8）
         if (item.Success && !(item.Groups["code"].Value.StartsWith("MR-", StringComparison.Ordinal) && !text.StartsWith(ItemPrefix, StringComparison.Ordinal)))
         {
-            return new ScanCode(ScanCodeKind.Item, original, null, null, item.Groups["code"].Value);
+            return new ScanCode(ScanCodeKind.Item, original, null, null, item.Groups["code"].Value) { Normalized = text };
         }
-        return new ScanCode(ScanCodeKind.Text, original, null, null, null);
+        return new ScanCode(ScanCodeKind.Text, original, null, null, null) { Normalized = text };
     }
 
     [GeneratedRegex("^WH:LOC:(?<wh>[A-Z0-9]{1,8}):(?<loc>[A-Z0-9]+(-[A-Z0-9]+){0,5})$")]

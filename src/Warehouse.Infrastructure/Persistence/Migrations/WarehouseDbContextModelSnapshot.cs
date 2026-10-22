@@ -1303,6 +1303,97 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemBarcode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by_name");
+
+                    b.Property<DateTimeOffset?>("DeactivatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deactivated_at");
+
+                    b.Property<Guid?>("DeactivatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deactivated_by_id");
+
+                    b.Property<string>("DeactivatedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("deactivated_by_name");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("NormalizedText")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("normalized_text");
+
+                    b.Property<decimal>("PackQuantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("pack_quantity");
+
+                    b.Property<string>("Symbology")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("symbology");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("text");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id")
+                        .HasName("pk_item_barcodes");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_item_barcodes_item_id");
+
+                    b.HasIndex("NormalizedText")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_barcodes_active_normalized_text")
+                        .HasFilter("is_active");
+
+                    b.ToTable("item_barcodes", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_barcodes_deactivation", "is_active = (deactivated_at IS NULL) AND (deactivated_at IS NULL) = (deactivated_by_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_item_barcodes_pack_quantity", "pack_quantity > 0");
+
+                            t.HasCheckConstraint("ck_item_barcodes_text_not_blank", "btrim(text) <> '' AND normalized_text <> ''");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.ItemCategory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2604,6 +2695,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_item_aliases_items_item_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemBarcode", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_barcodes_items_item_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Items.ItemCategory", b =>

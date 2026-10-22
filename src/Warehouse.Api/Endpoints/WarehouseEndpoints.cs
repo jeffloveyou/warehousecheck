@@ -6,7 +6,7 @@ using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Warehousing;
-using Warehouse.Domain.Scanning;
+using Warehouse.Application.Scanning;
 using Warehouse.Domain.Warehousing;
 
 namespace Warehouse.Api.Endpoints;
@@ -69,16 +69,23 @@ public static class WarehouseEndpoints
                 IWarehouseService warehouses, Guid id, CancellationToken ct) =>
             await warehouses.GetLocationAsync(id, ct) is { } row ? TypedResults.Ok(row) : TypedResults.NotFound());
 
-        // 掃碼內容解析（M3-04）：判斷是儲位、物料或一般文字；儲位會一併回傳查到的儲位
-        group.MapGet("/scan", async (IWarehouseService warehouses, string? code, CancellationToken ct) =>
+        // 掃碼內容解析（M3-04；M5-01 改用 IScanResolver）：儲位、物料（料號／原廠條碼／專屬別名精確相同）、一般文字或拒絕。
+        // 舊欄位 warehouseCode、locationCode、itemCode 保留（A/B 相容窗口內舊版畫面仍可用）；
+        // warehouseId 有值時，別的倉庫的儲位 QR 會被拒絕，且可用沒有前綴的儲位碼。
+        group.MapGet("/scan", async (IScanResolver resolver, string? code, Guid? warehouseId, CancellationToken ct) =>
         {
-            var scan = ScanCodeParser.Parse(code);
-            LocationRow? location = null;
-            if (scan.Kind == ScanCodeKind.Location)
+            var result = await resolver.ResolveAsync(code, warehouseId, ct);
+            return TypedResults.Ok(new
             {
-                location = await warehouses.GetLocationByCodeAsync(scan.WarehouseCode!, scan.LocationCode!, ct);
-            }
-            return TypedResults.Ok(new { scan.Kind, scan.WarehouseCode, scan.LocationCode, scan.ItemCode, Location = location });
-        });
+                result.Kind,
+                result.Value,
+                result.Message,
+                WarehouseCode = result.Location?.WarehouseCode,
+                LocationCode = result.Location?.Code,
+                ItemCode = result.Item?.ItemCode,
+                result.Location,
+                result.Item,
+            });
+        }).AddEndpointFilter(JsonOnlyFilter.InvokeAsync);
     }
 }

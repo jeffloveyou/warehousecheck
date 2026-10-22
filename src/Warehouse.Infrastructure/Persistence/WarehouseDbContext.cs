@@ -30,6 +30,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<ItemKeyword> ItemKeywords => Set<ItemKeyword>();
 
+    public DbSet<ItemBarcode> ItemBarcodes => Set<ItemBarcode>();
+
     public DbSet<WarehouseSite> Warehouses => Set<WarehouseSite>();
 
     public DbSet<Location> Locations => Set<Location>();

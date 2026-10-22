@@ -388,6 +388,20 @@ public partial class WebAuthTests
         });
         Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
         Assert.StartsWith("/Account/AccessDenied", denied.Headers.Location!.OriginalString);
+
+        // M5-01（T-M5-01-16）：原廠條碼 API 與頁面、/api/scan 解析；SystemAdmin 沒有 Items.Index 不能登錄條碼
+        var barcode = "47" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999);
+        var added = await op.Client.PostAsJsonAsync($"/api/items/{a}/barcodes", new { text = barcode, packQuantity = 12, symbology = "ean_13" }, Ct);
+        Assert.Equal(HttpStatusCode.Created, added.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.Client.PostAsJsonAsync($"/api/items/{b}/barcodes", new { text = barcode + "9" }, Ct)).StatusCode);
+        var scan = await op.Client.GetFromJsonAsync<JsonElement>("/api/scan?code=" + Uri.EscapeDataString(barcode + "\r\n"), Ct);
+        Assert.Equal(("Item", "Barcode", 12m), (scan.GetProperty("kind").GetString(),
+            scan.GetProperty("item").GetProperty("matchedBy").GetString(), scan.GetProperty("item").GetProperty("packQuantity").GetDecimal()));
+        Assert.Equal("Rejected", (await op.Client.GetFromJsonAsync<JsonElement>("/api/scan?code=AB", Ct)).GetProperty("kind").GetString());
+        var barcodePage = await op.GetStringAsync($"/Items/Details/{a}?indexKind=Barcode");
+        Assert.Contains(barcode, barcodePage);
+        Assert.Contains("每掃一次 12", barcodePage);
+        Assert.Contains("<option value=\"Barcode\" selected=\"selected\">", barcodePage);
     }
 
     // T-M2-04-01（docs/03 情境 F、H）

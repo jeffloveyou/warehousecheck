@@ -20,6 +20,8 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
 
     public const int MaxActiveKeywords = 100;
 
+    public const int MaxActiveBarcodes = 50;
+
     /// <summary>明細頁最多顯示幾筆已停用的歷史（較舊的請用 SQL 查，docs/04 §4.3）。</summary>
     public const int MaxInactiveShown = 50;
 
@@ -49,30 +51,47 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
                 db.ItemKeywords.Count(o => o.IsActive && o.NormalizedText == k.NormalizedText
                     && db.Items.Any(i => i.Id == o.ItemId && i.Status == ItemStatus.Active))))
             .ToListAsync(cancellationToken);
+        var barcodes = await db.ItemBarcodes.AsNoTracking()
+            .Where(b => b.ItemId == itemId)
+            .OrderByDescending(b => b.IsActive).ThenByDescending(b => b.CreatedAt)
+            .Take(MaxActiveBarcodes + MaxInactiveShown)
+            .Select(b => new ItemIndexRow(
+                b.Id, ItemIndexKind.Barcode, b.Text, b.IsActive, b.CreatedByName, b.CreatedById, b.CreatedAt,
+                b.DeactivatedByName, b.DeactivatedAt, 1, b.PackQuantity, b.Symbology))
+            .ToListAsync(cancellationToken);
 
-        var active = aliases.Concat(keywords).Where(r => r.IsActive).OrderBy(r => r.Kind).ThenBy(r => r.CreatedAt);
-        var inactive = aliases.Concat(keywords).Where(r => !r.IsActive)
+        var all = aliases.Concat(keywords).Concat(barcodes).ToList();
+        var active = all.Where(r => r.IsActive).OrderBy(r => r.Kind).ThenBy(r => r.CreatedAt);
+        var inactive = all.Where(r => !r.IsActive)
             .OrderByDescending(r => r.DeactivatedAt).Take(MaxInactiveShown);
         return active.Concat(inactive).ToList();
     }
 
     public async Task<Guid> AddAsync(
-        Guid itemId, ItemIndexKind kind, string text, Actor actor, CancellationToken cancellationToken)
+        Guid itemId, ItemIndexKind kind, string text, Actor actor, CancellationToken cancellationToken,
+        decimal packQuantity = 1m, string? symbology = null)
     {
         var now = clock.GetUtcNow();
-        ItemIndexEntry entry = kind == ItemIndexKind.Alias
-            ? ItemAlias.Create(itemId, text, actor.Id, actor.Name, now)
-            : ItemKeyword.Create(itemId, text, actor.Id, actor.Name, now);
 
         // 鎖住物料那一列到交易結束：同一物料的索引新增會排隊，物料也不會在檢查之後被停用；
         // 「本物料別名與關鍵字不重複」「數量上限」因此不會被同時送出的請求繞過（M2 審查 S2、S3）。
-        // 不同物料搶同一個別名則由資料庫唯一索引把關。
+        // 不同物料搶同一個別名（或條碼）由資料庫唯一索引把關；別名與條碼互搶由識別碼鎖把關（M5-01）。
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var status = await LockItemStatusAsync(itemId, cancellationToken)
             ?? throw new NotFoundException("item.not_found", "找不到物料。");
         if (status != nameof(ItemStatus.Active))
         {
             throw new ConflictException("index.item_not_active", "只有已核准且有效的物料可以新增搜尋索引。");
+        }
+        ItemIndexEntry entry = kind switch
+        {
+            ItemIndexKind.Alias => ItemAlias.Create(itemId, text, actor.Id, actor.Name, now),
+            ItemIndexKind.Keyword => ItemKeyword.Create(itemId, text, actor.Id, actor.Name, now),
+            _ => await CreateBarcodeAsync(itemId, text, packQuantity, symbology, actor, now, cancellationToken),
+        };
+        if (kind != ItemIndexKind.Keyword)
+        {
+            await AdvisoryLocks.LockIdentifierAsync(db, entry.NormalizedText, cancellationToken);
         }
         await EnsureNoConflictAsync(itemId, kind, entry.NormalizedText, cancellationToken);
         await EnsureWithinLimitAsync(itemId, kind, cancellationToken);
@@ -104,23 +123,53 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
 
+    /// <summary>原廠條碼的包裝數量要符合物料的追蹤模式與單位小數位數（物料列已在交易內鎖住）。</summary>
+    private async Task<ItemBarcode> CreateBarcodeAsync(
+        Guid itemId, string text, decimal packQuantity, string? symbology, Actor actor, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var item = await db.Items.AsNoTracking()
+            .Where(i => i.Id == itemId)
+            .Select(i => new
+            {
+                i.TrackingMode,
+                DecimalPlaces = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.DecimalPlaces).First(),
+            })
+            .SingleAsync(cancellationToken);
+        return ItemBarcode.Create(
+            itemId, text, packQuantity, symbology, item.TrackingMode, item.DecimalPlaces, actor.Id, actor.Name, now);
+    }
+
     private async Task EnsureWithinLimitAsync(Guid itemId, ItemIndexKind kind, CancellationToken cancellationToken)
     {
-        var (count, max) = kind == ItemIndexKind.Alias
-            ? (await db.ItemAliases.CountAsync(a => a.ItemId == itemId && a.IsActive, cancellationToken), MaxActiveAliases)
-            : (await db.ItemKeywords.CountAsync(k => k.ItemId == itemId && k.IsActive, cancellationToken), MaxActiveKeywords);
+        var (count, max) = kind switch
+        {
+            ItemIndexKind.Alias => (await db.ItemAliases.CountAsync(a => a.ItemId == itemId && a.IsActive, cancellationToken), MaxActiveAliases),
+            ItemIndexKind.Keyword => (await db.ItemKeywords.CountAsync(k => k.ItemId == itemId && k.IsActive, cancellationToken), MaxActiveKeywords),
+            _ => (await db.ItemBarcodes.CountAsync(b => b.ItemId == itemId && b.IsActive, cancellationToken), MaxActiveBarcodes),
+        };
         if (count >= max)
         {
-            throw new ConflictException("index.limit_exceeded", $"每個物料最多 {max} 筆有效的{(kind == ItemIndexKind.Alias ? "專屬別名" : "共用關鍵字")}，請先停用不需要的。");
+            throw new ConflictException("index.limit_exceeded", $"每個物料最多 {max} 筆有效的{KindName(kind)}，請先停用不需要的。");
         }
     }
+
+    private static string KindName(ItemIndexKind kind) => kind switch
+    {
+        ItemIndexKind.Alias => "專屬別名",
+        ItemIndexKind.Keyword => "共用關鍵字",
+        _ => "原廠條碼",
+    };
 
     public async Task DeactivateAsync(
         Guid itemId, ItemIndexKind kind, Guid entryId, Actor actor, CancellationToken cancellationToken)
     {
-        ItemIndexEntry? entry = kind == ItemIndexKind.Alias
-            ? await db.ItemAliases.SingleOrDefaultAsync(a => a.Id == entryId && a.ItemId == itemId, cancellationToken)
-            : await db.ItemKeywords.SingleOrDefaultAsync(k => k.Id == entryId && k.ItemId == itemId, cancellationToken);
+        ItemIndexEntry? entry = kind switch
+        {
+            ItemIndexKind.Alias => await db.ItemAliases.SingleOrDefaultAsync(a => a.Id == entryId && a.ItemId == itemId, cancellationToken),
+            ItemIndexKind.Keyword => await db.ItemKeywords.SingleOrDefaultAsync(k => k.Id == entryId && k.ItemId == itemId, cancellationToken),
+            _ => await db.ItemBarcodes.SingleOrDefaultAsync(b => b.Id == entryId && b.ItemId == itemId, cancellationToken),
+        };
         if (entry is null)
         {
             throw new NotFoundException("index.not_found", "找不到這筆搜尋索引。");
@@ -146,10 +195,39 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
     /// - 別名：其他物料已有相同的有效別名 → <see cref="AliasTakenException"/>。
     /// - 本物料已有相同文字的有效別名或關鍵字 → 重複（不建立第二筆，docs/03 情境 C）。
     /// - 其他物料有相同的「關鍵字」不算衝突：共用關鍵字本來就可以多個物料共用。
+    /// - 原廠條碼（M5-01）：其他物料已登錄同一條碼 → index.barcode_taken；
+    ///   別名與條碼互斥（任何物料、含本物料）→ index.identifier_conflict。掃碼時才不會一個碼對到兩種意思。
     /// </summary>
     private async Task EnsureNoConflictAsync(
         Guid itemId, ItemIndexKind kind, string normalized, CancellationToken cancellationToken)
     {
+        if (kind == ItemIndexKind.Barcode)
+        {
+            var barcodeHolder = await db.ItemBarcodes.AsNoTracking()
+                .Where(b => b.IsActive && b.NormalizedText == normalized)
+                .Join(db.Items, b => b.ItemId, i => i.Id, (b, i) => new { i.Id, Label = (i.ItemCode ?? i.RequestNo) + " " + i.Name })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (barcodeHolder is not null)
+            {
+                throw barcodeHolder.Id == itemId
+                    ? new ConflictException("index.duplicate", "此物料已經登錄這個原廠條碼，不需要重複新增。")
+                    : new ConflictException("index.barcode_taken", $"這個條碼已登錄在 {barcodeHolder.Label}，一個條碼只能對應一個物料。");
+            }
+            var aliasHolder = await HolderLabelAsync(db.ItemAliases, normalized, cancellationToken);
+            if (aliasHolder is not null)
+            {
+                throw new ConflictException("index.identifier_conflict", $"這個條碼與 {aliasHolder} 的專屬別名相同，請先停用該別名。");
+            }
+            return;
+        }
+        if (kind == ItemIndexKind.Alias)
+        {
+            var barcodeHolder = await HolderLabelAsync(db.ItemBarcodes, normalized, cancellationToken);
+            if (barcodeHolder is not null)
+            {
+                throw new ConflictException("index.identifier_conflict", $"這段文字已是 {barcodeHolder} 的原廠條碼，不能再當專屬別名。");
+            }
+        }
         if (kind == ItemIndexKind.Alias)
         {
             var holder = await db.ItemAliases.AsNoTracking()
@@ -172,4 +250,12 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
                 "index.duplicate", $"此物料已經有這個{(ownAlias ? "專屬別名" : "共用關鍵字")}，不需要重複新增。");
         }
     }
+
+    /// <summary>某張索引表中與文字相同的有效紀錄屬於哪個物料（料號＋品名）；沒有則回傳 null。</summary>
+    private Task<string?> HolderLabelAsync<T>(IQueryable<T> entries, string normalized, CancellationToken cancellationToken)
+        where T : ItemIndexEntry =>
+        entries.AsNoTracking()
+            .Where(e => e.IsActive && e.NormalizedText == normalized)
+            .Join(db.Items, e => e.ItemId, i => i.Id, (e, i) => (string?)((i.ItemCode ?? i.RequestNo) + " " + i.Name))
+            .FirstOrDefaultAsync(cancellationToken);
 }

@@ -113,7 +113,7 @@ public class DetailsModel(
 
         public decimal Quantity { get; set; }
 
-        /// <summary>移庫：目的倉庫碼（空白＝同倉）。</summary>
+        /// <summary>移庫：目的倉庫碼（空白＝同倉；目的儲位是別倉 QR 時用 QR 上的倉庫）。</summary>
         public string? TargetWarehouseCode { get; set; }
 
         public string? TargetLocationCode { get; set; }
@@ -326,6 +326,7 @@ public class DetailsModel(
         var result = await search.SearchAsync(new ItemSearchRequest(text, false, 1, CandidateLimit), cancellationToken);
         var hits = result.Items.Where(h => h.ItemCode is not null).ToList();
         var exact = hits.Where(h => h.Reason == HitReason.ItemCode).ToList();
+        // 原廠條碼命中只列為候選、不自動帶入：條碼可能是外箱（包裝數量），由人確認後輸入基本單位數量（M5-01 審查 M1）
         if (exact.Count == 0 && hits.Count == 1 && hits[0].Reason == HitReason.Alias)
         {
             exact = hits;

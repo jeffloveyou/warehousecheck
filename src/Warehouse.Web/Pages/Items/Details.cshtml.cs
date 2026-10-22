@@ -103,8 +103,12 @@ public class DetailsModel(
     [BindProperty(SupportsGet = true)]
     public string? IndexText { get; set; }
 
-    [BindProperty]
+    [BindProperty(SupportsGet = true)]
     public ItemIndexKind IndexKind { get; set; } = ItemIndexKind.Keyword;
+
+    /// <summary>原廠條碼的包裝數量（基本單位，空白＝1）；從掃碼查料頁「登錄為原廠條碼」過來時以 ?indexKind=Barcode 預先選好類型。</summary>
+    [BindProperty]
+    public decimal? IndexPackQuantity { get; set; }
 
     /// <summary>別名被其他物料占用時，畫面提供「改加為共用關鍵字」。</summary>
     public string? SuggestKeyword { get; private set; }
@@ -165,14 +169,14 @@ public class DetailsModel(
         {
             try
             {
-                await index.AddAsync(id, IndexKind, IndexText ?? string.Empty, actor, cancellationToken);
+                await index.AddAsync(id, IndexKind, IndexText ?? string.Empty, actor, cancellationToken, IndexPackQuantity ?? 1m);
             }
             catch (AliasTakenException)
             {
                 SuggestKeyword = IndexText;
                 throw;
             }
-            return $"已新增{(IndexKind == ItemIndexKind.Alias ? "專屬別名" : "共用關鍵字")}「{IndexText?.Trim()}」。";
+            return $"已新增{Display.Of(IndexKind)}「{IndexText?.Trim()}」。";
         }, cancellationToken);
 
     public async Task<IActionResult> OnPostDeactivateIndexAsync(Guid id, Guid entryId, ItemIndexKind kind, CancellationToken cancellationToken) =>

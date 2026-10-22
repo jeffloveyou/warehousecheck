@@ -38,7 +38,27 @@ public class ItemKeywordConfiguration : IEntityTypeConfiguration<ItemKeyword>
     }
 }
 
-/// <summary>兩張索引表共用的欄位設定與 CHECK。禁止刪除與改寫的 trigger 在 Migration M2_01 以 SQL 建立。</summary>
+/// <summary>
+/// item_barcodes（原廠條碼，M5-01）：與別名相同，有效的 normalized_text 全系統唯一；
+/// 包裝數量 numeric(19,4) 必須大於 0。禁止刪除與改寫的 trigger 在 Migration M5_01 以 SQL 建立。
+/// </summary>
+public class ItemBarcodeConfiguration : IEntityTypeConfiguration<ItemBarcode>
+{
+    public void Configure(EntityTypeBuilder<ItemBarcode> builder)
+    {
+        ItemIndexMapping.Configure(builder, "item_barcodes", ItemBarcode.TextMaxLength);
+        builder.ToTable(t => t.HasCheckConstraint("ck_item_barcodes_pack_quantity", "pack_quantity > 0"));
+        builder.Property(b => b.PackQuantity).HasPrecision(19, 4);
+        builder.Property(b => b.Symbology).HasMaxLength(ItemBarcode.SymbologyMaxLength);
+        builder.HasIndex(b => b.NormalizedText)
+            .IsUnique()
+            .HasFilter("is_active")
+            .HasDatabaseName("ux_item_barcodes_active_normalized_text");
+        builder.HasIndex(b => b.ItemId);
+    }
+}
+
+/// <summary>三張索引表共用的欄位設定與 CHECK。禁止刪除與改寫的 trigger 在 Migration M2_01 以 SQL 建立。</summary>
 internal static class ItemIndexMapping
 {
     public static void Configure<T>(EntityTypeBuilder<T> builder, string table, int textMaxLength)

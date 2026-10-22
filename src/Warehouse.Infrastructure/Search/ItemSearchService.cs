@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Search;
 using Warehouse.Domain.Items;
+using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Text;
 using Warehouse.Infrastructure.Persistence;
 
@@ -23,7 +24,8 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
     {
         var page = Paging.ClampPage(query.Page);
         var pageSize = query.PageSize < 1 ? ItemSearch.DefaultPageSize : Math.Min(query.PageSize, ItemSearch.MaxPageSize);
-        var raw = query.Text?.Trim() ?? string.Empty;
+        // 先去控制字元（掃碼尾碼、中間夾的 Tab／GS），與條碼登錄、掃碼解析同一套前處理（M5-01 審查 S6）
+        var raw = ScanInput.StripControl(query.Text);
         if (raw.Length > ItemSearch.MaxTextLength)
         {
             raw = raw[..ItemSearch.MaxTextLength];
@@ -44,10 +46,12 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
         // 精確比中別名、關鍵字的物料 ID 寫成 IN (子查詢)：PostgreSQL 可以先用 normalized_text 索引找出少數幾筆，
         // 不必對每個物料各跑一次 EXISTS（M2 審查 R3）
         var aliasItemIds = db.ItemAliases.Where(a => a.IsActive && a.NormalizedText == text).Select(a => a.ItemId);
+        // 原廠條碼（M5-01）與專屬別名同屬第 2 層：兩者互斥，都是全系統唯一的精確識別碼
+        var barcodeItemIds = db.ItemBarcodes.Where(b => b.IsActive && b.NormalizedText == text).Select(b => b.ItemId);
         var keywordItemIds = db.ItemKeywords.Where(k => k.IsActive && k.NormalizedText == text).Select(k => k.ItemId);
         Expression<Func<Item, bool>> exact = i =>
             i.ItemCode == text || i.RequestNo == text
-            || aliasItemIds.Contains(i.Id)
+            || aliasItemIds.Contains(i.Id) || barcodeItemIds.Contains(i.Id)
             || (compact != null && i.NormalizedPartNo == compact)
             || i.NormalizedName == text
             || keywordItemIds.Contains(i.Id);
@@ -63,7 +67,7 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
                 UnitCode = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
                 // 與上面的 exact 條件逐項對應（改其中一邊時兩邊都要改）
                 Tier = i.ItemCode == text || i.RequestNo == text ? 1
-                    : aliasItemIds.Contains(i.Id) ? 2
+                    : aliasItemIds.Contains(i.Id) || barcodeItemIds.Contains(i.Id) ? 2
                     : (compact != null && i.NormalizedPartNo == compact) || i.NormalizedName == text ? 3
                     : keywordItemIds.Contains(i.Id) ? 4
                     : 5,
@@ -92,7 +96,9 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
             {
                 1 => r.ItemCode == text ? (HitReason.ItemCode, r.ItemCode!) : (HitReason.RequestNo, r.RequestNo),
                 // 兩句查詢之間索引可能剛被停用（不同快照），找不到時就顯示查詢文字，不丟例外（M2 審查 R4）
-                2 => (HitReason.Alias, itemAliases.FirstOrDefault(a => a.Normalized == text)?.Text ?? raw),
+                2 => itemAliases.FirstOrDefault(a => a.Normalized == text) is { } alias
+                    ? (HitReason.Alias, alias.Text)
+                    : (HitReason.Barcode, raw),
                 3 => compact is not null && r.NormalizedPartNo == compact
                     ? (HitReason.PartNo, r.ManufacturerPartNo ?? string.Empty)
                     : (HitReason.Name, r.Name),
