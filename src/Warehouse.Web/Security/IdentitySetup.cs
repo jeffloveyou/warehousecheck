@@ -66,7 +66,8 @@ public static class IdentitySetup
             if (context.User.HasClaim(ActorClaims.MustChangePassword, "true")
                 && !path.StartsWithSegments("/Account/ChangePassword")
                 && !path.StartsWithSegments("/Account/Logout")
-                && !path.StartsWithSegments("/health"))
+                && !path.StartsWithSegments("/health")
+                && !path.StartsWithSegments("/sw.js")) // Service Worker 腳本不含資料，轉址會讓註冊失敗（M5-02）
             {
                 if (path.StartsWithSegments("/api"))
                 {

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>目前離線 - 倉庫管理系統</title>
+    <!-- Service Worker 在離線時顯示（M5-02）。只用內嵌樣式：離線時不一定拿得到其他檔案。 -->
+    <style>
+        body { margin: 0; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; color: #222; background: #fff; }
+        header { background: #243447; color: #fff; padding: 12px 16px; font-weight: bold; }
+        main { padding: 16px; max-width: 640px; }
+        .warn { background: #fde8e7; color: #8c1d18; padding: 10px 12px; border-radius: 3px; }
+        button { padding: 10px 18px; border: 1px solid #243447; background: #243447; color: #fff; border-radius: 3px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <header>倉庫管理系統</header>
+    <main>
+        <h1>目前無法連到伺服器</h1>
+        <p class="warn">系統不支援離線作業：離線時不能查庫存、不能送出任何單據。剛才若正在送出，請連線後到單據頁確認是否已加入，<strong>不要直接重送</strong>。</p>
+        <p>請確認手機或電腦已連上公司網路（Wi-Fi），再按重新整理。</p>
+        <p><button type="button" id="offline-reload">重新整理</button></p>
+        <script src="/js/offline.js"></script>
+    </main>
+</body>
+</html>

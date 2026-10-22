@@ -20,7 +20,10 @@ public class StatusPageTests
         Assert.Contains("系統狀態", html);
         Assert.Contains("已連線", html);
         Assert.Contains("id=\"version\"", html);
-        Assert.DoesNotContain("<script", html, StringComparison.OrdinalIgnoreCase);
+        // 只有全站共用的 pwa.js（M5-02，約 3 KB：Service Worker 註冊、離線與新版提示），沒有其他程式
+        var scripts = System.Text.RegularExpressions.Regex.Matches(html, "<script[^>]*src=\"([^\"]+)\"").Select(m => m.Groups[1].Value).ToList();
+        Assert.Equal(html.Split("<script", StringSplitOptions.None).Length - 1, scripts.Count);
+        Assert.All(scripts, s => Assert.StartsWith("/js/pwa.js", s));
     }
 
     // T-M0-09-02
