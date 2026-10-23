@@ -43,6 +43,7 @@ builder.Services.AddWarehouseApi();
 // 預留到期釋放（M4-07）：每 10 分鐘一次，A／B 兩個實例同時執行也安全（條件式更新）
 builder.Services.AddHostedService<Warehouse.Web.Jobs.ReservationExpiryJob>();
 builder.Services.AddWarehouseIdentity();
+builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddRazorPages(options =>
 {
     // 預設全部頁面要登入（FallbackPolicy）；以下明確開放或要求特定權限（ADR-0012）
@@ -64,6 +65,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizePage("/Search/AddIndex", Policies.ItemsIndex);
     options.Conventions.AuthorizeFolder("/Warehouses", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Settings", Policies.SettingsManage);
+    options.Conventions.AuthorizeFolder("/Admin/Users", Policies.UsersManage);
     options.Conventions.AuthorizeFolder("/Opening", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Stock", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Scan", Policies.StockRead);

@@ -1,0 +1,81 @@
+@page
+@model Warehouse.Web.Pages.Admin.Users.IndexModel
+@using Warehouse.Application.Abstractions
+@{
+    ViewData["Title"] = "帳號管理";
+}
+<h1>帳號管理</h1>
+<p class="muted">一個帳號可以有多個角色。停用、重設密碼或改角色後，對方已登入的畫面最慢 5 分鐘內要重新登入。帳號不刪除，只停用（操作紀錄仍可追查）。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (Model.Created is not null)
+{
+    <div class="message info" id="created-password">
+        已建立帳號 <strong>@Model.Created.UserName</strong>，初始密碼：<code id="initial-password">@Model.Created.Password</code><br />
+        密碼只顯示這一次，請交給本人；第一次登入時必須改密碼。
+    </div>
+}
+<form method="post" asp-page-handler="Create" class="panel" id="user-create-form">
+    <h2>新增帳號</h2>
+    <div class="form-grid">
+        <label for="Input_UserName">帳號</label>
+        <input type="text" id="Input_UserName" name="Input.UserName" value="@Model.Input.UserName" maxlength="50" autocomplete="off" placeholder="英數字，例：wang" />
+        <label for="Input_DisplayName">顯示名稱</label>
+        <input type="text" id="Input_DisplayName" name="Input.DisplayName" value="@Model.Input.DisplayName" maxlength="100" placeholder="例：王小明" />
+        <span>角色</span>
+        <span>
+            @foreach (var role in Roles.All)
+            {
+                <label class="inline-check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" /> @Roles.DisplayName(role)</label>
+            }
+        </span>
+    </div>
+    <div class="actions"><button type="submit" id="user-create">新增並產生初始密碼</button></div>
+</form>
+<form method="get" class="filters" id="user-filter">
+    <input type="search" name="q" value="@Model.Keyword" placeholder="帳號或顯示名稱" aria-label="搜尋帳號" />
+    <label><input type="checkbox" name="inactive" value="true" checked="@Model.IncludeInactive" /> 含停用帳號</label>
+    <button type="submit">查詢</button>
+</form>
+<div class="table-wrap">
+    <table id="user-list">
+        <thead><tr><th>帳號</th><th>顯示名稱</th><th>角色</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var u in Model.Result.Items)
+            {
+                <tr>
+                    <td>@u.UserName</td>
+                    <td>@u.DisplayName</td>
+                    <td>@string.Join("、", u.Roles.Select(Roles.DisplayName))</td>
+                    <td>
+                        @(u.IsActive ? "啟用" : "停用")
+                        @if (u.IsLockedOut) { <span class="chip">鎖定中</span> }
+                        @if (u.MustChangePassword) { <span class="chip">待改密碼</span> }
+                    </td>
+                    <td><a href="/Admin/Users/Edit?id=@u.Id">管理</a></td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">沒有符合的帳號。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

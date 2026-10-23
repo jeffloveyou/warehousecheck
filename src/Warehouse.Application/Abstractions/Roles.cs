@@ -17,5 +17,19 @@ public static class Roles
     /// <summary>倉庫作業員：查詢、提出物料、建立期初單。</summary>
     public const string Operator = "Operator";
 
-    public static readonly IReadOnlyList<string> All = [SystemAdmin, ItemManager, WarehouseManager, Operator];
+    /// <summary>只讀使用者：只能查詢物料、庫存、儲位與紀錄，沒有任何寫入權限（M6-01，ADR-0017）。</summary>
+    public const string Viewer = "Viewer";
+
+    public static readonly IReadOnlyList<string> All = [SystemAdmin, ItemManager, WarehouseManager, Operator, Viewer];
+
+    /// <summary>畫面顯示用的中文名稱。</summary>
+    public static string DisplayName(string role) => role switch
+    {
+        SystemAdmin => "系統管理員",
+        ItemManager => "物料管理員",
+        WarehouseManager => "倉庫主管",
+        Operator => "倉庫作業員",
+        Viewer => "只讀使用者",
+        _ => role,
+    };
 }

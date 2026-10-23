@@ -1,0 +1,64 @@
+@page
+@model Warehouse.Web.Pages.Admin.Users.EditModel
+@using Warehouse.Application.Abstractions
+@{
+    ViewData["Title"] = "管理帳號";
+    var account = Model.Account!;
+}
+<p><a href="/Admin/Users">← 帳號列表</a></p>
+<h1>帳號 @account.UserName</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (Model.NewPassword is not null)
+{
+    <div class="message info" id="new-password">
+        新密碼：<code id="reset-password">@Model.NewPassword.Password</code><br />
+        密碼只顯示這一次，請交給本人；登入後必須改密碼。帳號鎖定已一併解除。
+    </div>
+}
+<p>
+    狀態：@(account.IsActive ? "啟用" : "停用")
+    @if (account.IsLockedOut) { <span class="chip">鎖定中</span> }
+    @if (account.MustChangePassword) { <span class="chip">待改密碼</span> }
+</p>
+<form method="post" asp-page-handler="Save" asp-route-id="@account.Id" class="panel" id="user-edit-form">
+    <h2>基本資料與角色</h2>
+    <input type="hidden" name="Input.ConcurrencyStamp" value="@Model.Input.ConcurrencyStamp" />
+    <div class="form-grid">
+        <label for="Input_DisplayName">顯示名稱</label>
+        <input type="text" id="Input_DisplayName" name="Input.DisplayName" value="@Model.Input.DisplayName" maxlength="100" />
+        <span>角色</span>
+        <span>
+            @foreach (var role in Roles.All)
+            {
+                <label class="inline-check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" /> @Roles.DisplayName(role)</label>
+            }
+        </span>
+    </div>
+    <p class="muted">只能查詢的帳號請選「只讀使用者」。顯示名稱會寫進之後的單據與操作紀錄，舊紀錄保留當時的名稱。</p>
+    <div class="actions"><button type="submit" id="user-save">儲存</button></div>
+</form>
+<div class="panel">
+    <h2>帳號操作</h2>
+    <div class="actions">
+        <form method="post" asp-page-handler="ResetPassword" asp-route-id="@account.Id" class="inline">
+            <button type="submit" id="user-reset-password">重設密碼</button>
+        </form>
+        @if (account.IsLockedOut)
+        {
+            <form method="post" asp-page-handler="Unlock" asp-route-id="@account.Id" class="inline">
+                <button type="submit" id="user-unlock">解除鎖定</button>
+            </form>
+        }
+        <form method="post" asp-page-handler="Active" asp-route-id="@account.Id" class="inline">
+            <input type="hidden" name="isActive" value="@((!account.IsActive).ToString().ToLowerInvariant())" />
+            <button type="submit" id="user-toggle-active">@(account.IsActive ? "停用帳號" : "啟用帳號")</button>
+        </form>
+    </div>
+</div>
