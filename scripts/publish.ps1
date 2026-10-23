@@ -6,7 +6,8 @@
     1. 檢查工作目錄是否乾淨（版本號含 Git commit，未提交的修改會讓版本號與內容不一致）
     2. 執行測試（-SkipTests 可略過）
     3. dotnet publish -r <RID>，Framework-dependent（預設）或 Self-contained
-    4. 寫入 release.json：版本、commit、RID、部署型式、建置時間、大小，供部署腳本與排查使用
+    4. 檢查版本號含 +commit（PWA 依此判斷新版，M7-09）
+    5. 寫入 SHA256SUMS（每個檔案的雜湊）與 release.json：版本、commit、RID、部署型式、建置時間、大小，供部署腳本與排查使用
 .PARAMETER Runtime
     win-x64（Windows PC）、linux-x64（x86 NAS／Linux PC）、linux-arm64（ARM NAS）。
 .PARAMETER Project
@@ -61,12 +62,27 @@ Invoke-Step "發布 $name" {
     dotnet publish src/$entry -c Release -r $Runtime --self-contained $selfContainedArg -o $output --nologo -v quiet
 }
 
-$files = Get-ChildItem $output -Recurse -File
 $dll = Join-Path $output "$entry.dll"
+$productVersion = (Get-Item $dll).VersionInfo.ProductVersion
+# PWA（sw.js、快取名）與部署紀錄都靠版本號裡的 commit 判斷新版；少了 +commit 瀏覽器永遠不會更新 Service Worker（docs/11 §6.1）
+if ($productVersion -notlike "*+$commit*") {
+    Remove-Item $output -Recurse -Force
+    throw "發布的版本號 '$productVersion' 不含 +$commit（建置時讀不到 Git？）。已刪除 $output。"
+}
+
+# 檔案雜湊：複製到伺服器或外部媒體後可用 Get-FileHash 比對，確認發布檔沒有損壞或被改過
+$files = Get-ChildItem $output -Recurse -File
+$root = (Resolve-Path $output).Path
+$files | ForEach-Object {
+    $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $relative = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+    "$hash  $relative"
+} | Set-Content (Join-Path $output 'SHA256SUMS') -Encoding utf8
+
 $release = [ordered]@{
     name = $name
     entry = $entry
-    version = (Get-Item $dll).VersionInfo.ProductVersion
+    version = $productVersion
     commit = $commit
     runtime = $Runtime
     deployment = if ($SelfContained) { 'self-contained' } else { 'framework-dependent' }
