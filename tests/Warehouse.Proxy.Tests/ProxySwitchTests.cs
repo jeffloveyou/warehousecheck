@@ -116,6 +116,8 @@ public sealed class ProxySwitchTests : IAsyncLifetime
     [InlineData("""{ "ActiveSlot": "B", "ReverseProxy": { "Clusters": { "app": { "Destinations": { "active": { "Address": "ftp://x/" } } } } } }""", false)]
     [InlineData("""{ "ReverseProxy": { "Clusters": { "app": { "Destinations": { "active": { "Address": "http://localhost:5080/" } } } } } }""", false)]
     [InlineData("""[]""", false)]
+    [InlineData("""{ "ActiveSlot": 1, "ReverseProxy": { "Clusters": { "app": { "Destinations": { "active": { "Address": "http://localhost:5080/" } } } } } }""", false)]
+    [InlineData("""{ "ActiveSlot": "A", "ReverseProxy": { "Clusters": "x" } }""", false)]
     public void 解析upstream內容(string json, bool valid)
     {
         if (valid)
@@ -126,7 +128,8 @@ public sealed class ProxySwitchTests : IAsyncLifetime
         }
         else
         {
-            Assert.ThrowsAny<Exception>(() => UpstreamFile.Parse(json));
+            // 一律是 FormatException，Reload 記錄錯誤後保留目前設定（審查 M3）
+            Assert.Throws<FormatException>(() => UpstreamFile.Parse(json));
         }
     }
 

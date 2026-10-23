@@ -180,8 +180,12 @@ function New-UpstreamContent {
 function Get-DeployState {
     param([Parameter(Mandatory)][string]$Root)
     $file = Join-Path $Root 'deploy-state.json'
-    if (Test-Path $file) { return Get-Content $file -Raw | ConvertFrom-Json -AsHashtable }
-    return @{}
+    if (-not (Test-Path $file)) { return @{} }
+    try { $state = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable } catch { $state = $null }
+    if ($state -isnot [System.Collections.IDictionary]) {
+        throw "$file 損毀（不是有效的 JSON 物件）。請檢查內容，或刪除後重試（刪除後第一次回滾無法確認待命槽位曾成功上線）。"
+    }
+    return $state
 }
 
 function Set-SlotState {

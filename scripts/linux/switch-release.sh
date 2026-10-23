@@ -29,6 +29,7 @@ while [[ $# -gt 0 ]]; do
 done
 [[ $EUID -eq 0 ]] || { echo "請以 root 執行（sudo）。" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "需要 python3（讀寫 JSON 設定）。" >&2; exit 1; }
+command -v flock >/dev/null || { echo "需要 flock（util-linux）。" >&2; exit 1; }
 [[ "$ROLLBACK" == "true" || -n "$RELEASE" ]] || { echo "請指定 --release 或 --rollback。" >&2; exit 2; }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -36,6 +37,8 @@ UPSTREAM="$PROXY_CONFIG/upstream.json"
 LOG=/var/log/warehouse-deploy.log
 STATE="$PROXY_CONFIG/deploy-state.json"
 # 同時只能有一個切換（M7-10）
+[[ ! -f "$STATE" ]] || python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert isinstance(s, dict)' "$STATE" 2>/dev/null \
+  || { echo "$STATE 損毀（不是有效的 JSON 物件）。請檢查內容，或刪除後重試。" >&2; exit 1; }
 exec 9>/run/warehouse-switch-release.lock
 flock -n 9 || { echo "另一個 switch-release 正在執行，請等它完成後再試。" >&2; exit 1; }
 log() { echo "$(date -Iseconds) $*" | tee -a "$LOG"; }
@@ -83,10 +86,12 @@ smoke() {  # $1=槽位 URL；curl 失敗（逾時、500）時不能讓 set -e �
 }
 
 write_upstream() {  # 暫存檔＋mv（同一檔案系統內為原子置換），代理不會讀到寫一半的內容
+  # 每一步都檢查：呼叫端可能寫成 write_upstream || …，那時 set -e 不生效（審查 M2）
   python3 -c 'import json,sys; print(json.dumps({"ActiveSlot": sys.argv[1], "ReverseProxy": {"Clusters": {"app": {"Destinations": {"active": {"Address": f"http://localhost:{sys.argv[2]}/"}}}}}}, indent=2))' \
-    "$1" "$(port_of "$1")" > "$UPSTREAM.tmp"
-  chown --reference="$UPSTREAM" "$UPSTREAM.tmp"; chmod 0640 "$UPSTREAM.tmp"   # 沿用原檔擁有者（root:warehouse-proxy）
-  mv -f "$UPSTREAM.tmp" "$UPSTREAM"
+    "$1" "$(port_of "$1")" > "$UPSTREAM.tmp" || return 1
+  chown --reference="$UPSTREAM" "$UPSTREAM.tmp" || return 1   # 沿用原檔擁有者（root:warehouse-proxy）
+  chmod 0640 "$UPSTREAM.tmp" || return 1
+  mv -f "$UPSTREAM.tmp" "$UPSTREAM" || return 1
 }
 
 [[ -f "$UPSTREAM" ]] || { echo "找不到 $UPSTREAM，請先以 install-service.sh 安裝代理。" >&2; exit 1; }
@@ -99,11 +104,14 @@ current_version=$(version_at "$current_url")
 if [[ "$ROLLBACK" == "true" ]]; then
   systemctl cat "$(service_of "$target")" >/dev/null 2>&1 || { log "失敗：待命槽位 $target 沒有安裝服務，無法回滾"; exit 1; }
   # 只回到曾成功上線的版本：更新失敗留在待命槽位的新版不能被切過去
-  [[ "$(state_get "$target" good)" != "false" ]] || { log "失敗：待命槽位 $target 的版本 $(state_get "$target" version) 未曾成功上線，拒絕回滾"; exit 1; }
+  known_version=$(state_get "$target" version)
+  [[ "$(state_get "$target" good)" != "false" ]] || { log "失敗：待命槽位 $target 的版本 $known_version 未曾成功上線，拒絕回滾"; exit 1; }
+  [[ -n "$known_version" ]] || echo "警告：沒有槽位 $target 的部署紀錄（M7-10 以前安裝），無法確認它曾成功上線。" >&2
   log "開始回滾：$current（$current_version）→ $target"
   systemctl start "$(service_of "$target")" || { log "失敗：槽位 $target 無法啟動，流量維持 $current"; exit 1; }
   wait_version "$target_url" "" 30 || { systemctl stop "$(service_of "$target")"; log "失敗：槽位 $target 未就緒，流量維持 $current"; exit 1; }
-  target_version=$(version_at "$target_url")
+  target_version=${known_version:-$(version_at "$target_url")}
+  [[ -n "$target_version" && "$(version_at "$target_url")" == "$target_version" ]] || { systemctl stop "$(service_of "$target")"; log "失敗：槽位 $target 版本與部署紀錄不符或取不到，流量維持 $current"; exit 1; }
   smoke "$target_url" || { systemctl stop "$(service_of "$target")"; log "失敗：冒煙測試資料庫未連線，流量維持 $current"; exit 1; }
 else
   entry=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("entry", "Warehouse.Web"))' "$RELEASE/release.json")
@@ -125,8 +133,9 @@ if ! wait_version "$PROXY_URL" "$target_version" 15 "$target"; then
   write_upstream "$current" || { log "嚴重：無法改回 upstream.json，目前指向 $target；請檢查 $UPSTREAM 與兩個槽位的服務"; exit 1; }
   log "失敗：代理未在 15 秒內轉到 $target，已改回 $current"; exit 1
 fi
-state_set "$target" "$target_version" true
 log "流量已切換：$current → $target"
+# 流量已切換：寫紀錄失敗只警告，不能讓收尾（停舊槽位、開機啟動）被中斷（審查 M1）
+state_set "$target" "$target_version" true || log "警告：無法更新 $STATE；槽位 $target 之後無法作為回滾目標"
 
 echo "排空 $DRAIN 秒…"
 sleep "$DRAIN"

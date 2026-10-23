@@ -22,43 +22,54 @@ public static class UpstreamFile
     /// <summary>回應標頭：實際處理請求的槽位，switch-release 用它確認切換（兩槽位同版本時也能確認，M7-10）。</summary>
     public const string SlotHeader = "X-Warehouse-Slot";
 
-    /// <summary>解析 upstream.json；格式不對時丟出 <see cref="FormatException"/>（訊息說明哪裡不對）。</summary>
+    /// <summary>解析 upstream.json；任何格式問題都丟出 <see cref="FormatException"/>（訊息說明哪裡不對）。</summary>
     public static Upstream Parse(string json)
     {
-        JsonElement root;
+        JsonDocument document;
         try
         {
-            root = JsonDocument.Parse(json).RootElement;
+            document = JsonDocument.Parse(json);
         }
         catch (JsonException ex)
         {
             throw new FormatException($"不是有效的 JSON：{ex.Message}", ex);
         }
 
-        var slot = root.TryGetProperty("ActiveSlot", out var slotElement) ? slotElement.GetString() : null;
-        if (slot is not ("A" or "B"))
+        using (document)
         {
-            throw new FormatException("ActiveSlot 必須是 A 或 B。");
-        }
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw new FormatException("最外層必須是物件。");
+            }
 
-        string? address = null;
-        if (root.TryGetProperty("ReverseProxy", out var proxy)
-            && proxy.TryGetProperty("Clusters", out var clusters)
-            && clusters.TryGetProperty("app", out var app)
-            && app.TryGetProperty("Destinations", out var destinations)
-            && destinations.TryGetProperty("active", out var active)
-            && active.TryGetProperty("Address", out var addressElement))
-        {
-            address = addressElement.GetString();
-        }
+            var slot = StringOf(root, "ActiveSlot");
+            if (slot is not ("A" or "B"))
+            {
+                throw new FormatException("ActiveSlot 必須是 A 或 B。");
+            }
 
-        if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
-        {
-            throw new FormatException("ReverseProxy:Clusters:app:Destinations:active:Address 必須是 http(s) 網址。");
-        }
+            var active = ObjectOf(ObjectOf(ObjectOf(ObjectOf(ObjectOf(root, "ReverseProxy"), "Clusters"), "app"), "Destinations"), "active");
+            var address = StringOf(active, "Address");
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            {
+                throw new FormatException("ReverseProxy:Clusters:app:Destinations:active:Address 必須是 http(s) 網址。");
+            }
 
-        return new Upstream(slot, uri);
+            return new Upstream(slot, uri);
+        }
     }
+
+    // 型別不對（例如 "ActiveSlot": 1）時視為沒有值，避免 GetString／TryGetProperty 丟出 InvalidOperationException
+    private static JsonElement? ObjectOf(JsonElement? parent, string name) =>
+        parent is { ValueKind: JsonValueKind.Object } p && p.TryGetProperty(name, out var child) && child.ValueKind == JsonValueKind.Object
+            ? child
+            : null;
+
+    private static string? StringOf(JsonElement? parent, string name) =>
+        parent is { ValueKind: JsonValueKind.Object } p && p.TryGetProperty(name, out var child) && child.ValueKind == JsonValueKind.String
+            ? child.GetString()
+            : null;
 }
 
 /// <summary>
@@ -66,6 +77,7 @@ public static class UpstreamFile
 /// 路由與叢集固定寫在程式，只有目的地來自 upstream.json。檔案改寫後重新載入；
 /// **內容無效時保留上一份有效設定並記錄錯誤**（原本會讓目的地消失、全部回 503，M0-12 審查 I3）。
 /// 啟動時檔案無效則啟動失敗，不會在沒有目的地的情況下運作。
+/// 逾時設定鍵：Proxy:ActivityTimeout（M7-10 前是 ReverseProxy:Clusters:app:HttpRequest:ActivityTimeout）。
 /// </summary>
 public sealed class UpstreamConfigProvider : IProxyConfigProvider, IDisposable
 {
@@ -94,10 +106,19 @@ public sealed class UpstreamConfigProvider : IProxyConfigProvider, IDisposable
 
         var fullDirectory = Path.GetFullPath(directory);
         _path = Path.Combine(fullDirectory, UpstreamFile.FileName);
+        // 先開始監看再讀檔：讀檔之後才被改寫也收得到通知（審查 L4）
+        _files = new PhysicalFileProvider(fullDirectory);
+        IChangeToken? firstChange = _files.Watch(UpstreamFile.FileName);
         Current = Read(_path);
         _config = Build(Current);
-        _files = new PhysicalFileProvider(fullDirectory);
-        _watch = ChangeToken.OnChange(() => _files.Watch(UpstreamFile.FileName), Reload);
+        _watch = ChangeToken.OnChange(
+            () =>
+            {
+                var token = firstChange ?? _files.Watch(UpstreamFile.FileName);
+                firstChange = null;
+                return token;
+            },
+            Reload);
     }
 
     /// <summary>目前生效的目的地（開發模式為 null）。</summary>
@@ -118,13 +139,15 @@ public sealed class UpstreamConfigProvider : IProxyConfigProvider, IDisposable
         {
             next = ReadWithRetry(_path!);
         }
-        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
+            // 任何讀取或格式錯誤都保留目前設定；例外若從回呼丟出會被檔案監看吞掉、看不到紀錄
             _logger.LogError("{File} 無效，保留目前的目的地（槽位 {Slot}，{Address}）：{Reason}",
                 _path, Current?.Slot, Current?.Address, ex.Message);
             return;
         }
 
+        Config previous;
         lock (_gate)
         {
             if (next == Current)
@@ -132,13 +155,21 @@ public sealed class UpstreamConfigProvider : IProxyConfigProvider, IDisposable
                 return;
             }
 
-            var previous = _config;
+            previous = _config;
             Current = next;
             _config = Build(next);
-            previous.Expire();
         }
 
         _logger.LogInformation("目前槽位改為 {Slot}（{Address}）", next.Slot, next.Address);
+        try
+        {
+            // 通知 YARP 改用新設定（會同步執行 YARP 的回呼），放在 lock 外
+            previous.Expire();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "通知代理改用新目的地時發生錯誤");
+        }
     }
 
     private static Upstream Read(string path)
@@ -203,15 +234,23 @@ public sealed class UpstreamConfigProvider : IProxyConfigProvider, IDisposable
         return new Config([route], [cluster]);
     }
 
-    private sealed class Config(IReadOnlyList<RouteConfig> routes, IReadOnlyList<ClusterConfig> clusters) : IProxyConfig
+    private sealed class Config : IProxyConfig
     {
+        // 舊設定被取代後不再使用；CTS 不 Dispose（YARP 可能仍持有 token），數量極少可忽略
         private readonly CancellationTokenSource _expired = new();
 
-        public IReadOnlyList<RouteConfig> Routes { get; } = routes;
+        public Config(IReadOnlyList<RouteConfig> routes, IReadOnlyList<ClusterConfig> clusters)
+        {
+            Routes = routes;
+            Clusters = clusters;
+            ChangeToken = new CancellationChangeToken(_expired.Token);
+        }
 
-        public IReadOnlyList<ClusterConfig> Clusters { get; } = clusters;
+        public IReadOnlyList<RouteConfig> Routes { get; }
 
-        public IChangeToken ChangeToken => new CancellationChangeToken(_expired.Token);
+        public IReadOnlyList<ClusterConfig> Clusters { get; }
+
+        public IChangeToken ChangeToken { get; }
 
         public void Expire() => _expired.Cancel();
     }

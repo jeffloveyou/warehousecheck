@@ -84,6 +84,7 @@ function Test-Smoke($Slot, [string]$ExpectedVersion) {
         throw "冒煙測試失敗：版本 $($info.version)、資料庫連線 $($info.databaseConnected)；流量維持目前槽位。"
     }
     Write-Host "冒煙測試通過：版本 $($info.version)、資料庫已連線" -ForegroundColor Green
+    return $info.version
 }
 
 # 同時只能有一個切換（M0-12 審查 S4）：兩個切換同時改 upstream.json 與服務會互相覆蓋
@@ -114,8 +115,9 @@ try {
             Stop-Service $target.Service
             throw "槽位 $($target.Name) 未就緒，回滾中止，流量維持 $($current.Name)。"
         }
-        $targetVersion = Get-SlotVersion $target
-        Test-Smoke $target $(if ($known) { $known.version } else { $targetVersion })
+        # 版本以部署紀錄為準；沒有紀錄時取冒煙回應的版本（單次查詢逾時可能取不到，審查 L1）
+        $targetVersion = Test-Smoke $target $(if ($known) { $known.version } else { $null })
+        if (-not $targetVersion) { Stop-Service $target.Service; throw "無法取得槽位 $($target.Name) 的版本，回滾中止。" }
     } else {
         $release = Get-ReleaseInfo $ReleasePath
         $targetVersion = $release.version
@@ -137,13 +139,19 @@ try {
         }
 
         # 3. 冒煙測試
-        Test-Smoke $target $targetVersion
+        Test-Smoke $target $targetVersion | Out-Null
+    }
+
+    if ($targetVersion -eq $currentVersion) {
+        Write-Warning "兩個槽位版本相同（$targetVersion）：只能靠代理的 X-Warehouse-Slot 確認切換（M7-10 以前的代理無法確認）。"
     }
 
     # 4～5. 切換並停止舊槽位
     Switch-Traffic $current $target $targetVersion
-    Set-SlotState $Root $target.Name $targetVersion $true
     if (Get-Service $current.Service -ErrorAction SilentlyContinue) { Complete-Switch $current $target }
+    # 流量已切換：寫紀錄失敗只警告，不能讓收尾（停舊槽位、設開機啟動）被中斷（審查 M1）
+    try { Set-SlotState $Root $target.Name $targetVersion $true }
+    catch { Write-DeployLog "警告：無法更新部署紀錄（$($_.Exception.Message)）；槽位 $($target.Name) 之後無法作為回滾目標，請檢查 $(Join-Path $Root 'deploy-state.json')。" }
     Write-DeployLog "完成：目前槽位 $($target.Name)，版本 $targetVersion"
     exit 0
 } catch {
