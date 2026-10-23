@@ -14,8 +14,8 @@ using Warehouse.Domain.Items;
 namespace Warehouse.Web.Pages.Items;
 
 /// <summary>
-/// 物料明細、審核紀錄與審核動作。按鈕依角色與狀態顯示，但權限一律由 <see cref="IItemWorkflowService"/> 再檢查
-/// （只隱藏按鈕擋不住直接送出的請求）。每個動作都帶回讀取時的版本（xmin），別人先改過會顯示衝突。
+/// 物料明細、審核紀錄與審核動作。按鈕依角色與狀態顯示；權限由頁面層政策先擋（M6-04），<see cref="IItemWorkflowService"/>
+/// 再檢查一次（是否物料管理員、提出人；只隱藏按鈕擋不住直接送出的請求）。每個動作都帶回讀取時的版本（xmin），別人先改過會顯示衝突。
 /// </summary>
 public class DetailsModel(
     IItemQueryService queries, IItemWorkflowService workflow, IItemIndexService index, IAuthorizationService authorization,
@@ -124,42 +124,42 @@ public class DetailsModel(
         await LoadAsync(id, cancellationToken) ? Page() : NotFound();
 
     public Task<IActionResult> OnPostApproveAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
         {
             var code = await workflow.ApproveAsync(id, Version, AcknowledgedIds, Comment, actor, cancellationToken);
             return $"已核准，正式料號 {code}。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostReturnAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
         {
             await workflow.ReturnAsync(id, Version, Comment ?? string.Empty, actor, cancellationToken);
             return "已退回給提出人。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostRejectAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
         {
             await workflow.RejectAsync(id, Version, Comment ?? string.Empty, DuplicateOfItemId, actor, cancellationToken);
             return "已拒絕。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostWithdrawAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsSubmit, async actor =>
         {
             await workflow.WithdrawAsync(id, Version, Comment, actor, cancellationToken);
             return "已撤回。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostDeactivateAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
         {
             await workflow.DeactivateAsync(id, Version, Comment, actor, cancellationToken);
             return "已停用。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostReactivateAsync(Guid id, CancellationToken cancellationToken) =>
-        RunAsync(id, async actor =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
         {
             await workflow.ReactivateAsync(id, Version, Comment, actor, cancellationToken);
             return "已重新啟用。";
@@ -193,6 +193,10 @@ public class DetailsModel(
     /// </summary>
     private async Task<bool> CanMaintainIndexAsync() =>
         (await authorization.AuthorizeAsync(User, Policies.ItemsIndex)).Succeeded;
+
+    /// <summary>先檢查頁面層政策（伺服器端第一道），服務層仍檢查是否為物料管理員或提出人（第二道，M6-04）。</summary>
+    private async Task<IActionResult> RunAsync(Guid id, string policy, Func<Actor, Task<string>> action, CancellationToken cancellationToken) =>
+        (await authorization.AuthorizeAsync(User, policy)).Succeeded ? await RunAsync(id, action, cancellationToken) : Forbid();
 
     /// <summary>執行動作：成功時轉址（PRG，重新整理不會重送）；已知錯誤時重新載入並顯示訊息。</summary>
     private async Task<IActionResult> RunAsync(Guid id, Func<Actor, Task<string>> action, CancellationToken cancellationToken)

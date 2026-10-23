@@ -215,6 +215,10 @@ public class WarehouseScopeTests
         var service = scope.ServiceProvider.GetRequiredService<IUserAdminService>();
         await ForbiddenAsync(() => service.SetWarehousesAsync(admin.Id, true, [], admin, Ct));
         Assert.False((await service.GetAsync(admin.Id, Ct)).AllWarehouses);
+        // 也不能新增帳號（新帳號預設全部倉庫）或重設別人密碼來繞過自己的範圍（M6-04 審查 R2）
+        await ForbiddenAsync(() => service.CreateAsync(new CreateUserRequest("r" + Guid.NewGuid().ToString("N")[..9], "繞過", [Roles.WarehouseManager]), admin, Ct));
+        var other = await WebSession.CreateUserAsync(factory, "r" + Guid.NewGuid().ToString("N")[..9], Password, Roles.WarehouseManager);
+        await ForbiddenAsync(() => service.ResetPasswordAsync(other, admin, Ct));
     }
 
     private static async Task ForbiddenAsync(Func<Task> action) =>

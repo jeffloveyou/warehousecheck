@@ -109,6 +109,11 @@ public sealed class StockDocumentService(
         StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken,
         Guid? requestId = null)
     {
+        // 刻意在冪等重送檢查之前先擋（帶 requestId 也不能繞過）；Domain StockDocument.CreateMovement 也有同樣的規則（第二道）
+        if (type is StockDocumentType.Opening or StockDocumentType.Adjustment)
+        {
+            throw new DomainRuleException(type == StockDocumentType.Adjustment ? "調整單只能由盤點核准產生。" : "期初單請用期初建帳功能。");
+        }
         if (requestId is { } existingId && await SameRequestAsync(existingId, actor, cancellationToken))
         {
             return existingId;
