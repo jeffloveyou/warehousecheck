@@ -12,8 +12,11 @@ namespace Warehouse.Web.Pages.Settings;
 /// 表單同時帶「開頁時的值」（Original*），只更新實際改動的項目；別人先改過同一項時顯示衝突，不會默默蓋掉。
 /// 關閉倉位註記、屬性、圖片只隱藏畫面，既有資料保留。
 /// </summary>
-public class IndexModel(ISettingsService settings) : PageModel
+public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.IAuditQueryService audit, TimeProvider clock) : PageModel
 {
+    /// <summary>最近的設定變更（setting.update 稽核，最近 90 天前 20 筆，M6-05）。</summary>
+    public IReadOnlyList<Warehouse.Application.Audit.AuditRow> RecentChanges { get; private set; } = [];
+
     [BindProperty]
     public SettingsForm Form { get; set; } = new();
 
@@ -107,7 +110,39 @@ public class IndexModel(ISettingsService settings) : PageModel
     {
         Form = SettingsForm.From(await settings.GetAsync(cancellationToken));
         Original = SettingsForm.From(Form.ToSettings());
+        await LoadChangesAsync(cancellationToken);
     }
+
+    private async Task LoadChangesAsync(CancellationToken cancellationToken)
+    {
+        var now = clock.GetUtcNow();
+        RecentChanges = (await audit.SearchAsync(new Warehouse.Application.Audit.AuditQuery(
+            now.AddDays(-90), now.AddMinutes(1), ActionPrefix: "setting.", EntityType: "setting"), cancellationToken)).Items;
+    }
+
+    /// <summary>設定鍵的中文名稱（最近變更列表用）。</summary>
+    public static string LabelOf(string key) => key switch
+    {
+        SettingKeys.AllowSelfApproveOpening => "期初單允許自核",
+        SettingKeys.LocationNotesEnabled => "倉位自由備註",
+        SettingKeys.LocationAttributesEnabled => "倉位結構化屬性",
+        SettingKeys.LocationImagesEnabled => "倉位圖片",
+        SettingKeys.DocumentApprovalEnabled => "單據需要審核",
+        SettingKeys.AllowSelfApproveDocuments => "進出倉單允許自核",
+        SettingKeys.DocumentPurposeEnabled => "表頭：用途啟用",
+        SettingKeys.DocumentPurposeRequired => "表頭：用途必填",
+        SettingKeys.DocumentPartnerEnabled => "表頭：往來對象啟用",
+        SettingKeys.DocumentPartnerRequired => "表頭：往來對象必填",
+        SettingKeys.DocumentExternalNoEnabled => "表頭：外部單號啟用",
+        SettingKeys.DocumentExternalNoRequired => "表頭：外部單號必填",
+        SettingKeys.DocumentNoteEnabled => "表頭：備註啟用",
+        SettingKeys.DocumentNoteRequired => "表頭：備註必填",
+        SettingKeys.DocumentAttachmentsEnabled => "單據附件",
+        SettingKeys.PrintCompanyName => "列印公司名稱",
+        SettingKeys.AllowSelfApproveStocktake => "盤差允許自核",
+        SettingKeys.StocktakeBlindCount => "盲盤",
+        _ => key,
+    };
 
     public async Task<IActionResult> OnPostAsync(CancellationToken cancellationToken)
     {
@@ -122,12 +157,14 @@ public class IndexModel(ISettingsService settings) : PageModel
             Error = ex.Message;
             Form = SettingsForm.From(await settings.GetAsync(cancellationToken));
             Original = SettingsForm.From(Form.ToSettings());
+            await LoadChangesAsync(cancellationToken);
             return Page();
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
             // 例如公司名稱超過 100 字：保留使用者輸入、顯示原因（M4-03 審查 #3）
             Error = ex.Message;
+            await LoadChangesAsync(cancellationToken);
             return Page();
         }
     }
