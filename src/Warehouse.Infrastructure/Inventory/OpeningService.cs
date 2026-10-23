@@ -304,7 +304,7 @@ public sealed class OpeningService(
         Guid documentId, uint? expectedVersion, Actor actor, bool editorOnly, CancellationToken cancellationToken,
         Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
         var doc = await LoadAsync(documentId, expectedVersion, actor, cancellationToken);
         if (editorOnly && !actor.IsWarehouseManager && doc.CreatedById != actor.Id)

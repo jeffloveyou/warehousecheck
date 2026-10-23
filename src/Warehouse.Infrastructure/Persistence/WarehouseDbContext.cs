@@ -71,6 +71,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<StocktakeLocation> StocktakeLocations => Set<StocktakeLocation>();
 
+    public DbSet<Imports.ImportBatch> ImportBatches => Set<Imports.ImportBatch>();
+
     /// <summary>盤點單號 ST-000001、調整單號 ADJ-000001 的流水號來源（M6-02）。</summary>
     public const string StocktakeNoSequence = "stocktake_no_seq";
     public const string AdjustmentDocNoSequence = "adjustment_doc_no_seq";

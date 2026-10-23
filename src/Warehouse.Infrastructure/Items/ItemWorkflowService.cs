@@ -70,7 +70,7 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             return previous;
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         await EnsureCategoryAndUnitUsableAsync(draft.CategoryId, draft.BaseUnitId, cancellationToken);
 
         var now = clock.GetUtcNow();

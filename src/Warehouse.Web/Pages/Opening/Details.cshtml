@@ -31,6 +31,10 @@
 {
     <partial name="_ScanPanel" model="Model.ScanPanel" />
 }
+@if (Model.CanEdit)
+{
+    <p><a href="/Import?Kind=OpeningLines&Target=@Model.Doc.Id" id="opening-import-link">從 Excel 匯入明細</a></p>
+}
 <partial name="_OpeningLines" model="Model" />
 
 @if (Model.CanEdit)

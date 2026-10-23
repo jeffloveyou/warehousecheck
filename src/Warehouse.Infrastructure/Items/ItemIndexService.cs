@@ -76,7 +76,7 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         // 鎖住物料那一列到交易結束：同一物料的索引新增會排隊，物料也不會在檢查之後被停用；
         // 「本物料別名與關鍵字不重複」「數量上限」因此不會被同時送出的請求繞過（M2 審查 S2、S3）。
         // 不同物料搶同一個別名（或條碼）由資料庫唯一索引把關；別名與條碼互搶由識別碼鎖把關（M5-01）。
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         var status = await LockItemStatusAsync(itemId, cancellationToken)
             ?? throw new NotFoundException("item.not_found", "找不到物料。");
         if (status != nameof(ItemStatus.Active))
@@ -118,7 +118,9 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
     {
         await using var command = db.Database.GetDbConnection().CreateCommand();
         command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
-        command.CommandText = "SELECT status FROM items WHERE id = @id FOR UPDATE";
+        // NO KEY UPDATE：仍與同一物料的其他修改（UPDATE items、FOR UPDATE）互斥，但不擋過帳插入異動時外鍵檢查的 KEY SHARE
+        // （匯入大量別名時這個鎖會持有到整批結束，M6-03b 審查 🟠-4）
+        command.CommandText = "SELECT status FROM items WHERE id = @id FOR NO KEY UPDATE";
         command.Parameters.Add(new NpgsqlParameter("id", itemId));
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
