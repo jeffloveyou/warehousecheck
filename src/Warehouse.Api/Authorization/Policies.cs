@@ -68,6 +68,9 @@ public static class Policies
     /// <summary>查詢與匯出操作日誌（audit_logs）：系統管理員（M6-01）。</summary>
     public const string AuditRead = "Audit.Read";
 
+    /// <summary>系統狀態頁（版本、資料庫、備份、磁碟）：系統管理員（M7-02）。</summary>
+    public const string SystemStatusRead = "System.Status";
+
     public static IServiceCollection AddWarehouseAuthorization(this IServiceCollection services)
     {
         services.AddAuthorizationBuilder()
@@ -90,7 +93,8 @@ public static class Policies
             .AddPolicy(NegativePolicy, p => p.RequireRole(Roles.ItemManager))
             .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin))
             .AddPolicy(UsersManage, p => p.RequireRole(Roles.SystemAdmin))
-            .AddPolicy(AuditRead, p => p.RequireRole(Roles.SystemAdmin));
+            .AddPolicy(AuditRead, p => p.RequireRole(Roles.SystemAdmin))
+            .AddPolicy(SystemStatusRead, p => p.RequireRole(Roles.SystemAdmin));
         return services;
     }
 }
