@@ -38,6 +38,16 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
         Guid? warehouseId, Guid? locationId, Guid? itemId, int page, CancellationToken cancellationToken)
     {
         page = Paging.ClampPage(page);
+        var (balances, query) = QueryBalances(warehouseId, locationId, itemId);
+        var total = await balances.CountAsync(cancellationToken);
+        var rows = await query.Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize).ToListAsync(cancellationToken);
+        return new PagedResult<BalanceRow>(rows, page, Paging.DefaultPageSize, total);
+    }
+
+    /// <summary>結存查詢（畫面與匯出共用，M6-03）：篩選後的結存（計數用）與排序後的畫面列。</summary>
+    internal (IQueryable<Domain.Inventory.StockBalance> Filtered, IQueryable<BalanceRow> Rows) QueryBalances(
+        Guid? warehouseId, Guid? locationId, Guid? itemId)
+    {
         var balances = db.StockBalances.AsNoTracking().Where(b => b.Quantity != 0);
         if (locationId is { } l)
         {
@@ -64,15 +74,15 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
             select new BalanceRow(
                 item.Id, item.ItemCode, item.Name, unit.Code, loc.Id, wh.Code, loc.Code, lot.LotNo, lot.ExpiryDate,
                 serial.SerialNo, b.StockStatus, loc.Status == LocationStatus.Available, b.Quantity);
-
-        var total = await balances.CountAsync(cancellationToken);
-        var rows = await query.Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize).ToListAsync(cancellationToken);
-        return new PagedResult<BalanceRow>(rows, page, Paging.DefaultPageSize, total);
+        return (balances, query);
     }
 
-    public async Task<PagedResult<MovementRow>> SearchMovementsAsync(MovementQuery q, CancellationToken cancellationToken)
+    public async Task<PagedResult<MovementRow>> SearchMovementsAsync(MovementQuery q, CancellationToken cancellationToken) =>
+        await PageMovementsAsync(FilterMovements(q), Paging.ClampPage(q.Page), cancellationToken);
+
+    /// <summary>異動歷史的篩選條件（畫面與匯出共用，M6-03）。</summary>
+    internal IQueryable<Domain.Inventory.StockMovement> FilterMovements(MovementQuery q)
     {
-        var page = Paging.ClampPage(q.Page);
         // 沒有料號、儲位、單號，也沒有起日時，只查最近 <see cref="MovementQuery.DefaultDays"/> 天（避免全表掃描與計數，M4-03 審查 #12）
         if (string.IsNullOrWhiteSpace(q.ItemCode) && string.IsNullOrWhiteSpace(q.LocationCode) && string.IsNullOrWhiteSpace(q.DocNo) && q.From is null)
         {
@@ -116,7 +126,7 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
             var utc = to.ToUniversalTime();
             movements = movements.Where(m => m.OccurredAt < utc);
         }
-        return await PageMovementsAsync(movements, page, cancellationToken);
+        return movements;
     }
 
     public async Task<PagedResult<MovementRow>> GetMovementsAsync(
@@ -144,23 +154,26 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
     private async Task<PagedResult<MovementRow>> PageMovementsAsync(
         IQueryable<Domain.Inventory.StockMovement> movements, int page, CancellationToken cancellationToken)
     {
-        var query =
-            from m in movements
-            join doc in db.StockDocuments on m.DocumentId equals doc.Id
-            join item in db.Items on m.ItemId equals item.Id
-            join loc in db.Locations on m.LocationId equals loc.Id
-            join wh in db.Warehouses on loc.WarehouseId equals wh.Id
-            from lot in db.InventoryLots.Where(x => x.Id == m.LotId).DefaultIfEmpty()
-            from serial in db.ItemSerials.Where(x => x.Id == m.SerialId).DefaultIfEmpty()
-            orderby m.OccurredAt descending, m.Id
-            select new MovementRow(
-                m.OccurredAt, doc.DocNo, doc.DocType, item.ItemCode, item.Name, wh.Code, loc.Code, lot.LotNo,
-                serial.SerialNo, m.StockStatus, m.QuantityDelta, m.BalanceAfter, m.ActorName, m.DocumentId, m.IsNegative);
+        var query = MovementRows(movements);
 
         var total = await movements.CountAsync(cancellationToken);
         var rows = await query.Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize).ToListAsync(cancellationToken);
         return new PagedResult<MovementRow>(rows, page, Paging.DefaultPageSize, total);
     }
+
+    /// <summary>異動列投影（新到舊；畫面與匯出共用）。</summary>
+    internal IQueryable<MovementRow> MovementRows(IQueryable<Domain.Inventory.StockMovement> movements) =>
+        from m in movements
+        join doc in db.StockDocuments on m.DocumentId equals doc.Id
+        join item in db.Items on m.ItemId equals item.Id
+        join loc in db.Locations on m.LocationId equals loc.Id
+        join wh in db.Warehouses on loc.WarehouseId equals wh.Id
+        from lot in db.InventoryLots.Where(x => x.Id == m.LotId).DefaultIfEmpty()
+        from serial in db.ItemSerials.Where(x => x.Id == m.SerialId).DefaultIfEmpty()
+        orderby m.OccurredAt descending, m.Id
+        select new MovementRow(
+            m.OccurredAt, doc.DocNo, doc.DocType, item.ItemCode, item.Name, wh.Code, loc.Code, lot.LotNo,
+            serial.SerialNo, m.StockStatus, m.QuantityDelta, m.BalanceAfter, m.ActorName, m.DocumentId, m.IsNegative);
 
     public async Task<PagedResult<UncountedLocationRow>> GetUncountedLocationsAsync(
         Guid warehouseId, int page, CancellationToken cancellationToken)

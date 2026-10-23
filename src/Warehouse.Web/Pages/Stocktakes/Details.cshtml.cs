@@ -126,6 +126,12 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
             return adjustment is null ? "已核准，沒有差異（不產生調整單）。" : "已核准，調整單已過帳。";
         }, cancellationToken);
 
+    /// <summary>匯出盤點明細與差異（M6-03）；盲盤時與畫面相同隱藏帳面量。</summary>
+    public Task<IActionResult> OnGetExportAsync(
+        Guid id, [FromServices] Warehouse.Application.Exports.IExportService export, [FromServices] ExportGate gate,
+        CancellationToken cancellationToken) =>
+        gate.RunAsync(this, () => export.StocktakeAsync(id, User.ToActor(), cancellationToken), $"/Stocktakes/Details/{id}");
+
     public string LinesUrl(int page) =>
         Url.Page("/Stocktakes/Details", new { id = Doc.Id, Loc, Uncounted, Diff, p = page })!;
 

@@ -1,0 +1,10 @@
+@model string
+@* 匯出 Excel 連結（M6-03）：與目前篩選條件相同；超過上限或錯誤時，訊息由 ExportGate 放在 TempData["ExportError"] *@
+<p class="export-bar">
+    <a href="@Model" id="export-link">匯出 Excel</a>
+    <span class="muted">（最多 50,000 筆；同時匯出人數有限制）</span>
+    @if (TempData["ExportError"] is string exportError)
+    {
+        <span class="bad" id="export-error">@exportError</span>
+    }
+</p>

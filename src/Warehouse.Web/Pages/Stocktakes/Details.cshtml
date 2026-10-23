@@ -27,7 +27,8 @@
     @if (d.RecountComment is not null && d.Status == StocktakeStatus.Counting) { <div class="message error">要求重盤：@d.RecountComment</div> }
     @if (d.AdjustmentDocumentId is { } adj) { <p>調整單：<a href="/Documents/Details/@adj" id="adjustment-link">@d.AdjustmentDocNo</a></p> }
     @if (d.QuantitiesHidden) { <p class="muted">盲盤：盤點中不顯示帳面量。</p> }
-    <p><a href="/Stocktakes/Print/@d.Id" target="_blank">列印盤點表</a></p>
+    <p><a href="/Stocktakes/Print/@d.Id" target="_blank">列印盤點表</a>｜<a href="/Stocktakes/Details/@d.Id?handler=Export" id="export-link">匯出 Excel</a>
+        @if (TempData["ExportError"] is string exportError) { <span class="bad">@exportError</span> }</p>
 </div>
 
 @if (Model.CanCount)

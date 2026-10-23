@@ -17,6 +17,7 @@
     <input type="text" name="ItemCode" value="@Model.ItemCode" placeholder="料號" aria-label="料號" />
     <button type="submit" id="stock-submit">查詢</button>
 </form>
+<partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
     <div class="message warn">@Model.Notice</div>
