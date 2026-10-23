@@ -52,7 +52,7 @@
                 <tr>
                     <td>@u.UserName</td>
                     <td>@u.DisplayName</td>
-                    <td>@string.Join("、", u.Roles.Select(Roles.DisplayName))</td>
+                    <td>@string.Join("、", u.Roles.Select(Roles.DisplayName))@(u.AllWarehouses ? "" : $"（限 {u.WarehouseIds.Count} 個倉庫）")</td>
                     <td>
                         @(u.IsActive ? "啟用" : "停用")
                         @if (u.IsLockedOut) { <span class="chip">鎖定中</span> }

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Warehouse.Web.Security;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
@@ -58,6 +59,9 @@ public class IndexModel(IStockReservationService reservations, IWarehouseService
     public PagedResult<ReservationRow> Result { get; private set; } = null!;
 
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
+
+    /// <summary>可作業的倉庫（null＝全部），建單下拉選單只列這些（M6-01b）。</summary>
+    public IReadOnlySet<Guid>? Operable { get; private set; }
 
     public bool CanManage { get; private set; }
 
@@ -138,6 +142,7 @@ public class IndexModel(IStockReservationService reservations, IWarehouseService
     {
         CurrentActor = User.ToActor();
         Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
         Result = await reservations.ListAsync(ItemCode, WarehouseId, StatusFilter, PageNumber, cancellationToken);
         CanManage = (await authorization.AuthorizeAsync(User, Policies.ReservationManage)).Succeeded;
     }

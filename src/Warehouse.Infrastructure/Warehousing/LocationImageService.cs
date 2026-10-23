@@ -7,6 +7,7 @@ using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Files;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 
 namespace Warehouse.Infrastructure.Warehousing;
@@ -47,10 +48,12 @@ public sealed class LocationImageService(
         {
             throw new DomainRuleException("系統設定已關閉倉位圖片功能。");
         }
-        if (!await db.Locations.AnyAsync(l => l.Id == locationId, cancellationToken))
+        var locationWarehouse = await db.Locations.Where(l => l.Id == locationId).Select(l => (Guid?)l.WarehouseId).SingleOrDefaultAsync(cancellationToken);
+        if (locationWarehouse is null)
         {
             throw new NotFoundException("location.not_found", "找不到儲位。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor, locationWarehouse.Value, cancellationToken);
         // 已滿就不必花 CPU 解碼；最終仍以下方鎖住後的計數為準
         await EnsureBelowLimitAsync(locationId, cancellationToken);
         var bytes = await ReadLimitedAsync(content, cancellationToken);
@@ -78,6 +81,8 @@ public sealed class LocationImageService(
         await DbCommands.ExecuteAsync(db, "SELECT 1 FROM locations WHERE id = @id FOR NO KEY UPDATE", cancellationToken,
             DbCommands.Param("id", locationId));
         await EnsureBelowLimitAsync(locationId, cancellationToken);
+        // 解碼期間權限可能被撤銷：交易內再檢查一次（與單據附件相同，M6-01b 審查 Y4）
+        await WarehouseAccess.EnsureAsync(db, actor, locationWarehouse.Value, cancellationToken);
 
         db.Add(LocationImage.Create(id, locationId, largeKey, thumbKey, processed.Width, processed.Height,
             processed.Large.Length, processed.Thumb.Length, actor.Id, actor.Name, now));
@@ -104,6 +109,8 @@ public sealed class LocationImageService(
         {
             throw new NotFoundException("location_image.not_found", "找不到圖片。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor,
+            await db.Locations.Where(l => l.Id == locationId).Select(l => l.WarehouseId).SingleAsync(cancellationToken), cancellationToken);
         var now = clock.GetUtcNow();
         // 條件式更新：兩人同時停用同一張圖，只有一人成功、只寫一筆稽核（審查 Y11）
         var changed = await DbCommands.ExecuteAsync(db,

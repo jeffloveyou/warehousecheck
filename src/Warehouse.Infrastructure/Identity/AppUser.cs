@@ -17,6 +17,20 @@ public class AppUser : IdentityUser<Guid>
 
     /// <summary>停用的帳號不能登入；不刪除帳號，審核紀錄的操作者仍可追查。</summary>
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// true（預設）＝可在全部倉庫作業；false＝只能在 <c>user_warehouses</c> 列出的倉庫作業（M6-01，ADR-0017）。
+    /// 只限制作業（建單、核准、預留、盤點、儲位維護），查詢不受限制。
+    /// </summary>
+    public bool AllWarehouses { get; set; } = true;
+}
+
+/// <summary>帳號可作業的倉庫（<see cref="AppUser.AllWarehouses"/> 為 false 時才有作用）。</summary>
+public sealed class UserWarehouse
+{
+    public Guid UserId { get; set; }
+
+    public Guid WarehouseId { get; set; }
 }
 
 /// <summary>內建角色的固定 ID（種子資料，之後不可修改）。</summary>

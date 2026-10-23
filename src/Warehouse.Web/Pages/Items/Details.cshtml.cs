@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Warehouse.Web.Security;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
@@ -233,7 +234,8 @@ public class DetailsModel(
         }
         if (CanManageLocations)
         {
-            Warehouses = (await warehouses.ListWarehousesAsync(cancellationToken)).Where(w => w.IsActive).ToList();
+            var operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
+            Warehouses = (await warehouses.ListWarehousesAsync(cancellationToken)).Where(w => w.IsActive && operable.Allows(w.Id)).ToList();
         }
         // 待核准時列出重複候選，供管理員核准前確認、或拒絕時選擇「重複於」
         if (item.Status == ItemStatus.PendingApproval && IsManager)

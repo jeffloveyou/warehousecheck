@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Accounts;
 using Warehouse.Application.Errors;
+using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Infrastructure.Identity;
 
@@ -13,7 +14,8 @@ namespace Warehouse.Web.Pages.Admin.Users;
 /// 單一帳號的管理：顯示名稱與角色、停用／啟用、重設密碼、解除鎖定（M6-01，限系統管理員）。
 /// 規則都在 <see cref="IUserAdminService"/>（不能停用自己、至少保留一個系統管理員等），畫面只負責顯示錯誤。
 /// </summary>
-public class EditModel(IUserAdminService admin, UserManager<AppUser> users, SignInManager<AppUser> signIn) : PageModel
+public class EditModel(
+    IUserAdminService admin, IWarehouseService warehouseService, UserManager<AppUser> users, SignInManager<AppUser> signIn) : PageModel
 {
     [BindProperty(SupportsGet = true)]
     public Guid Id { get; set; }
@@ -64,6 +66,21 @@ public class EditModel(IUserAdminService admin, UserManager<AppUser> users, Sign
         {
             await admin.SetActiveAsync(Id, isActive, User.ToActor(), cancellationToken);
             return isActive ? "已啟用帳號。" : "已停用帳號（對方已登入的畫面最慢 5 分鐘內失效）。";
+        }, cancellationToken);
+
+    [BindProperty]
+    public bool AllWarehouses { get; set; }
+
+    [BindProperty]
+    public List<Guid> WarehouseIds { get; set; } = [];
+
+    public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
+
+    public Task<IActionResult> OnPostWarehousesAsync(CancellationToken cancellationToken) =>
+        RunAsync(async () =>
+        {
+            await admin.SetWarehousesAsync(Id, AllWarehouses, WarehouseIds, User.ToActor(), cancellationToken);
+            return "已更新可作業的倉庫（立即生效）。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostUnlockAsync(CancellationToken cancellationToken) =>
@@ -120,6 +137,7 @@ public class EditModel(IUserAdminService admin, UserManager<AppUser> users, Sign
         try
         {
             Account = await admin.GetAsync(Id, cancellationToken);
+            Warehouses = await warehouseService.ListWarehousesAsync(cancellationToken);
             return true;
         }
         catch (NotFoundException)

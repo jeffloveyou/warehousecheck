@@ -2096,6 +2096,11 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("access_failed_count");
 
+                    b.Property<bool>("AllWarehouses")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("all_warehouses");
+
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("text")
@@ -2179,6 +2184,25 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_users_normalized_user_name");
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserWarehouse", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("UserId", "WarehouseId")
+                        .HasName("pk_user_warehouses");
+
+                    b.HasIndex("WarehouseId")
+                        .HasDatabaseName("ix_user_warehouses_warehouse_id");
+
+                    b.ToTable("user_warehouses", (string)null);
                 });
 
             modelBuilder.Entity("Warehouse.Infrastructure.Inventory.PostingFailure", b =>
@@ -2797,6 +2821,23 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_location_images_locations_location_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserWarehouse", b =>
+                {
+                    b.HasOne("Warehouse.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_warehouses_users_user_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_warehouses_warehouses_warehouse_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockDocument", b =>
