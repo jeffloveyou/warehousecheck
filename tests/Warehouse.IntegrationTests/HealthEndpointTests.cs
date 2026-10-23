@@ -72,7 +72,8 @@ public class HealthEndpointTests
         var root = json.RootElement;
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("version").GetString()));
         Assert.True(root.GetProperty("databaseConnected").GetBoolean());
-        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("databaseVersion").GetString()));
+        // 匿名不回資料庫版本（M6-04 審查 R9，T-M7-01-01）
+        Assert.False(root.TryGetProperty("databaseVersion", out _));
 
         Assert.DoesNotContain("password", body, StringComparison.OrdinalIgnoreCase);
         var password = TestDatabase.ExtractPassword(connectionString);

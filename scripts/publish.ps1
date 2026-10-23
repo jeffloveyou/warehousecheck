@@ -62,6 +62,14 @@ Invoke-Step "發布 $name" {
     dotnet publish src/$entry -c Release -r $Runtime --self-contained $selfContainedArg -o $output --nologo -v quiet
 }
 
+# 正式資料庫 Migration 用的冪等 SQL（M7-01）：與程式同一個 commit，由 migrate-db.ps1 以擁有者帳號套用，程式啟動時不改結構
+if ($Project -eq 'Web') {
+    Invoke-Step '產生 migrations.sql' {
+        dotnet ef migrations script --idempotent --project src/Warehouse.Infrastructure --startup-project src/Warehouse.Web `
+            --output (Join-Path $output 'migrations.sql')
+    }
+}
+
 $dll = Join-Path $output "$entry.dll"
 $productVersion = (Get-Item $dll).VersionInfo.ProductVersion
 # PWA（sw.js、快取名）與部署紀錄都靠版本號裡的 commit 判斷新版；少了 +commit 瀏覽器永遠不會更新 Service Worker（docs/11 §6.1）
