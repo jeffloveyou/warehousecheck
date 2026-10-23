@@ -7,6 +7,7 @@ using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 
 namespace Warehouse.Infrastructure.Warehousing;
@@ -27,6 +28,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     public async Task<Guid> CreateWarehouseAsync(WarehouseInput input, Actor actor, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
+        await WarehouseAccess.EnsureAllAsync(db, actor, cancellationToken);
         // 代碼先正規化（小寫、全形都接受），Domain 仍檢查嚴格格式（M3-01 審查 #7）
         var warehouse = new WarehouseSite(Guid.NewGuid(), TextNormalizer.Normalize(input.Code), input.Name, now);
         db.Warehouses.Add(warehouse);
@@ -40,6 +42,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         Guid id, uint expectedVersion, string name, Actor actor, CancellationToken cancellationToken)
     {
         var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
+        await WarehouseAccess.EnsureAsync(db, actor, id, cancellationToken);
         var before = warehouse.Name;
         warehouse.Rename(name);
         AuditLog.Add(db, actor, clock.GetUtcNow(), "warehouse.rename", "warehouse", id.ToString(),
@@ -54,6 +57,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await DbCommands.ExecuteAsync(db, "SELECT 1 FROM warehouses WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
         var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
+        await WarehouseAccess.EnsureAsync(db, actor, id, cancellationToken);
         if (warehouse.IsActive == isActive)
         {
             throw new DomainRuleException(isActive ? "倉庫已經是啟用狀態。" : "倉庫已經停用。");
@@ -143,6 +147,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         {
             throw new DomainRuleException("倉庫已停用，不能新增儲位。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         var now = clock.GetUtcNow();
         var location = Location.Create(Guid.NewGuid(), warehouseId, TextNormalizer.Normalize(input.Code), input.Details, now);
         // 儲位碼不可與有效原廠條碼相同（掃到時會先比中條碼，M5-03 審查 M1）。
@@ -162,6 +167,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         Guid id, uint expectedVersion, LocationDetails details, Actor actor, CancellationToken cancellationToken)
     {
         var location = await LoadAsync(db.Locations, id, expectedVersion, "location", "找不到儲位。", cancellationToken);
+        await WarehouseAccess.EnsureAsync(db, actor, location.WarehouseId, cancellationToken);
         var before = Snapshot(location);
         var now = clock.GetUtcNow();
         location.Update(details, now);
@@ -175,6 +181,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await DbCommands.ExecuteAsync(db, "SELECT 1 FROM locations WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
         var location = await LoadAsync(db.Locations, id, expectedVersion, "location", "找不到儲位。", cancellationToken);
+        await WarehouseAccess.EnsureAsync(db, actor, location.WarehouseId, cancellationToken);
         // 有庫存的儲位不能停用（停用後無法過帳，庫存會卡住）；改待驗可以，結存立即不算可用量（M3-01 審查 #3）
         if (status == LocationStatus.Inactive
             && await db.StockBalances.AnyAsync(b => b.LocationId == id && b.Quantity != 0, cancellationToken))

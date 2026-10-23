@@ -64,6 +64,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<LocationImage> LocationImages => Set<LocationImage>();
 
+    public DbSet<UserWarehouse> UserWarehouses => Set<UserWarehouse>();
+
     /// <summary>期初單號 OB-000001 的流水號來源。</summary>
     public const string OpeningDocNoSequence = "opening_doc_no_seq";
 
@@ -88,6 +90,7 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
             b.ToTable("users");
             b.Property(u => u.DisplayName).HasMaxLength(AppUser.DisplayNameMaxLength);
             b.Property(u => u.IsActive).HasDefaultValue(true).ValueGeneratedNever();
+            b.Property(u => u.AllWarehouses).HasDefaultValue(true).ValueGeneratedNever();
             // Identity 預設索引名稱是 PascalCase（UserNameIndex），改成與其他表一致的 snake_case
             b.HasIndex(u => u.NormalizedUserName).HasDatabaseName("ix_users_normalized_user_name");
             b.HasIndex(u => u.NormalizedEmail).HasDatabaseName("ix_users_normalized_email");
@@ -97,6 +100,14 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
             b.ToTable("roles");
             b.HasIndex(r => r.NormalizedName).HasDatabaseName("ix_roles_normalized_name");
             b.HasData(RoleSeed.All);
+        });
+        modelBuilder.Entity<UserWarehouse>(b =>
+        {
+            b.ToTable("user_warehouses");
+            b.HasKey(x => new { x.UserId, x.WarehouseId });
+            b.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne<WarehouseSite>().WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(x => x.WarehouseId);
         });
         modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
         modelBuilder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");

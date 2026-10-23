@@ -7,6 +7,7 @@ using Warehouse.Domain;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 
 namespace Warehouse.Infrastructure.Warehousing;
@@ -33,6 +34,7 @@ public sealed class ItemLocationService(WarehouseDbContext db, TimeProvider cloc
         Guid itemId, Guid warehouseId, string locationCode, bool isDefault, Actor actor, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         if (!await db.Items.AnyAsync(i => i.Id == itemId && i.Status == ItemStatus.Active, cancellationToken))
         {
             throw new DomainRuleException("只有有效的物料可以設定常用倉位。");
@@ -61,6 +63,7 @@ public sealed class ItemLocationService(WarehouseDbContext db, TimeProvider cloc
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var row = await db.Set<ItemLocation>().SingleOrDefaultAsync(x => x.Id == itemLocationId && x.ItemId == itemId, cancellationToken)
             ?? throw new NotFoundException("item_location.not_found", "找不到這個常用倉位。");
+        await WarehouseAccess.EnsureAsync(db, actor, row.WarehouseId, cancellationToken);
         await ClearDefaultAsync(itemId, row.WarehouseId, cancellationToken);
         row.SetDefault(true);
         AuditLog.Add(db, actor, clock.GetUtcNow(), "item_location.default", "item", itemId.ToString(), null, new { row.LocationId });
@@ -72,6 +75,7 @@ public sealed class ItemLocationService(WarehouseDbContext db, TimeProvider cloc
     {
         var row = await db.Set<ItemLocation>().SingleOrDefaultAsync(x => x.Id == itemLocationId && x.ItemId == itemId, cancellationToken)
             ?? throw new NotFoundException("item_location.not_found", "找不到這個常用倉位。");
+        await WarehouseAccess.EnsureAsync(db, actor, row.WarehouseId, cancellationToken);
         db.Remove(row);
         AuditLog.Add(db, actor, clock.GetUtcNow(), "item_location.remove", "item", itemId.ToString(), new { row.LocationId, row.IsDefault }, null);
         await SaveAsync(cancellationToken);

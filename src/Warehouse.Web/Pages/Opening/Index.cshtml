@@ -32,7 +32,7 @@
     <form method="post" asp-page-handler="Create" class="panel filters" id="opening-create-form">
         <select name="WarehouseId" aria-label="建立期初單的倉庫" required>
             <option value="">選擇倉庫</option>
-            @foreach (var w in Model.Warehouses.Where(w => w.IsActive))
+            @foreach (var w in Model.Warehouses.Where(w => w.IsActive && Model.Operable.Allows(w.Id)))
             {
                 <option value="@w.Id">@w.Code @w.Name</option>
             }

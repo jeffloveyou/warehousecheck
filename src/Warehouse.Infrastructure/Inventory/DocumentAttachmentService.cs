@@ -8,6 +8,7 @@ using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
 using Warehouse.Infrastructure.Files;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
 
@@ -105,9 +106,10 @@ public sealed class DocumentAttachmentService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await ExecuteAsync(db, "SELECT 1 FROM stock_documents WHERE id = @id FOR NO KEY UPDATE", cancellationToken, Param("id", documentId));
         var doc = await db.StockDocuments.AsNoTracking().Where(d => d.Id == documentId)
-            .Select(d => new { d.Status, d.CreatedById }).SingleOrDefaultAsync(cancellationToken)
+            .Select(d => new { d.Status, d.CreatedById, d.WarehouseId }).SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("document.not_found", "找不到單據。");
         RequireEditor(doc.CreatedById, actor);
+        await WarehouseAccess.EnsureAsync(db, actor, doc.WarehouseId, cancellationToken);
         if (doc.Status != StockDocumentStatus.Draft)
         {
             throw new DomainRuleException("單據送出後，附件只能新增、不能移除。");
@@ -148,9 +150,10 @@ public sealed class DocumentAttachmentService(
     private async Task EnsureCanUploadAsync(Guid documentId, Actor actor, CancellationToken cancellationToken)
     {
         var doc = await db.StockDocuments.AsNoTracking().Where(d => d.Id == documentId && d.DocType != StockDocumentType.Opening)
-            .Select(d => new { d.Status, d.CreatedById }).SingleOrDefaultAsync(cancellationToken)
+            .Select(d => new { d.Status, d.CreatedById, d.WarehouseId }).SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("document.not_found", "找不到單據。");
         RequireEditor(doc.CreatedById, actor);
+        await WarehouseAccess.EnsureAsync(db, actor, doc.WarehouseId, cancellationToken);
         if (doc.Status == StockDocumentStatus.Cancelled)
         {
             throw new DomainRuleException("已取消的單據不能新增附件。");

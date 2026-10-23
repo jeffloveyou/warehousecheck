@@ -36,17 +36,21 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
         var rows = await query.OrderBy(u => u.UserName)
             .Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize)
             .ToListAsync(cancellationToken);
-        var roles = await RolesOfAsync(rows.Select(u => u.Id).ToArray(), cancellationToken);
+        var ids = rows.Select(u => u.Id).ToArray();
+        var roles = await RolesOfAsync(ids, cancellationToken);
+        var warehouses = await WarehousesOfAsync(ids, cancellationToken);
         var now = clock.GetUtcNow();
         return new PagedResult<UserSummary>(
-            rows.Select(u => ToSummary(u, roles.GetValueOrDefault(u.Id, []), now)).ToList(), page, Paging.DefaultPageSize, total);
+            rows.Select(u => ToSummary(u, roles.GetValueOrDefault(u.Id, []), warehouses.GetValueOrDefault(u.Id, []), now)).ToList(),
+            page, Paging.DefaultPageSize, total);
     }
 
     public async Task<UserSummary> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id, cancellationToken) ?? throw NotFound();
         var roles = await RolesOfAsync([id], cancellationToken);
-        return ToSummary(user, roles.GetValueOrDefault(id, []), clock.GetUtcNow());
+        var warehouses = await WarehousesOfAsync([id], cancellationToken);
+        return ToSummary(user, roles.GetValueOrDefault(id, []), warehouses.GetValueOrDefault(id, []), clock.GetUtcNow());
     }
 
     public async Task<UserPasswordResult> CreateAsync(CreateUserRequest request, Actor actor, CancellationToken cancellationToken)
@@ -160,6 +164,34 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
             return true;
         }, cancellationToken);
 
+    public Task SetWarehousesAsync(
+        Guid id, bool allWarehouses, IReadOnlyList<Guid> warehouseIds, Actor actor, CancellationToken cancellationToken)
+    {
+        List<Guid> wanted = allWarehouses ? [] : (warehouseIds ?? []).Distinct().Order().ToList();
+        return InTransactionAsync(actor, async now =>
+        {
+            // 被限制倉庫的管理員不能放寬任何人（包括自己）的範圍（M6-01b 審查 Y6）
+            await WarehouseAccess.EnsureAllAsync(db, actor, cancellationToken);
+            // 鎖帳號列：兩位管理員同時設定同一帳號時排隊，不會同時新增同一列撞主鍵（審查 Y5）
+            await db.Database.ExecuteSqlAsync($"SELECT 1 FROM users WHERE id = {id} FOR UPDATE", cancellationToken);
+            var user = await FindAsync(id);
+            if (wanted.Count > 0 && await db.Warehouses.CountAsync(w => wanted.Contains(w.Id), cancellationToken) != wanted.Count)
+            {
+                throw new DomainRuleException("有不存在的倉庫，請重新整理後再選。");
+            }
+            var existing = await db.UserWarehouses.Where(x => x.UserId == id).ToListAsync(cancellationToken);
+            var before = new { user.AllWarehouses, Warehouses = existing.Select(x => x.WarehouseId).Order().ToList() };
+            db.UserWarehouses.RemoveRange(existing.Where(x => !wanted.Contains(x.WarehouseId)));
+            db.UserWarehouses.AddRange(wanted.Where(w => existing.All(x => x.WarehouseId != w))
+                .Select(w => new UserWarehouse { UserId = id, WarehouseId = w }));
+            user.AllWarehouses = allWarehouses;
+            Check(await users.UpdateAsync(user));
+            AuditLog.Add(db, actor, now, "user.warehouses", "user", id.ToString(), before,
+                new { AllWarehouses = allWarehouses, Warehouses = wanted });
+            return true;
+        }, cancellationToken);
+    }
+
     private async Task<T> InTransactionAsync<T>(Actor actor, Func<DateTimeOffset, Task<T>> action, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -220,9 +252,15 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
             .GroupBy(x => x.UserId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Name!).Order(StringComparer.Ordinal).ToList());
 
-    private static UserSummary ToSummary(AppUser user, IReadOnlyList<string> roles, DateTimeOffset now) =>
+    private async Task<Dictionary<Guid, IReadOnlyList<Guid>>> WarehousesOfAsync(Guid[] userIds, CancellationToken cancellationToken) =>
+        (await db.UserWarehouses.AsNoTracking().Where(x => userIds.Contains(x.UserId)).ToListAsync(cancellationToken))
+            .GroupBy(x => x.UserId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<Guid>)g.Select(x => x.WarehouseId).Order().ToList());
+
+    private static UserSummary ToSummary(AppUser user, IReadOnlyList<string> roles, IReadOnlyList<Guid> warehouses, DateTimeOffset now) =>
         new(user.Id, user.UserName!, user.DisplayName, roles, user.IsActive,
-            user.LockoutEnd is { } end && end > now, user.MustChangePassword, user.ConcurrencyStamp ?? string.Empty);
+            user.LockoutEnd is { } end && end > now, user.MustChangePassword, user.AllWarehouses, warehouses,
+            user.ConcurrencyStamp ?? string.Empty);
 
     private static string ValidateDisplayName(string? displayName)
     {

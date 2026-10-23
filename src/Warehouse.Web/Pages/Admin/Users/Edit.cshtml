@@ -44,6 +44,19 @@
     <p class="muted">只能查詢的帳號請選「只讀使用者」。顯示名稱會寫進之後的單據與操作紀錄，舊紀錄保留當時的名稱。</p>
     <div class="actions"><button type="submit" id="user-save">儲存</button></div>
 </form>
+<form method="post" asp-page-handler="Warehouses" asp-route-id="@account.Id" class="panel" id="user-warehouses-form">
+    <h2>可作業的倉庫</h2>
+    <p class="muted">限制建單、核准、預留、盤點、儲位維護與匯入；查詢庫存、異動不受限制。變更立即生效。</p>
+    <p><label><input type="radio" name="AllWarehouses" value="true" checked="@account.AllWarehouses" /> 全部倉庫（含之後新增的倉庫）</label></p>
+    <p><label><input type="radio" name="AllWarehouses" value="false" checked="@(!account.AllWarehouses)" /> 只限勾選的倉庫（都不勾＝只能查詢）</label></p>
+    <p>
+        @foreach (var w in Model.Warehouses)
+        {
+            <label class="inline-check"><input type="checkbox" name="WarehouseIds" value="@w.Id" checked="@account.WarehouseIds.Contains(w.Id)" /> @w.Code @w.Name@(w.IsActive ? "" : "（停用）")</label>
+        }
+    </p>
+    <div class="actions"><button type="submit" id="user-warehouses-save">儲存倉庫範圍</button></div>
+</form>
 <div class="panel">
     <h2>帳號操作</h2>
     <div class="actions">

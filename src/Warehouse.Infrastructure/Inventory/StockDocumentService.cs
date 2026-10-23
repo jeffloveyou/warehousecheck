@@ -9,6 +9,7 @@ using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
@@ -147,6 +148,7 @@ public sealed class StockDocumentService(
         {
             throw new DomainRuleException("倉庫已停用，不能建立單據。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         var current = await settings.GetAsync(cancellationToken);
         var effective = await EffectiveHeaderAsync(type, header, null, current, cancellationToken);
         var now = clock.GetUtcNow();
@@ -190,6 +192,7 @@ public sealed class StockDocumentService(
                     ? doc.WarehouseId
                     : await FindWarehouseIdAsync(targetWarehouseCode, cancellationToken);
                 target = await FindLocationAsync(targetWarehouseId, input.TargetLocationCode, cancellationToken, isTarget: true);
+                await WarehouseAccess.EnsureAsync(db, actor, target.WarehouseId, cancellationToken);
             }
 
             var (items, code) = await ScanCodes.ItemsAsync(db, input.ItemCode, cancellationToken);
@@ -315,7 +318,7 @@ public sealed class StockDocumentService(
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await LockDocumentAsync(id, cancellationToken);
-        var original = await LoadAsync(id, null, cancellationToken);
+        var original = await LoadAsync(id, null, actor, cancellationToken);
         if (original.Status != StockDocumentStatus.Posted)
         {
             throw new DomainRuleException("只有已過帳的單可以建立沖銷單。");
@@ -505,7 +508,7 @@ public sealed class StockDocumentService(
             {
                 return;
             }
-            var doc = await LoadAsync(id, expectedVersion, cancellationToken);
+            var doc = await LoadAsync(id, expectedVersion, actor, cancellationToken);
             var current = await settings.GetAsync(cancellationToken);
             var now = clock.GetUtcNow();
             var (name, after) = await action(doc, current, now);
@@ -528,7 +531,7 @@ public sealed class StockDocumentService(
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await LockDocumentAsync(id, cancellationToken);
-        var doc = await LoadAsync(id, expectedVersion, cancellationToken);
+        var doc = await LoadAsync(id, expectedVersion, actor, cancellationToken);
         if (editorOnly)
         {
             RequireEditor(doc, actor);
@@ -628,11 +631,14 @@ public sealed class StockDocumentService(
     private async Task LockDocumentAsync(Guid id, CancellationToken cancellationToken) =>
         await ExecuteAsync(db, "SELECT 1 FROM stock_documents WHERE id = @id FOR UPDATE", cancellationToken, Param("id", id));
 
-    private async Task<StockDocument> LoadAsync(Guid id, uint? expectedVersion, CancellationToken cancellationToken)
+    private async Task<StockDocument> LoadAsync(Guid id, uint? expectedVersion, Actor actor, CancellationToken cancellationToken)
     {
         var doc = await db.StockDocuments.Include(d => d.Lines)
             .SingleOrDefaultAsync(d => d.Id == id && d.DocType != StockDocumentType.Opening, cancellationToken)
             ?? throw new NotFoundException("document.not_found", "找不到單據。");
+        // 每個修改、送審、核准、沖銷都經過這裡：操作者要能在單據倉庫（與跨倉移庫的目的倉）作業（M6-01b）；
+        // 先於版本比對，沒有權限的人一律得到 warehouse.forbidden
+        await WarehouseAccess.EnsureDocumentAsync(db, actor, doc, cancellationToken);
         if (expectedVersion is { } v && db.Entry(doc).Property<uint>("Version").CurrentValue != v)
         {
             throw new ConcurrencyConflictException("document.concurrency_conflict", "單據已被他人修改，請重新載入後再操作。");

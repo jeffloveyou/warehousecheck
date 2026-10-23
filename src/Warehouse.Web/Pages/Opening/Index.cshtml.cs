@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Warehouse.Web.Security;
 using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
@@ -29,6 +30,9 @@ public class IndexModel(IOpeningService openings, IWarehouseService warehouses, 
     public PagedResult<OpeningRow> Result { get; private set; } = null!;
 
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
+
+    /// <summary>可作業的倉庫（null＝全部），建單下拉選單只列這些（M6-01b）。</summary>
+    public IReadOnlySet<Guid>? Operable { get; private set; }
 
     public bool CanEdit { get; private set; }
 
@@ -64,6 +68,7 @@ public class IndexModel(IOpeningService openings, IWarehouseService warehouses, 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
         Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
         Result = await openings.ListAsync(WarehouseId, Status, PageNumber, cancellationToken);
         CanEdit = (await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded;
     }

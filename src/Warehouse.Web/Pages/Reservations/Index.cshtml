@@ -45,7 +45,7 @@
             <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
             <select id="Create_WarehouseId" name="Create.WarehouseId" required>
                 <option value="">選擇倉庫</option>
-                @foreach (var w in Model.Warehouses.Where(w => w.IsActive))
+                @foreach (var w in Model.Warehouses.Where(w => w.IsActive && Model.Operable.Allows(w.Id)))
                 {
                     <option value="@w.Id" selected="@(w.Id == Model.Create.WarehouseId)">@w.Code @w.Name</option>
                 }

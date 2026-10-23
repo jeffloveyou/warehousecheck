@@ -9,6 +9,7 @@ using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
@@ -91,6 +92,7 @@ public sealed class OpeningService(
         {
             throw new DomainRuleException("倉庫已停用，不能建立期初單。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         var number = (await QueryAsync(db, $"SELECT nextval('{WarehouseDbContext.OpeningDocNoSequence}')",
             r => r.GetInt64(0), cancellationToken)).Single();
         var now = clock.GetUtcNow();
@@ -211,7 +213,7 @@ public sealed class OpeningService(
         {
             return;
         }
-        var doc = await LoadAsync(documentId, expectedVersion, cancellationToken);
+        var doc = await LoadAsync(documentId, expectedVersion, actor, cancellationToken);
         RequireWarehouseManager(actor);
         var now = clock.GetUtcNow();
         var allowSelfApprove = (await settings.GetAsync(cancellationToken)).AllowSelfApproveOpening;
@@ -304,7 +306,7 @@ public sealed class OpeningService(
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
-        var doc = await LoadAsync(documentId, expectedVersion, cancellationToken);
+        var doc = await LoadAsync(documentId, expectedVersion, actor, cancellationToken);
         if (editorOnly && !actor.IsWarehouseManager && doc.CreatedById != actor.Id)
         {
             throw new PermissionDeniedException("opening.permission_denied", "只有建立者或倉庫主管可以修改這張期初單。");
@@ -323,11 +325,13 @@ public sealed class OpeningService(
         _ = found; // 不存在的單在下一步 LoadAsync 回報
     }
 
-    private async Task<StockDocument> LoadAsync(Guid documentId, uint? expectedVersion, CancellationToken cancellationToken)
+    private async Task<StockDocument> LoadAsync(Guid documentId, uint? expectedVersion, Actor actor, CancellationToken cancellationToken)
     {
         var doc = await db.StockDocuments.Include(d => d.Lines)
             .SingleOrDefaultAsync(d => d.Id == documentId && d.DocType == StockDocumentType.Opening, cancellationToken)
             ?? throw new NotFoundException("opening.not_found", "找不到期初單。");
+        // 先檢查倉庫範圍再比對版本：沒有權限的人一律得到 warehouse.forbidden（M6-01b）
+        await WarehouseAccess.EnsureAsync(db, actor, doc.WarehouseId, cancellationToken);
         if (expectedVersion is { } v && db.Entry(doc).Property<uint>("Version").CurrentValue != v)
         {
             throw new ConcurrencyConflictException("opening.concurrency_conflict", "期初單已被他人修改，請重新載入後再操作。");

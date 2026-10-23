@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<ILocationImageService, LocationImageService>();
         services.AddScoped<IUserAdminService, UserAdminService>();
         services.AddScoped<ILoginAuditLog, LoginAuditLog>();
+        services.AddScoped<IWarehouseAccess, WarehouseAccessService>();
         return services;
     }
 }

@@ -11,6 +11,8 @@ public sealed record UserSummary(
     bool IsActive,
     bool IsLockedOut,
     bool MustChangePassword,
+    bool AllWarehouses,
+    IReadOnlyList<Guid> WarehouseIds,
     string ConcurrencyStamp);
 
 /// <summary>新增帳號：初始密碼由系統產生，只在回傳結果出現一次。</summary>
@@ -44,6 +46,12 @@ public interface IUserAdminService
     Task<UserPasswordResult> ResetPasswordAsync(Guid id, Actor actor, CancellationToken cancellationToken);
 
     Task UnlockAsync(Guid id, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 設定可作業的倉庫（M6-01b）：<paramref name="allWarehouses"/> 為 true＝全部倉庫（忽略清單）；
+    /// false 時只能在清單中的倉庫作業（清單可為空＝不能作業任何倉庫，只能查詢）。立即生效、寫稽核 <c>user.warehouses</c>。
+    /// </summary>
+    Task SetWarehousesAsync(Guid id, bool allWarehouses, IReadOnlyList<Guid> warehouseIds, Actor actor, CancellationToken cancellationToken);
 }
 
 /// <summary>登入結果（寫入稽核的動作名稱）。</summary>

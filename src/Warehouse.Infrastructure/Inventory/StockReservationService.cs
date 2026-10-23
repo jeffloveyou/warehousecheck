@@ -7,6 +7,7 @@ using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Text;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
@@ -98,6 +99,7 @@ public sealed class StockReservationService(
         {
             return concurrent;
         }
+        await WarehouseAccess.EnsureAsync(db, actor, input.WarehouseId, cancellationToken);
         // 料號欄可以直接收掃到的物料 QR 或原廠條碼（M5-01）
         var (items, display) = await ScanCodes.ItemsAsync(db, code, cancellationToken);
         var itemId = await items.Where(i => i.Status == ItemStatus.Active).Select(i => (Guid?)i.Id)
@@ -121,6 +123,7 @@ public sealed class StockReservationService(
         {
             throw new ConflictException("reservation.not_cancellable", "這是出倉單送審時建立的預留，請取消或退回該單據。");
         }
+        await WarehouseAccess.EnsureAsync(db, actor, reservation.WarehouseId, cancellationToken);
         if (!actor.IsWarehouseManager && reservation.CreatedById != actor.Id)
         {
             throw new PermissionDeniedException("reservation.permission_denied", "只有建立者或倉庫主管可以取消這筆預留。");
