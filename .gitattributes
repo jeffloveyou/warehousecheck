@@ -8,3 +8,5 @@
 # Linux／NAS 執行的腳本需 LF
 *.sh text eol=lf
 Dockerfile text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
