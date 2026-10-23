@@ -2515,6 +2515,9 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_import_batches");
 
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_import_batches_created_at");
+
                     b.HasIndex("CreatedById", "CreatedAt")
                         .HasDatabaseName("ix_import_batches_created_by_id_created_at");
 
@@ -2728,6 +2731,9 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Key")
                         .HasName("pk_processed_commands");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_processed_commands_created_at");
 
                     b.ToTable("processed_commands", (string)null);
                 });

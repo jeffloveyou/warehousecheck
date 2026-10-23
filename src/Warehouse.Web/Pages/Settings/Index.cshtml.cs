@@ -64,6 +64,16 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         /// <summary>列印抬頭的公司名稱（空白＝不印）；表單空白時綁定為 null。</summary>
         public string? PrintCompanyName { get; set; }
 
+        public int RetentionAuditYears { get; set; }
+
+        public int RetentionLoginDays { get; set; }
+
+        public int RetentionProcessedCommandsDays { get; set; }
+
+        public int RetentionPostingFailuresDays { get; set; }
+
+        public int RetentionImportBatchesDays { get; set; }
+
         public SystemSettings ToSettings() =>
             new(AllowSelfApproveOpening, LocationNotesEnabled, LocationAttributesEnabled, LocationImagesEnabled)
             {
@@ -81,6 +91,11 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 AllowSelfApproveStocktake = AllowSelfApproveStocktake,
                 StocktakeBlindCount = StocktakeBlindCount,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
+                RetentionAuditYears = RetentionAuditYears,
+                RetentionLoginDays = RetentionLoginDays,
+                RetentionProcessedCommandsDays = RetentionProcessedCommandsDays,
+                RetentionPostingFailuresDays = RetentionPostingFailuresDays,
+                RetentionImportBatchesDays = RetentionImportBatchesDays,
             };
 
         public static SettingsForm From(SystemSettings s) => new()
@@ -103,6 +118,11 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             AllowSelfApproveStocktake = s.AllowSelfApproveStocktake,
             StocktakeBlindCount = s.StocktakeBlindCount,
             PrintCompanyName = s.PrintCompanyName,
+            RetentionAuditYears = s.RetentionAuditYears,
+            RetentionLoginDays = s.RetentionLoginDays,
+            RetentionProcessedCommandsDays = s.RetentionProcessedCommandsDays,
+            RetentionPostingFailuresDays = s.RetentionPostingFailuresDays,
+            RetentionImportBatchesDays = s.RetentionImportBatchesDays,
         };
     }
 
@@ -141,6 +161,11 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.PrintCompanyName => "列印公司名稱",
         SettingKeys.AllowSelfApproveStocktake => "盤差允許自核",
         SettingKeys.StocktakeBlindCount => "盲盤",
+        SettingKeys.RetentionAuditYears => "操作日誌保留年數",
+        SettingKeys.RetentionLoginDays => "登入紀錄保留天數",
+        SettingKeys.RetentionProcessedCommandsDays => "冪等紀錄保留天數",
+        SettingKeys.RetentionPostingFailuresDays => "過帳失敗紀錄保留天數",
+        SettingKeys.RetentionImportBatchesDays => "匯入批次保留天數",
         _ => key,
     };
 
