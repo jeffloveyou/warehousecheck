@@ -66,6 +66,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Warehouses", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Settings", Policies.SettingsManage);
     options.Conventions.AuthorizeFolder("/Admin/Users", Policies.UsersManage);
+    options.Conventions.AuthorizeFolder("/Admin/Audit", Policies.AuditRead);
     options.Conventions.AuthorizeFolder("/Opening", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Stock", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Scan", Policies.StockRead);

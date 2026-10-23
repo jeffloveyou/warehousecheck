@@ -1,0 +1,67 @@
+@page
+@model Warehouse.Web.Pages.Admin.Audit.IndexModel
+@{
+    ViewData["Title"] = "操作日誌";
+}
+<h1>操作日誌</h1>
+<p class="muted">登入、帳號、設定、單據、庫存等操作紀錄（只能新增，不能修改或刪除）。期間最長 366 天；超過 10000 筆請縮小條件。查某人的登入紀錄：動作選「登入」、對象類型填 user、對象 ID 填帳號 ID（登入紀錄的操作者一律記為「（登入）」）。</p>
+<form method="get" class="filters" id="audit-filter">
+    <label>起日 <input type="date" name="From" value="@Model.From?.ToString("yyyy-MM-dd")" /></label>
+    <label>迄日 <input type="date" name="To" value="@Model.To?.ToString("yyyy-MM-dd")" /></label>
+    <input type="search" name="ActorName" value="@Model.ActorName" placeholder="操作者" aria-label="操作者" />
+    <select name="ActionPrefix" aria-label="動作">
+        <option value="">全部動作</option>
+        @foreach (var (prefix, label) in Warehouse.Web.Pages.Admin.Audit.IndexModel.ActionGroups)
+        {
+            <option value="@prefix" selected="@(Model.ActionPrefix == prefix)">@label（@prefix）</option>
+        }
+    </select>
+    <input type="text" name="EntityType" value="@Model.EntityType" placeholder="對象類型，例：user" aria-label="對象類型" />
+    <input type="text" name="EntityId" value="@Model.EntityId" placeholder="對象 ID" aria-label="對象 ID" />
+    <button type="submit">查詢</button>
+</form>
+@if (Model.Notice is not null)
+{
+    <div class="message error" id="page-error">@Model.Notice</div>
+}
+<div class="table-wrap">
+    <table id="audit-list">
+        <thead><tr><th>時間</th><th>操作者</th><th>動作</th><th>對象</th><th>內容</th></tr></thead>
+        <tbody>
+            @foreach (var a in Model.Result.Items)
+            {
+                <tr>
+                    <td>@Display.Time(a.OccurredAt)</td>
+                    <td>@a.ActorName</td>
+                    <td>@a.Action</td>
+                    <td>@a.EntityType<br /><span class="muted">@a.EntityId</span></td>
+                    <td>
+                        @if (a.Before is not null || a.After is not null)
+                        {
+                            <details>
+                                <summary>前後值</summary>
+                                @if (a.Before is not null) { <div>前：<code class="json">@a.Before</code></div> }
+                                @if (a.After is not null) { <div>後：<code class="json">@a.After</code></div> }
+                            </details>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">沒有符合的紀錄。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @(Model.Result.TotalCount >= Warehouse.Application.Audit.AuditQuery.MaxCount ? $"{Model.Result.TotalCount} 筆以上，請縮小條件" : $"{Model.Result.TotalCount} 筆")）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>
