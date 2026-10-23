@@ -38,6 +38,12 @@ public sealed record SystemSettings(
     /// <summary>單據附件（照片、掃描檔）是否啟用（預設 true）。</summary>
     public bool DocumentAttachmentsEnabled { get; init; } = true;
 
+    /// <summary>盤點差異可否由盤點單的建立者或送審者自己核准（預設 false，D-07；與期初、單據的自核開關分開）。</summary>
+    public bool AllowSelfApproveStocktake { get; init; }
+
+    /// <summary>盲盤（預設 true）：輸入實盤量的畫面與 API 不顯示帳面量，倉庫主管審核時才看得到差異。</summary>
+    public bool StocktakeBlindCount { get; init; } = true;
+
     /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
     public string PrintCompanyName { get; init; } = string.Empty;
 }
@@ -64,6 +70,8 @@ public static class SettingKeys
     public const string DocumentNoteRequired = "stock.documents.field.note.required";
     public const string DocumentAttachmentsEnabled = "stock.documents.attachments.enabled";
     public const string PrintCompanyName = "print.company_name";
+    public const string AllowSelfApproveStocktake = "stock.stocktake.allow_self_approval";
+    public const string StocktakeBlindCount = "stock.stocktake.blind_count";
 
     /// <summary>文字設定的長度上限。</summary>
     public const int TextMaxLength = 100;

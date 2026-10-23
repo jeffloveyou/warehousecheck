@@ -1,0 +1,172 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Stocktakes.DetailsModel
+@using Warehouse.Domain.Inventory
+@{
+    var d = Model.Doc;
+    ViewData["Title"] = $"盤點 {d.StocktakeNo}";
+    var reviewing = d.Status == StocktakeStatus.Submitted && Model.CanManage;
+}
+<p><a href="/Stocktakes">← 盤點列表</a></p>
+<h1>盤點 @d.StocktakeNo <span class="chip" id="stocktake-status">@Display.Of(d.Status)</span></h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<div class="panel">
+    <p>倉庫 @d.WarehouseCode｜範圍：@(d.AllLocations ? "全部儲位" : "指定儲位")（@d.LocationCodes.Count 個：@string.Join("、", d.LocationCodes.Take(20))@(d.LocationCodes.Count > 20 ? "…" : "")）</p>
+    <p>快照時間 @Display.Time(d.SnapshotAt)｜建立 @d.CreatedByName
+        @if (d.SubmittedAt is { } submitted) { <span>｜送審 @d.SubmittedByName @Display.Time(submitted)</span> }
+        @if (d.ApprovedAt is { } approved) { <span>｜核准 @d.ApprovedByName @Display.Time(approved)</span> }
+    </p>
+    <p>共 @d.LineCount 行；未盤（含待重盤）@d.UncountedCount 行@(d.QuantitiesHidden ? "" : $"；有差異 {d.DifferenceCount} 行")</p>
+    @if (d.Note is not null) { <p>備註：@d.Note</p> }
+    @if (d.RecountComment is not null && d.Status == StocktakeStatus.Counting) { <div class="message error">要求重盤：@d.RecountComment</div> }
+    @if (d.AdjustmentDocumentId is { } adj) { <p>調整單：<a href="/Documents/Details/@adj" id="adjustment-link">@d.AdjustmentDocNo</a></p> }
+    @if (d.QuantitiesHidden) { <p class="muted">盲盤：盤點中不顯示帳面量。</p> }
+    <p><a href="/Stocktakes/Print/@d.Id" target="_blank">列印盤點表</a></p>
+</div>
+
+@if (Model.CanCount)
+{
+    <form method="post" asp-page-handler="Count" asp-route-id="@d.Id" class="panel" id="stocktake-count-form">
+        <h2>輸入實盤量</h2>
+        <p class="muted">可直接掃儲位 QR、物料 QR 或原廠條碼（每格 Enter 跳下一格）。帳上沒有的物料會自動新增一行「現場找到」。同一行再輸入會覆蓋（留下紀錄）。</p>
+        <div class="form-grid">
+            <label for="Count_LocationCode">儲位</label>
+            <input type="text" id="Count_LocationCode" name="Count.LocationCode" value="@Model.Count.LocationCode" autocomplete="off" required />
+            <label for="Count_ItemCode">料號</label>
+            <input type="text" id="Count_ItemCode" name="Count.ItemCode" value="" autocomplete="off" required autofocus="@(Model.Count.LocationCode.Length > 0)" />
+            <label for="Count_LotNo">批號</label>
+            <input type="text" id="Count_LotNo" name="Count.LotNo" autocomplete="off" placeholder="批號管理的物料才填" />
+            <label for="Count_SerialNo">序號</label>
+            <input type="text" id="Count_SerialNo" name="Count.SerialNo" autocomplete="off" placeholder="序號管理的物料才填（數量 0 或 1）" />
+            <label for="Count_Quantity">實盤量</label>
+            <input type="number" id="Count_Quantity" name="Count.Quantity" step="any" min="0" required />
+        </div>
+        <div class="actions"><button type="submit" id="stocktake-count">記錄</button></div>
+    </form>
+}
+
+<div class="panel">
+    @if (Model.CanCount)
+    {
+        <form method="post" asp-page-handler="Submit" asp-route-id="@d.Id" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <button type="submit" id="stocktake-submit">送審</button>
+        </form>
+    }
+    @if (Model.CanManage && d.Status is StocktakeStatus.Counting or StocktakeStatus.Submitted)
+    {
+        <form method="post" asp-page-handler="Cancel" asp-route-id="@d.Id" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <button type="submit" id="stocktake-cancel">取消盤點單</button>
+        </form>
+    }
+    @if (reviewing)
+    {
+        <form method="post" asp-page-handler="Approve" asp-route-id="@d.Id" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+            <button type="submit" id="stocktake-approve">核准（產生調整單）</button>
+        </form>
+    }
+</div>
+
+<form method="get" class="filters" id="line-filter">
+    <input type="text" name="Loc" value="@Model.Loc" placeholder="儲位" aria-label="篩選儲位" />
+    <label><input type="checkbox" name="Uncounted" value="true" checked="@Model.Uncounted" /> 只看未盤</label>
+    @if (!d.QuantitiesHidden)
+    {
+        <label><input type="checkbox" name="Diff" value="true" checked="@Model.Diff" /> 只看差異</label>
+    }
+    <button type="submit">篩選</button>
+</form>
+
+<form method="post" asp-page-handler="Recount" asp-route-id="@d.Id" id="recount-form">
+    <input type="hidden" name="Version" value="@Model.Version" />
+    <div class="table-wrap">
+        <table id="stocktake-lines">
+            <thead>
+                <tr>
+                    @if (reviewing) { <th>重盤</th> }
+                    <th>#</th><th>儲位</th><th>料號</th><th>品名</th><th>批號／序號</th>
+                    @if (!d.QuantitiesHidden) { <th>快照</th><th>期間異動</th><th>計數當下帳面</th> }
+                    <th>實盤</th>
+                    @if (!d.QuantitiesHidden) { <th>差異</th> }
+                    <th>盤點人員</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in d.Lines.Items)
+                {
+                    <tr class="@(l.RecountRequested ? "bad" : "")">
+                        @if (reviewing) { <td><input type="checkbox" name="RecountLines" value="@l.Id" aria-label="重盤第 @l.LineNo 行" /></td> }
+                        <td class="num">@l.LineNo</td>
+                        <td>@l.LocationCode</td>
+                        <td>@l.ItemCode@(l.IsAdded ? "（現場找到）" : "")</td>
+                        <td>@l.ItemName</td>
+                        <td>@(l.LotNo ?? l.SerialNo ?? "")@(l.StockStatus == StockStatus.Quarantine ? "（待驗）" : "")</td>
+                        @if (!d.QuantitiesHidden)
+                        {
+                            <td class="num">@(l.SnapshotQuantity is { } snap ? Display.Qty(snap) : "")</td>
+                            <td class="num">@(l.MovementSinceSnapshot is { } moved && moved != 0 ? Display.Qty(moved) : "")</td>
+                            <td class="num">@(l.BookQuantityAtCount is { } book ? Display.Qty(book) : "")</td>
+                        }
+                        <td class="num">
+                            @if (Model.CanCount)
+                            {
+                                <input type="number" form="count-line-@l.Id" name="quantity" value="@(l.CountedQuantity is { } c ? Display.Qty(c) : "")" step="any" min="0" required aria-label="第 @l.LineNo 行實盤量" style="width: 6em" />
+                                <button type="submit" form="count-line-@l.Id" class="link">存</button>
+                            }
+                            else
+                            {
+                                @(l.CountedQuantity is { } c ? Display.Qty(c) : "未盤")
+                            }
+                            @if (l.RecountRequested) { <span class="chip">待重盤</span> }
+                        </td>
+                        @if (!d.QuantitiesHidden)
+                        {
+                            <td class="num @(l.Difference is { } diff && diff != 0 ? "bad" : "")">@(l.Difference is { } df ? Display.Qty(df) : "")</td>
+                        }
+                        <td>@l.CountedByName</td>
+                    </tr>
+                }
+                @if (d.Lines.Items.Count == 0)
+                {
+                    <tr><td colspan="12" class="muted">沒有符合的盤點行。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (reviewing)
+    {
+        <div class="form-grid">
+            <label for="Comment">重盤說明</label>
+            <input type="text" id="Comment" name="Comment" maxlength="500" placeholder="例：A-01 差異過大請重點" />
+        </div>
+        <div class="actions"><button type="submit" id="stocktake-recount">勾選的行退回重盤</button></div>
+    }
+</form>
+@if (Model.CanCount)
+{
+    @* 每一行的「存」是獨立的小表單（放在表格外，避免巢狀 form；用 form 屬性綁定，Chrome 109 支援） *@
+    @foreach (var l in d.Lines.Items)
+    {
+        <form method="post" asp-page-handler="CountLine" asp-route-id="@d.Id" asp-route-lineId="@l.Id" id="count-line-@l.Id" hidden></form>
+    }
+}
+<div class="pager">
+    @if (d.Lines.Page > 1)
+    {
+        <a href="@Model.LinesUrl(d.Lines.Page - 1)">上一頁</a>
+    }
+    <span>第 @d.Lines.Page / @d.Lines.TotalPages 頁（共 @d.Lines.TotalCount 行）</span>
+    @if (d.Lines.Page < d.Lines.TotalPages)
+    {
+        <a href="@Model.LinesUrl(d.Lines.Page + 1)">下一頁</a>
+    }
+</div>

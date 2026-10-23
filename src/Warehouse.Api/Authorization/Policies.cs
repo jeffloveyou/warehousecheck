@@ -47,6 +47,12 @@ public static class Policies
     /// <summary>建立、取消手動預留：作業員、倉庫主管（取消他人的預留限主管，服務層檢查；M4-07）。</summary>
     public const string ReservationManage = "Stock.Reservation.Manage";
 
+    /// <summary>輸入實盤量、送審盤點：作業員、倉庫主管（M6-02）。</summary>
+    public const string StocktakeCount = "Stock.Stocktake.Count";
+
+    /// <summary>開始、取消、要求重盤、核准盤點：倉庫主管（自核依設定，M6-02）。</summary>
+    public const string StocktakeManage = "Stock.Stocktake.Manage";
+
     /// <summary>修改物料的負庫存設定：物料管理員（M4-08，ADR-0004）。</summary>
     public const string NegativePolicy = "Stock.NegativePolicy";
 
@@ -79,6 +85,8 @@ public static class Policies
             .AddPolicy(DocumentApprove, p => p.RequireRole(Roles.WarehouseManager))
             .AddPolicy(PartnersManage, p => p.RequireRole(Roles.WarehouseManager, Roles.ItemManager))
             .AddPolicy(ReservationManage, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
+            .AddPolicy(StocktakeCount, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
+            .AddPolicy(StocktakeManage, p => p.RequireRole(Roles.WarehouseManager))
             .AddPolicy(NegativePolicy, p => p.RequireRole(Roles.ItemManager))
             .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin))
             .AddPolicy(UsersManage, p => p.RequireRole(Roles.SystemAdmin))

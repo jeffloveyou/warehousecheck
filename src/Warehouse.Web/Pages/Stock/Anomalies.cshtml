@@ -13,6 +13,7 @@
     <a class="@TabClass(AnomaliesModel.TabEvents)" href="/Stock/Anomalies?tab=events">單據事件</a>
     <a class="@TabClass(AnomaliesModel.TabStaleDocuments)" href="/Stock/Anomalies?tab=stale-documents">久未處理單據</a>
     <a class="@TabClass(AnomaliesModel.TabStaleReservations)" href="/Stock/Anomalies?tab=stale-reservations">需注意的預留</a>
+    <a class="@TabClass(AnomaliesModel.TabOverReserved)" href="/Stock/Anomalies?tab=over-reserved">預留大於庫存</a>
     <a class="chip" href="/Stock/Negative">負庫存</a>
 </div>
 
@@ -31,7 +32,14 @@
                         <td>
                             @if (f.DocumentId is { } docId)
                             {
-                                <a href="/Documents/Details/@docId">@f.DocNo</a>
+                                @if (f.Command == "stocktake.approve")
+                                {
+                                    <a href="/Stocktakes/Details/@docId">盤點單</a>
+                                }
+                                else
+                                {
+                                    <a href="/Documents/Details/@docId">@f.DocNo</a>
+                                }
                             }
                         </td>
                         <td><code>@f.ErrorCode</code></td>
@@ -91,6 +99,31 @@
                 @if (staleDocuments.Items.Count == 0)
                 {
                     <tr><td colspan="6" class="muted">沒有久未處理的單據。</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (Model.OverReserved is { } overReserved)
+{
+    <p class="muted">未到期預留合計超過可用結存（常見於盤虧調整後）。請到「預留」頁釋放或調整預留，或確認庫存。</p>
+    <div class="table-wrap">
+        <table id="over-reserved-list">
+            <thead><tr><th>料號</th><th>品名</th><th>倉庫</th><th>預留</th><th>可用結存</th></tr></thead>
+            <tbody>
+                @foreach (var r in overReserved.Items)
+                {
+                    <tr>
+                        <td>@r.ItemCode</td>
+                        <td>@r.ItemName</td>
+                        <td>@r.WarehouseCode</td>
+                        <td class="num">@Display.Qty(r.Reserved)</td>
+                        <td class="num">@Display.Qty(r.Balance)</td>
+                    </tr>
+                }
+                @if (overReserved.Items.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">沒有預留大於庫存的料號。</td></tr>
                 }
             </tbody>
         </table>

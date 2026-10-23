@@ -45,7 +45,7 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
     {
         builder.ToTable("stock_documents", t =>
         {
-            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer')");
+            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer', 'Adjustment')");
             t.HasCheckConstraint("ck_stock_documents_status", "status IN ('Draft', 'Submitted', 'Posted', 'Cancelled')");
             t.HasCheckConstraint("ck_stock_documents_posted",
                 "(status = 'Posted') = (posted_at IS NOT NULL AND approved_by_id IS NOT NULL)");
@@ -92,6 +92,7 @@ public class StockDocumentLineConfiguration : IEntityTypeConfiguration<StockDocu
         builder.Property(l => l.LotNo).HasMaxLength(StockDocumentLine.CodeMaxLength);
         builder.Property(l => l.SerialNo).HasMaxLength(StockDocumentLine.CodeMaxLength);
         builder.Property(l => l.Quantity).HasPrecision(19, 4);
+        builder.Property(l => l.IsDecrease).HasDefaultValue(false).ValueGeneratedNever();
         builder.HasIndex(l => new { l.DocumentId, l.LineNo }).IsUnique();
         builder.HasIndex(l => new { l.DocumentId, l.LocationId, l.TargetLocationId, l.ItemId, l.LotNo, l.SerialNo })
             .IsUnique().AreNullsDistinct(false).HasDatabaseName("ux_stock_document_lines_key");

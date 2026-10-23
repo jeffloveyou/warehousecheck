@@ -93,6 +93,8 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             DocumentNoteEnabled = Flag(SettingKeys.DocumentNoteEnabled, Defaults.DocumentNoteEnabled),
             DocumentNoteRequired = Flag(SettingKeys.DocumentNoteRequired, Defaults.DocumentNoteRequired),
             DocumentAttachmentsEnabled = Flag(SettingKeys.DocumentAttachmentsEnabled, Defaults.DocumentAttachmentsEnabled),
+            AllowSelfApproveStocktake = Flag(SettingKeys.AllowSelfApproveStocktake, Defaults.AllowSelfApproveStocktake),
+            StocktakeBlindCount = Flag(SettingKeys.StocktakeBlindCount, Defaults.StocktakeBlindCount),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
         };
     }
@@ -133,5 +135,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.DocumentNoteEnabled, original.DocumentNoteEnabled, updated.DocumentNoteEnabled, current.DocumentNoteEnabled),
         (SettingKeys.DocumentNoteRequired, original.DocumentNoteRequired, updated.DocumentNoteRequired, current.DocumentNoteRequired),
         (SettingKeys.DocumentAttachmentsEnabled, original.DocumentAttachmentsEnabled, updated.DocumentAttachmentsEnabled, current.DocumentAttachmentsEnabled),
+        (SettingKeys.AllowSelfApproveStocktake, original.AllowSelfApproveStocktake, updated.AllowSelfApproveStocktake, current.AllowSelfApproveStocktake),
+        (SettingKeys.StocktakeBlindCount, original.StocktakeBlindCount, updated.StocktakeBlindCount, current.StocktakeBlindCount),
     ];
 }

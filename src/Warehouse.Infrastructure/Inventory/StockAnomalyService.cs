@@ -193,4 +193,35 @@ public sealed class StockAnomalyService(WarehouseDbContext db, TimeProvider cloc
             .ToListAsync(cancellationToken);
         return new PagedResult<StaleReservationRow>(rows, page, Paging.DefaultPageSize, total);
     }
+
+    /// <summary>未到期預留合計與可用結存（同 InventoryPostingService 的可用量定義），只列預留 &gt; 結存的料號＋倉庫。</summary>
+    private const string OverReservedSql = """
+        WITH r AS (
+            SELECT item_id, warehouse_id, SUM(remaining_quantity) AS reserved
+            FROM stock_reservations
+            WHERE status = 'Open' AND (expires_at IS NULL OR expires_at > now())
+            GROUP BY item_id, warehouse_id),
+        o AS (
+            SELECT r.item_id, r.warehouse_id, r.reserved, COALESCE(b.balance, 0) AS balance
+            FROM r LEFT JOIN LATERAL (
+                SELECT SUM(sb.quantity) AS balance FROM stock_balances sb JOIN locations l ON l.id = sb.location_id
+                WHERE sb.item_id = r.item_id AND l.warehouse_id = r.warehouse_id
+                  AND sb.stock_status = 'Available' AND l.status = 'Available') b ON true
+            WHERE r.reserved > COALESCE(b.balance, 0))
+        SELECT COALESCE(i.item_code, i.request_no), i.name, w.code, o.reserved, o.balance, count(*) OVER ()
+        FROM o JOIN items i ON i.id = o.item_id JOIN warehouses w ON w.id = o.warehouse_id
+        ORDER BY w.code, i.item_code
+        LIMIT @take OFFSET @skip
+        """;
+
+    public async Task<PagedResult<OverReservedRow>> GetOverReservedAsync(int page, CancellationToken cancellationToken)
+    {
+        page = Paging.ClampPage(page);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken); // DbCommands 需要交易（唯讀）
+        var rows = await DbCommands.QueryAsync(db, OverReservedSql,
+            r => (Row: new OverReservedRow(r.GetString(0), r.GetString(1), r.GetString(2), r.GetDecimal(3), r.GetDecimal(4)), Total: r.GetInt64(5)),
+            cancellationToken, DbCommands.Param("take", Paging.DefaultPageSize), DbCommands.Param("skip", (page - 1) * Paging.DefaultPageSize));
+        return new PagedResult<OverReservedRow>(rows.Select(x => x.Row).ToList(), page, Paging.DefaultPageSize,
+            rows.Count == 0 ? 0 : (int)rows[0].Total);
+    }
 }

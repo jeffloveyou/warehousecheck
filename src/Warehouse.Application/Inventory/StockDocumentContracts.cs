@@ -13,7 +13,11 @@ public sealed record DocumentLineRow(
     Guid Id, int LineNo, Guid LocationId, string LocationCode,
     Guid? TargetLocationId, string? TargetWarehouseCode, string? TargetLocationCode,
     Guid ItemId, string? ItemCode, string ItemName, string UnitCode, TrackingMode TrackingMode,
-    string? LotNo, string? SerialNo, DateOnly? ExpiryDate, decimal Quantity, Guid? ReservationId);
+    string? LotNo, string? SerialNo, DateOnly? ExpiryDate, decimal Quantity, Guid? ReservationId, bool IsDecrease = false)
+{
+    /// <summary>帶正負號的數量：盤點調整單的盤虧為負，其他單據等於 <see cref="Quantity"/>。</summary>
+    public decimal SignedQuantity => IsDecrease ? -Quantity : Quantity;
+}
 
 public sealed record DocumentDetails(
     Guid Id, string DocNo, StockDocumentType DocType, StockDocumentStatus Status, Guid WarehouseId, string WarehouseCode,

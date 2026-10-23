@@ -107,6 +107,7 @@ public static class Display
         Warehouse.Domain.Inventory.StockDocumentType.Inbound => "進倉",
         Warehouse.Domain.Inventory.StockDocumentType.Outbound => "出倉",
         Warehouse.Domain.Inventory.StockDocumentType.Transfer => "移庫",
+        Warehouse.Domain.Inventory.StockDocumentType.Adjustment => "盤點調整",
         _ => type.ToString(),
     };
 
@@ -125,6 +126,7 @@ public static class Display
         "document.submit" => "送審",
         "document.approve" => "核准",
         "reservation.create" => "建立預留",
+        "stocktake.approve" => "核准盤點",
         _ => command,
     };
 
@@ -135,6 +137,15 @@ public static class Display
         "document.return" => "退回",
         "document.reversal_create" => "建立沖銷單",
         _ => action,
+    };
+
+    public static string Of(Warehouse.Domain.Inventory.StocktakeStatus status) => status switch
+    {
+        Warehouse.Domain.Inventory.StocktakeStatus.Counting => "盤點中",
+        Warehouse.Domain.Inventory.StocktakeStatus.Submitted => "待核准",
+        Warehouse.Domain.Inventory.StocktakeStatus.Approved => "已核准",
+        Warehouse.Domain.Inventory.StocktakeStatus.Cancelled => "已取消",
+        _ => status.ToString(),
     };
 
     /// <summary>單號連結：期初單走 /Opening，其他走 /Documents。</summary>

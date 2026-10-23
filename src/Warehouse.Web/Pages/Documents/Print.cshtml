@@ -10,6 +10,7 @@
         StockDocumentType.Inbound => "進倉單",
         StockDocumentType.Outbound => "出倉單",
         StockDocumentType.Transfer => "移庫單",
+        StockDocumentType.Adjustment => "盤點調整單",
         _ => "庫存單據",
     };
     // 簽名欄第三格：出倉單是領料人，進倉與移庫是收料人
@@ -87,7 +88,7 @@
                         <td>@l.LotNo</td>
                         <td>@l.SerialNo</td>
                         <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
-                        <td class="num">@Display.Qty(l.Quantity)</td>
+                        <td class="num">@Display.Qty(l.SignedQuantity)</td>
                         <td>@l.UnitCode</td>
                     </tr>
                 }

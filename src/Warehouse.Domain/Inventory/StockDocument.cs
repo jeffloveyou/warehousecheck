@@ -2,13 +2,14 @@ using Warehouse.Domain.Items;
 
 namespace Warehouse.Domain.Inventory;
 
-/// <summary>庫存單據種類：期初（M3）、進倉、出倉、移庫（M4）；調整在 M6。</summary>
+/// <summary>庫存單據種類：期初（M3）、進倉、出倉、移庫（M4）、盤點調整（M6-02，由盤點核准自動產生）。</summary>
 public enum StockDocumentType
 {
     Opening,
     Inbound,
     Outbound,
     Transfer,
+    Adjustment,
 }
 
 /// <summary>
@@ -85,6 +86,10 @@ public sealed class StockDocument
         if (type == StockDocumentType.Opening)
         {
             throw new DomainRuleException("期初單請用期初建帳功能。");
+        }
+        if (type == StockDocumentType.Adjustment)
+        {
+            throw new DomainRuleException("調整單只能由盤點核准產生。");
         }
         if (id == Guid.Empty || warehouseId == Guid.Empty || actorId == Guid.Empty)
         {
@@ -365,6 +370,74 @@ public sealed class StockDocument
         PostedAt = now.ToUniversalTime();
     }
 
+    /// <summary>
+    /// 盤點調整單（M6-02，ADR-0018）：只由盤點核准在同一交易內建立並過帳，使用者不能手動開。
+    /// 草稿階段加入明細（數量為差異的絕對值，<see cref="StockDocumentLine.IsDecrease"/> 表示盤虧），接著 <see cref="PostAdjustment"/>。
+    /// </summary>
+    public static StockDocument CreateAdjustment(
+        Guid id, string docNo, Guid warehouseId, string note, Guid actorId, string actorName, DateTimeOffset now)
+    {
+        if (id == Guid.Empty || warehouseId == Guid.Empty || actorId == Guid.Empty)
+        {
+            throw new DomainRuleException("調整單必須指定倉庫與核准者。");
+        }
+        return new StockDocument
+        {
+            Id = id,
+            DocNo = Rules.Required(docNo, 20, "單號"),
+            DocType = StockDocumentType.Adjustment,
+            Status = StockDocumentStatus.Draft,
+            WarehouseId = warehouseId,
+            Note = Rules.Optional(note, NoteMaxLength, "備註"),
+            CreatedById = actorId,
+            CreatedByName = Rules.Required(actorName, ItemReview.ActorNameMaxLength, "建立者"),
+            CreatedAt = now.ToUniversalTime(),
+        };
+    }
+
+    /// <summary>調整單明細：<paramref name="quantity"/> 是差異的絕對值（&gt; 0）。不檢查同鍵重複（盤點明細已保證唯一，含結存狀態）。</summary>
+    public StockDocumentLine AddAdjustmentLine(
+        Guid lineId, Guid itemId, TrackingMode trackingMode, int decimalPlaces, Guid locationId,
+        string? lotNo, string? serialNo, decimal quantity, bool isDecrease)
+    {
+        EnsureDraft();
+        if (DocType != StockDocumentType.Adjustment)
+        {
+            throw new DomainRuleException("只有調整單可以加入調整明細。");
+        }
+        if (quantity <= 0)
+        {
+            throw new DomainRuleException("調整數量必須大於 0。");
+        }
+        if (_lines.Count >= MaxAdjustmentLines)
+        {
+            throw new DomainRuleException($"一張調整單最多 {MaxAdjustmentLines} 行。");
+        }
+        var line = StockDocumentLine.Create(
+            lineId, Id, _lines.Count + 1, itemId, trackingMode, decimalPlaces, locationId, lotNo, serialNo, null, quantity);
+        line.SetDecrease(isDecrease);
+        _lines.Add(line);
+        return line;
+    }
+
+    /// <summary>調整單過帳（核准者＝盤點核准者；自核規則已在盤點檢查）。</summary>
+    public void PostAdjustment(Guid approverId, string approverName, DateTimeOffset now)
+    {
+        EnsureDraft();
+        if (DocType != StockDocumentType.Adjustment || _lines.Count == 0)
+        {
+            throw new DomainRuleException("調整單至少要有一行明細。");
+        }
+        Status = StockDocumentStatus.Posted;
+        SubmittedAt = now.ToUniversalTime();
+        ApprovedById = approverId;
+        ApprovedByName = Rules.Required(approverName, ItemReview.ActorNameMaxLength, "核准者");
+        PostedAt = now.ToUniversalTime();
+    }
+
+    /// <summary>調整單行數上限（與盤點單行數上限相同）。</summary>
+    public const int MaxAdjustmentLines = Stocktake.MaxLines;
+
     private void EnsureDraft()
     {
         if (Status != StockDocumentStatus.Draft)
@@ -476,6 +549,11 @@ public sealed class StockDocumentLine
 
     /// <summary>依預留出庫時指定的預留（只限出倉單）。</summary>
     public Guid? ReservationId { get; private set; }
+
+    /// <summary>調整單：true＝盤虧（扣減 <see cref="Quantity"/>），false＝盤盈（增加）。其他單據一律 false。</summary>
+    public bool IsDecrease { get; private set; }
+
+    internal void SetDecrease(bool isDecrease) => IsDecrease = isDecrease;
 
     internal void SetMovement(Guid? targetLocationId, Guid? reservationId)
     {

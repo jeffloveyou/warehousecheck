@@ -5,6 +5,7 @@ using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
+using Warehouse.Infrastructure.Persistence.Configurations;
 
 namespace Warehouse.Infrastructure.Persistence;
 
@@ -66,6 +67,14 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<UserWarehouse> UserWarehouses => Set<UserWarehouse>();
 
+    public DbSet<Stocktake> Stocktakes => Set<Stocktake>();
+
+    public DbSet<StocktakeLocation> StocktakeLocations => Set<StocktakeLocation>();
+
+    /// <summary>盤點單號 ST-000001、調整單號 ADJ-000001 的流水號來源（M6-02）。</summary>
+    public const string StocktakeNoSequence = "stocktake_no_seq";
+    public const string AdjustmentDocNoSequence = "adjustment_doc_no_seq";
+
     /// <summary>期初單號 OB-000001 的流水號來源。</summary>
     public const string OpeningDocNoSequence = "opening_doc_no_seq";
 
@@ -120,6 +129,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
         modelBuilder.HasSequence<long>(InboundDocNoSequence);
         modelBuilder.HasSequence<long>(OutboundDocNoSequence);
         modelBuilder.HasSequence<long>(TransferDocNoSequence);
+        modelBuilder.HasSequence<long>(StocktakeNoSequence);
+        modelBuilder.HasSequence<long>(AdjustmentDocNoSequence);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WarehouseDbContext).Assembly);
     }
 }

@@ -54,6 +54,10 @@ public class IndexModel(ISettingsService settings) : PageModel
 
         public bool DocumentAttachmentsEnabled { get; set; }
 
+        public bool AllowSelfApproveStocktake { get; set; }
+
+        public bool StocktakeBlindCount { get; set; }
+
         /// <summary>列印抬頭的公司名稱（空白＝不印）；表單空白時綁定為 null。</summary>
         public string? PrintCompanyName { get; set; }
 
@@ -71,6 +75,8 @@ public class IndexModel(ISettingsService settings) : PageModel
                 DocumentNoteEnabled = DocumentNoteEnabled,
                 DocumentNoteRequired = DocumentNoteRequired,
                 DocumentAttachmentsEnabled = DocumentAttachmentsEnabled,
+                AllowSelfApproveStocktake = AllowSelfApproveStocktake,
+                StocktakeBlindCount = StocktakeBlindCount,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
             };
 
@@ -91,6 +97,8 @@ public class IndexModel(ISettingsService settings) : PageModel
             DocumentNoteEnabled = s.DocumentNoteEnabled,
             DocumentNoteRequired = s.DocumentNoteRequired,
             DocumentAttachmentsEnabled = s.DocumentAttachmentsEnabled,
+            AllowSelfApproveStocktake = s.AllowSelfApproveStocktake,
+            StocktakeBlindCount = s.StocktakeBlindCount,
             PrintCompanyName = s.PrintCompanyName,
         };
     }

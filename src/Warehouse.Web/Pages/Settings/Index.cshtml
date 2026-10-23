@@ -30,9 +30,16 @@
     <input type="hidden" name="Original.DocumentNoteRequired" value="@Model.Original.DocumentNoteRequired.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.DocumentAttachmentsEnabled" value="@Model.Original.DocumentAttachmentsEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.PrintCompanyName" value="@Model.Original.PrintCompanyName" />
+    <input type="hidden" name="Original.AllowSelfApproveStocktake" value="@Model.Original.AllowSelfApproveStocktake.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.StocktakeBlindCount" value="@Model.Original.StocktakeBlindCount.ToString().ToLowerInvariant()" />
     <h2>期初建帳</h2>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveOpening" value="true" checked="@Model.Form.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
+    <h2>盤點</h2>
+    <p><label><input type="checkbox" name="Form.StocktakeBlindCount" value="true" checked="@Model.Form.StocktakeBlindCount" /> 盲盤：輸入實盤量時不顯示帳面量</label></p>
+    <p class="muted">預設開啟。倉庫主管審核時才看得到帳面量與差異。</p>
+    <p><label><input type="checkbox" name="Form.AllowSelfApproveStocktake" value="true" checked="@Model.Form.AllowSelfApproveStocktake" /> 允許盤點單的建立者或送審者自己核准盤差</label></p>
+    <p class="muted">預設不允許（D-07）。不論哪一種，都會記錄建立者、送審者、核准者與時間。</p>
     <h2>倉位註記</h2>
     <p><label><input type="checkbox" name="Form.LocationNotesEnabled" value="true" checked="@Model.Form.LocationNotesEnabled" /> 自由備註</label></p>
     <p><label><input type="checkbox" name="Form.LocationAttributesEnabled" value="true" checked="@Model.Form.LocationAttributesEnabled" /> 結構化屬性（區／架／層／格、類型、承重、溫控、危險品）</label></p>
