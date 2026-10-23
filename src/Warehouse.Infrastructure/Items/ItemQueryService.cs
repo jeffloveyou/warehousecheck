@@ -16,6 +16,31 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
     {
         var page = Paging.ClampPage(query.Page);
         var pageSize = Paging.ClampPageSize(query.PageSize);
+        var items = Filter(db, query);
+
+        var total = await items.CountAsync(cancellationToken);
+        var rows = await items
+            .OrderByDescending(i => i.UpdatedAt).ThenBy(i => i.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(i => new ItemListRow(
+                i.Id,
+                i.RequestNo,
+                i.ItemCode,
+                i.Name,
+                i.Brand,
+                i.ManufacturerPartNo,
+                i.Status,
+                db.ItemCategories.Where(c => c.Id == i.CategoryId).Select(c => c.Name).First(),
+                db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
+                i.UpdatedAt))
+            .ToListAsync(cancellationToken);
+        return new PagedResult<ItemListRow>(rows, page, pageSize, total);
+    }
+
+    /// <summary>物料清單的篩選條件（畫面與匯出共用，M6-03）。</summary>
+    internal static IQueryable<Item> Filter(WarehouseDbContext db, ItemSearchQuery query)
+    {
         var items = db.Items.AsNoTracking();
 
         if (query.Status is { } status)
@@ -45,26 +70,7 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
                 || (i.ManufacturerPartNo != null && EF.Functions.ILike(i.ManufacturerPartNo, pattern, LikePattern.Escape))
                 || (partNo != null && i.NormalizedPartNo == partNo));
         }
-
-        var total = await items.CountAsync(cancellationToken);
-        var rows = await items
-            .OrderByDescending(i => i.UpdatedAt).ThenBy(i => i.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(i => new ItemListRow(
-                i.Id,
-                i.RequestNo,
-                i.ItemCode,
-                i.Name,
-                i.Brand,
-                i.ManufacturerPartNo,
-                i.Status,
-                db.ItemCategories.Where(c => c.Id == i.CategoryId).Select(c => c.Name).First(),
-                db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
-                i.UpdatedAt))
-            .ToListAsync(cancellationToken);
-
-        return new PagedResult<ItemListRow>(rows, page, pageSize, total);
+        return items;
     }
 
     public async Task<Guid?> FindIdByItemCodeAsync(string itemCode, CancellationToken cancellationToken) =>

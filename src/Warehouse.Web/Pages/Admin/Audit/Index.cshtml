@@ -20,6 +20,7 @@
     <input type="text" name="EntityId" value="@Model.EntityId" placeholder="對象 ID" aria-label="對象 ID" />
     <button type="submit">查詢</button>
 </form>
+<partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
     <div class="message error" id="page-error">@Model.Notice</div>

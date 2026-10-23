@@ -36,6 +36,15 @@ public class IndexModel(IItemQueryService queries, IMasterDataService masterData
         Categories = await masterData.ListCategoriesAsync(cancellationToken);
     }
 
+    /// <summary>匯出 Excel（M6-03）：條件與清單相同、不分頁；超過 5 萬筆回到清單顯示訊息。</summary>
+    public Task<IActionResult> OnGetExportAsync(
+        [FromServices] Warehouse.Application.Exports.IExportService export, [FromServices] ExportGate gate, CancellationToken cancellationToken) =>
+        gate.RunAsync(this, () => export.ItemsAsync(new ItemSearchQuery(Keyword, Status, CategoryId, 1, PageSize), cancellationToken),
+            Url.Page("/Items/Index", new { q = Keyword, Status, CategoryId })!);
+
+    /// <summary>目前條件的匯出網址。</summary>
+    public string ExportUrl => Url.Page("/Items/Index", "Export", new { q = Keyword, Status, CategoryId })!;
+
     /// <summary>保留目前篩選條件、只換頁碼的網址。</summary>
     public string PageUrl(int page) =>
         Url.Page("/Items/Index", new { q = Keyword, Status, CategoryId, p = page, PageSize = Result.PageSize })!;

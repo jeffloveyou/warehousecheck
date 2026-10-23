@@ -14,6 +14,23 @@ public sealed class AuditQueryService(WarehouseDbContext db) : IAuditQueryServic
 {
     public async Task<PagedResult<AuditRow>> SearchAsync(AuditQuery query, CancellationToken cancellationToken)
     {
+        var logs = Filter(db, query);
+        var page = Math.Clamp(query.Page, 1, AuditQuery.MaxCount / Paging.DefaultPageSize);
+        var total = await logs.Take(AuditQuery.MaxCount).CountAsync(cancellationToken);
+        var rows = await Rows(logs)
+            .Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize)
+            .ToListAsync(cancellationToken);
+        return new PagedResult<AuditRow>(rows, page, Paging.DefaultPageSize, total);
+    }
+
+    /// <summary>新到舊的畫面列（查詢與匯出共用）。</summary>
+    internal static IQueryable<AuditRow> Rows(IQueryable<AuditLog> logs) =>
+        logs.OrderByDescending(a => a.OccurredAt).ThenByDescending(a => a.Id)
+            .Select(a => new AuditRow(a.Id, a.OccurredAt, a.ActorName, a.Action, a.EntityType, a.EntityId, a.Before, a.After));
+
+    /// <summary>期間檢查與篩選（查詢與匯出共用，M6-03）。</summary>
+    internal static IQueryable<AuditLog> Filter(WarehouseDbContext db, AuditQuery query)
+    {
         var from = query.From.ToUniversalTime();
         var to = query.To.ToUniversalTime();
         if (from >= to)
@@ -24,7 +41,6 @@ public sealed class AuditQueryService(WarehouseDbContext db) : IAuditQueryServic
         {
             throw new DomainRuleException($"查詢期間最長 {AuditQuery.MaxDays} 天，請縮小範圍。");
         }
-        var page = Math.Clamp(query.Page, 1, AuditQuery.MaxCount / Paging.DefaultPageSize);
         var logs = db.AuditLogs.AsNoTracking().Where(a => a.OccurredAt >= from && a.OccurredAt < to);
         if (Clean(query.ActorName) is { } actor)
         {
@@ -44,12 +60,7 @@ public sealed class AuditQueryService(WarehouseDbContext db) : IAuditQueryServic
         {
             logs = logs.Where(a => a.EntityId == id);
         }
-        var total = await logs.Take(AuditQuery.MaxCount).CountAsync(cancellationToken);
-        var rows = await logs.OrderByDescending(a => a.OccurredAt).ThenByDescending(a => a.Id)
-            .Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize)
-            .Select(a => new AuditRow(a.Id, a.OccurredAt, a.ActorName, a.Action, a.EntityType, a.EntityId, a.Before, a.After))
-            .ToListAsync(cancellationToken);
-        return new PagedResult<AuditRow>(rows, page, Paging.DefaultPageSize, total);
+        return logs;
     }
 
     private static string? Clean(string? value)

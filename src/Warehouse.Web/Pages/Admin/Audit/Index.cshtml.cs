@@ -68,6 +68,28 @@ public class IndexModel(IAuditQueryService audit, TimeProvider clock) : PageMode
         }
     }
 
+    /// <summary>匯出操作日誌（M6-03，限系統管理員：資料夾政策 AuditRead）。期間規則同畫面。</summary>
+    public Task<IActionResult> OnGetExportAsync(
+        [FromServices] Warehouse.Application.Exports.IExportService export, [FromServices] ExportGate gate, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(clock.GetUtcNow().ToOffset(TimeSpan.FromHours(8)).DateTime);
+        From ??= today.AddDays(-(AuditQuery.DefaultDays - 1));
+        To ??= today;
+        var back = PageUrl(1);
+        var earliest = new DateOnly(2000, 1, 1);
+        if (From < earliest || To < earliest || From > today.AddDays(1) || To > today.AddDays(1))
+        {
+            TempData["ExportError"] = "日期超出可查詢範圍（2000-01-01 至今天）。";
+            return Task.FromResult<IActionResult>(LocalRedirect(back));
+        }
+        return gate.RunAsync(this, () => export.AuditAsync(new AuditQuery(
+            TaipeiTime.StartOfDay(From.Value), TaipeiTime.StartOfDay(To.Value.AddDays(1)), ActorName, ActionPrefix, EntityType, EntityId),
+            cancellationToken), back);
+    }
+
+    public string ExportUrl => Url.Page("/Admin/Audit/Index", "Export",
+        new { From = From?.ToString("yyyy-MM-dd"), To = To?.ToString("yyyy-MM-dd"), ActorName, ActionPrefix, EntityType, EntityId })!;
+
     public string PageUrl(int page) => Url.Page("/Admin/Audit/Index",
         new { From = From?.ToString("yyyy-MM-dd"), To = To?.ToString("yyyy-MM-dd"), ActorName, ActionPrefix, EntityType, EntityId, p = page })!;
 }

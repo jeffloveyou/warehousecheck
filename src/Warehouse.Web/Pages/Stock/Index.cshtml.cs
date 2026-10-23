@@ -43,33 +43,10 @@ public class IndexModel(
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
-        Guid? locationId = null;
-        Guid? itemId = null;
-        if (!string.IsNullOrWhiteSpace(LocationCode))
+        var (locationId, itemId) = await ResolveAsync(cancellationToken);
+        if (Notice is not null)
         {
-            var warehouse = Warehouses.FirstOrDefault(w => w.Id == WarehouseId);
-            if (warehouse is null)
-            {
-                Notice = "以儲位碼查詢時請先選擇倉庫。";
-                return;
-            }
-            var location = await warehouses.GetLocationByCodeAsync(warehouse.Code, LocationCode, cancellationToken);
-            if (location is null)
-            {
-                Notice = $"{warehouse.Code} 沒有儲位 {LocationCode}。";
-                return;
-            }
-            locationId = location.Id;
-        }
-        if (!string.IsNullOrWhiteSpace(ItemCode))
-        {
-            var code = TextNormalizer.Normalize(ItemCode);
-            itemId = await items.FindIdByItemCodeAsync(code, cancellationToken);
-            if (itemId is null)
-            {
-                Notice = $"找不到料號 {code}。";
-                return;
-            }
+            return;
         }
         if (WarehouseId is null && locationId is null && itemId is null && DocumentId is null)
         {
@@ -89,4 +66,59 @@ public class IndexModel(
     }
 
     public string PageUrl(int page) => Url.Page("/Stock/Index", new { WarehouseId, LocationCode, ItemCode, DocumentId, p = page })!;
+
+    /// <summary>匯出結存（M6-03）：條件同畫面（倉庫、儲位碼、料號，至少一項），不分頁。</summary>
+    public async Task<IActionResult> OnGetExportAsync(
+        [FromServices] Warehouse.Application.Exports.IExportService export, [FromServices] ExportGate gate, CancellationToken cancellationToken)
+    {
+        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        var back = Url.Page("/Stock/Index", new { WarehouseId, LocationCode, ItemCode })!;
+        var (locationId, itemId) = await ResolveAsync(cancellationToken);
+        if (Notice is null && WarehouseId is null && locationId is null && itemId is null)
+        {
+            Notice = "請先指定倉庫、儲位或料號再匯出（不匯出全部結存）。";
+        }
+        if (Notice is not null)
+        {
+            TempData["ExportError"] = Notice;
+            return LocalRedirect(back);
+        }
+        return await gate.RunAsync(this, () => export.BalancesAsync(WarehouseId, locationId, itemId, cancellationToken), back);
+    }
+
+    public string ExportUrl => Url.Page("/Stock/Index", "Export", new { WarehouseId, LocationCode, ItemCode })!;
+
+    /// <summary>儲位碼、料號轉成 ID；找不到時設定 <see cref="Notice"/>（畫面與匯出共用）。</summary>
+    private async Task<(Guid? LocationId, Guid? ItemId)> ResolveAsync(CancellationToken cancellationToken)
+    {
+        Guid? locationId = null;
+        Guid? itemId = null;
+        if (!string.IsNullOrWhiteSpace(LocationCode))
+        {
+            var warehouse = Warehouses.FirstOrDefault(w => w.Id == WarehouseId);
+            if (warehouse is null)
+            {
+                Notice = "以儲位碼查詢時請先選擇倉庫。";
+                return (null, null);
+            }
+            var location = await warehouses.GetLocationByCodeAsync(warehouse.Code, LocationCode, cancellationToken);
+            if (location is null)
+            {
+                Notice = $"{warehouse.Code} 沒有儲位 {LocationCode}。";
+                return (null, null);
+            }
+            locationId = location.Id;
+        }
+        if (!string.IsNullOrWhiteSpace(ItemCode))
+        {
+            var code = TextNormalizer.Normalize(ItemCode);
+            itemId = await items.FindIdByItemCodeAsync(code, cancellationToken);
+            if (itemId is null)
+            {
+                Notice = $"找不到料號 {code}。";
+                return (null, null);
+            }
+        }
+        return (locationId, itemId);
+    }
 }

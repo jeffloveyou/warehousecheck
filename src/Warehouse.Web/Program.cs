@@ -44,6 +44,7 @@ builder.Services.AddWarehouseApi();
 builder.Services.AddHostedService<Warehouse.Web.Jobs.ReservationExpiryJob>();
 builder.Services.AddWarehouseIdentity();
 builder.Services.AddSingleton<LoginThrottle>();
+builder.Services.AddSingleton<ExportGate>();
 builder.Services.AddRazorPages(options =>
 {
     // 預設全部頁面要登入（FallbackPolicy）；以下明確開放或要求特定權限（ADR-0012）

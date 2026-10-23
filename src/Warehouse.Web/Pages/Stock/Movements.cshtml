@@ -21,6 +21,7 @@
     <label>迄 <input type="date" name="To" value="@(Model.To?.ToString("yyyy-MM-dd"))" /></label>
     <button type="submit" id="movement-submit">查詢</button>
 </form>
+<partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
     <div class="message warn">@Model.Notice</div>
