@@ -51,6 +51,7 @@ public static class DependencyInjection
         services.AddScoped<IOpeningService, OpeningService>();
         services.AddScoped<IStocktakeService, StocktakeService>();
         services.AddScoped<Warehouse.Application.Exports.IExportService, Warehouse.Infrastructure.Exports.ExportService>();
+        services.AddScoped<Warehouse.Application.Imports.IImportService, Warehouse.Infrastructure.Imports.ImportService>();
         services.AddScoped<IStockDocumentService, StockDocumentService>();
         services.AddScoped<IDocumentMasterDataService, DocumentMasterDataService>();
         services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();

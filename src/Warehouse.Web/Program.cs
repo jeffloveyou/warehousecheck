@@ -45,6 +45,7 @@ builder.Services.AddHostedService<Warehouse.Web.Jobs.ReservationExpiryJob>();
 builder.Services.AddWarehouseIdentity();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<ExportGate>();
+builder.Services.AddSingleton<ImportGate>();
 builder.Services.AddRazorPages(options =>
 {
     // 預設全部頁面要登入（FallbackPolicy）；以下明確開放或要求特定權限（ADR-0012）
@@ -70,6 +71,8 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Admin/Audit", Policies.AuditRead);
     options.Conventions.AuthorizeFolder("/Opening", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Stocktakes", Policies.StockRead);
+    // 匯入：頁面要登入；每種資料的權限在 handler 內依種類檢查（ItemsSubmit、ItemsIndex、WarehousesManage、OpeningEdit）
+    options.Conventions.AuthorizeFolder("/Import", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Stock", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Scan", Policies.StockRead);
 });

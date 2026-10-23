@@ -28,6 +28,7 @@
     @if (User.IsInRole(Roles.Operator) || User.IsInRole(Roles.ItemManager))
     {
         <a href="/Items/Create" id="item-create-link">＋ 提出新物料</a>
+        <a href="/Import?Kind=Items" id="item-import-link">從 Excel 匯入</a>
     }
 </form>
 <partial name="_ExportLink" model="Model.ExportUrl" />

@@ -1,0 +1,71 @@
+@page
+@model Warehouse.Web.Pages.Import.IndexModel
+@using Warehouse.Application.Imports
+@{
+    ViewData["Title"] = "匯入";
+}
+<h1>匯入</h1>
+<p class="muted">上傳 Excel（.xlsx）或 CSV（UTF-8）後，系統會先<strong>試算</strong>並列出每一列的錯誤與警告；<strong>有任何錯誤就整批不匯入</strong>，修正檔案後重新上傳。沒有錯誤時再按「確認匯入」。庫存數量不能直接匯入，只能匯入期初單草稿的明細，仍需核准才過帳。</p>
+<div class="tabs">
+    @foreach (var kind in Enum.GetValues<ImportKind>().Where(k => k != ImportKind.OpeningLines || Model.Kind == ImportKind.OpeningLines))
+    {
+        <a class="@(kind == Model.Kind ? "chip tab-active" : "chip")" href="/Import?Kind=@kind@(kind == ImportKind.OpeningLines ? $"&Target={Model.Target}" : "")">@IndexModel.LabelOf(kind)</a>
+    }
+</div>
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (TempData["ExportError"] is string templateError)
+{
+    <div class="message error">@templateError</div>
+}
+<div class="panel">
+    <h2>@IndexModel.LabelOf(Model.Kind)：欄位</h2>
+    <p><a href="/Import?handler=Template&Kind=@Model.Kind" id="template-link">下載範本（.xlsx）</a>　第一列是標題，欄名要與範本相同；最多 5,000 列、5 MB。</p>
+    <div class="table-wrap">
+        <table id="import-columns">
+            <thead><tr><th>欄名</th><th>必填</th><th>說明</th></tr></thead>
+            <tbody>
+                @foreach (var (name, required, note) in Model.Columns)
+                {
+                    <tr><td>@name</td><td>@(required ? "是" : "")</td><td>@note</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+@if (!Model.Allowed)
+{
+    <p class="message error">你沒有匯入這種資料的權限。</p>
+}
+else if (Model.Kind == ImportKind.OpeningLines && Model.Target is null)
+{
+    <p class="message error">期初單明細請從期初單草稿頁面的「匯入明細」進入。</p>
+}
+else
+{
+    <form method="post" enctype="multipart/form-data" class="panel" id="import-form">
+        <input type="hidden" name="Kind" value="@Model.Kind" />
+        @if (Model.Kind == ImportKind.OpeningLines)
+        {
+            <input type="hidden" name="Target" value="@Model.Target" />
+        }
+        <div class="form-grid">
+            @if (Model.Kind == ImportKind.Locations)
+            {
+                <label for="Target">倉庫</label>
+                <select id="Target" name="Target" required>
+                    <option value="">選擇倉庫</option>
+                    @foreach (var w in Model.Warehouses.Where(w => w.IsActive && Model.Operable.Allows(w.Id)))
+                    {
+                        <option value="@w.Id" selected="@(w.Id == Model.Target)">@w.Code @w.Name</option>
+                    }
+                </select>
+            }
+            <label for="Upload">檔案</label>
+            <input type="file" id="Upload" name="Upload" accept=".xlsx,.csv" required />
+        </div>
+        <div class="actions"><button type="submit" id="import-upload">上傳並試算</button></div>
+    </form>
+}

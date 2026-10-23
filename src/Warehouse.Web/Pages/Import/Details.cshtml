@@ -1,0 +1,64 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Import.DetailsModel
+@using Warehouse.Application.Imports
+@{
+    var b = Model.Batch;
+    ViewData["Title"] = "匯入結果";
+}
+<p><a href="/Import?Kind=@b.Kind@(b.Kind == ImportKind.OpeningLines ? $"&Target={b.TargetId}" : "")">← 匯入</a></p>
+<h1>匯入：@IndexModel.LabelOf(b.Kind)</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<div class="panel">
+    <p>檔案 @b.FileName@(b.TargetLabel is null ? "" : $"｜目標 {b.TargetLabel}")｜上傳 @b.CreatedByName @Display.Time(b.CreatedAt)</p>
+    <p id="import-summary">共 @b.RowCount 列；錯誤 <strong>@b.ErrorCount</strong> 列；警告 @b.WarningCount 列
+        @if (b.Status == ImportStatus.Committed && b.CommittedAt is { } at) { <span class="chip" id="import-status">已匯入 @Display.Time(at)</span> }
+    </p>
+    @if (b.ErrorCount > 0)
+    {
+        <p class="message error">有錯誤，整批不會匯入。請依下表修正檔案後重新上傳。</p>
+    }
+    else if (b.CanCommit)
+    {
+        <form method="post" asp-page-handler="Commit" asp-route-id="@b.Id">
+            <p class="muted">試算在 @Display.Time(b.ExpiresAt) 前有效。確認時會再檢查一次，若資料已被他人變更而出現錯誤，整批不匯入。</p>
+            <button type="submit" id="import-commit">確認匯入 @b.RowCount 列</button>
+        </form>
+    }
+    else if (b.Status == ImportStatus.Validated)
+    {
+        <p class="muted">試算已過期或你不是上傳者，請重新上傳。</p>
+    }
+    @if (b.Kind == ImportKind.OpeningLines && b.TargetId is { } doc)
+    {
+        <p><a href="/Opening/Details/@doc">回期初單</a></p>
+    }
+</div>
+@if (b.Issues.Count > 0)
+{
+    <div class="table-wrap">
+        <table id="import-issues">
+            <thead><tr><th>列</th><th>類型</th><th>說明</th></tr></thead>
+            <tbody>
+                @foreach (var issue in b.Issues)
+                {
+                    <tr class="@(issue.IsError ? "bad" : "")">
+                        <td class="num">@issue.RowNo</td>
+                        <td>@(issue.IsError ? "錯誤" : "警告")</td>
+                        <td>@issue.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (b.ErrorCount + b.WarningCount > b.Issues.Count)
+    {
+        <p class="muted">只列出前 @b.Issues.Count 筆。</p>
+    }
+}

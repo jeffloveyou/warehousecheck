@@ -5,6 +5,10 @@
     ViewData["Title"] = "儲位";
 }
 <h1>儲位 @(Model.CurrentWarehouse is { } w ? $"－{w.Code} {w.Name}" : "")</h1>
+@if (Model.CanManage && Model.CurrentWarehouse is { IsActive: true } importTarget)
+{
+    <p><a href="/Import?Kind=Locations&Target=@importTarget.Id" id="location-import-link">從 Excel 匯入儲位</a></p>
+}
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>
