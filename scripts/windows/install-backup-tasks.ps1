@@ -9,7 +9,8 @@
       3. <BackupRoot>\backup-settings.json 不存在時建立（-Databases、-ExternalCopyPath）
       4. 排程：Warehouse 每日備份（02:00）、Warehouse 附件備份（每 15 分）、Warehouse 健康檢查（每 5 分）
       5. 事件記錄來源「Warehouse」（應用程式記錄檔），健康檢查異常時寫入
-    外部複本路徑之後要改：編輯 backup-settings.json 的 externalCopyPath（例如 E:\WarehouseBackup 或 \\nas\backup\warehouse）。
+    外部複本路徑之後要改：編輯 backup-settings.json 的 externalCopyPath。JSON 裡反斜線要寫兩個，
+    例如 "E:\\WarehouseBackup"、"\\\\nas\\backup\\warehouse"（或用 /：E:/WarehouseBackup）。格式錯誤時備份失敗並寫進狀態。
     網路路徑要讓 SYSTEM（網域環境為「網域\電腦名$」）有寫入權限；工作群組環境建議用外接硬碟。
 .EXAMPLE
     .\scripts\windows\install-backup-tasks.ps1 -Databases warehouse_prod
@@ -43,6 +44,14 @@ try {
         Write-Host "沿用既有設定 $settingsFile（要改資料庫或外部複本路徑請直接編輯）"
     }
 
+    # 狀態目錄：只有 SYSTEM／管理員可寫，網站服務帳號唯讀（install-service.ps1 授權），
+    # SYSTEM 不寫服務帳號可寫的 data、logs，避免被符號連結誘導覆寫其他檔案（審查 S3）
+    $statusDir = Join-Path $Root 'status'
+    Protect-SecretDirectory $statusDir
+    foreach ($service in Get-Service 'WarehouseA', 'WarehouseB' -ErrorAction SilentlyContinue) {
+        icacls $statusDir /grant "NT SERVICE\$($service.Name):(OI)(CI)R" | Out-Null
+    }
+
     $scriptDir = Join-Path $Root 'scripts'
     Protect-SecretDirectory $scriptDir
     foreach ($name in 'backup.ps1', 'backup-attachments.ps1', 'check-health.ps1', 'WarehouseDb.psm1') {
@@ -54,6 +63,10 @@ try {
     }
 
     $pwsh = (Get-Command pwsh).Source
+    # Microsoft Store 版的 pwsh（WindowsApps）SYSTEM 執行不了，排程會靜默失敗（審查 S4）
+    if ($pwsh -like '*\WindowsApps\*') {
+        throw "pwsh 是 Microsoft Store 版（$pwsh），排程以 SYSTEM 執行不了。請安裝 MSI 版 PowerShell 7（C:\Program Files\PowerShell\7）。"
+    }
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $paths = "-BackupRoot `"$BackupRoot`" -Root `"$Root`""
     function Register-WarehouseTask([string]$Name, [string]$Script, $Trigger, [int]$Hours, [string]$Description) {

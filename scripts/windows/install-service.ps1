@@ -93,7 +93,7 @@ try {
         # M7-02：檔案日誌（每個槽位一個檔名）、備份狀態檔位置（系統狀態頁讀取）
         "Logging__File__Directory=$(Join-Path $Root 'logs')",
         "Logging__File__Name=$ServiceName",
-        "Backup__StatusDirectory=$(Join-Path $Root 'data')")
+        "Backup__StatusDirectory=$(Join-Path $Root 'status')")
     Write-Host "已建立服務 $ServiceName（帳號 $account，埠 $Port）"
 
     # 4. 服務帳號權限（虛擬帳號要等服務建立後才存在）：config 讀；data（含 keys）、logs 可寫；releases 可讀與執行
@@ -102,6 +102,10 @@ try {
     icacls (Join-Path $Root 'data') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'logs') /grant "${account}:(OI)(CI)M" | Out-Null
     icacls (Join-Path $Root 'releases') /grant "${account}:(OI)(CI)RX" | Out-Null
+    # 備份狀態（M7-02）：SYSTEM 的備份排程寫入，服務帳號只能讀
+    $statusDir = Join-Path $Root 'status'
+    Protect-SecretDirectory $statusDir
+    icacls $statusDir /grant "${account}:(OI)(CI)R" | Out-Null
 
     # 5. 啟動並等待 readiness
     Start-Service $ServiceName

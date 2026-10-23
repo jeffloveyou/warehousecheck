@@ -9,6 +9,7 @@
       2. ALTER SYSTEM：archive_mode=on、archive_command=複製到 wal 目錄、archive_timeout=15min
       3. 重新啟動 PostgreSQL 服務，強制換一個 WAL 檔，確認它出現在 wal 目錄
     WAL 量：有寫入時最多每 15 分鐘一個 16 MB 檔（一天最多約 1.5 GB）；backup.ps1 只保留最近 7 份基底備份之後的 WAL。
+    **重新安裝 PostgreSQL 或重新 initdb 之前，要先把 wal 目錄改名保存**：新叢集的 WAL 檔名會和舊的重複，封存會失敗。
 #>
 param(
     [string]$BackupRoot = 'C:\WarehouseBackup',
@@ -27,8 +28,17 @@ if (-not (Test-Administrator)) {
 if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
 try {
     $psql = Find-PgTool 'psql'
-    $service = Get-CimInstance Win32_Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1
-    if (-not $service) { throw '找不到 PostgreSQL 的 Windows 服務。' }
+    $env:PGPASSWORD = ConvertTo-PlainText (Read-Host 'postgres 超級使用者密碼' -AsSecureString)
+    $connect = @('-X', '-q', '-h', 'localhost', '-p', $Port, '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1')
+
+    # 找「這個埠」的 PostgreSQL 服務：以資料目錄比對服務的啟動參數（同時裝多個版本時不會改錯服務，審查 S7）
+    $dataDir = & $psql -X -A -t -h localhost -p $Port -U postgres -d postgres -c 'SHOW data_directory'
+    if ($LASTEXITCODE -ne 0 -or -not $dataDir) { throw '無法以 postgres 連線（密碼？）。' }
+    $dataDir = [IO.Path]::GetFullPath("$dataDir".Trim())
+    $service = Get-CimInstance Win32_Service | Where-Object {
+        $_.Name -like 'postgresql*' -and $_.PathName -match '-D\s+"?([^"]+)"?' -and [IO.Path]::GetFullPath($Matches[1].Trim()) -eq $dataDir
+    } | Select-Object -First 1
+    if (-not $service) { throw "找不到資料目錄為 $dataDir 的 PostgreSQL 服務。" }
 
     $wal = Join-Path $BackupRoot 'wal'
     Protect-SecretDirectory $BackupRoot
@@ -36,10 +46,9 @@ try {
     icacls $wal /grant "$($service.StartName):(OI)(CI)M" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "無法給 $($service.StartName) 寫入 $wal 的權限。" }
 
-    $env:PGPASSWORD = ConvertTo-PlainText (Read-Host 'postgres 超級使用者密碼' -AsSecureString)
-    $connect = @('-X', '-q', '-h', 'localhost', '-p', $Port, '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1')
-    # copy /Y：上次複製到一半中斷時可以覆寫重來；%p 是相對資料目錄的路徑
-    $command = "copy /Y `"%p`" `"$wal\%f`""
+    # 封存指令（審查 I4）：目的檔已存在時，內容相同（fc /b）算成功、不同就失敗（不覆蓋已封存的 WAL，
+    # 例如重新 initdb 後檔名重複）；新檔先複製成 .tmp 再改名，中斷時不會留下看似完整的檔案。%p 是相對資料目錄的路徑
+    $command = "if exist `"$wal\%f`" (fc /b `"%p`" `"$wal\%f`" >nul) else (copy /Y `"%p`" `"$wal\%f.tmp`" >nul && move /Y `"$wal\%f.tmp`" `"$wal\%f`" >nul)"
     $sql = @"
 ALTER SYSTEM SET archive_mode = 'on';
 ALTER SYSTEM SET archive_command = '$($command.Replace("'", "''"))';

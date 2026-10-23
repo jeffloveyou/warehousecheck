@@ -3,7 +3,7 @@
 .SYNOPSIS
     M7-02 附件增量備份（工作排程器以 SYSTEM 每 15 分鐘執行）：<Root>\data\attachments → <BackupRoot>\attachments。
 .DESCRIPTION
-    只增不刪（/E）：網站停用的圖片檔本來就保留，誤刪也還能從備份找回。結果寫 <Root>\data\backup-attachments-status.json。
+    只增不刪（/E）：網站停用的圖片檔本來就保留，誤刪也還能從備份找回。結果寫 <Root>\status\backup-attachments-status.json。
     與資料庫的 WAL 封存一起構成 15 分鐘 RPO（ADR-0021）。
 #>
 param(
@@ -26,6 +26,6 @@ try {
     $status.message = $_.Exception.Message
 } finally {
     $status.finishedAt = (Get-Date).ToString('o')
-    Write-StatusFile (Join-Path $Root 'data\backup-attachments-status.json') $status
+    Write-StatusFile (Join-Path $Root 'status\backup-attachments-status.json') $status
 }
 exit $(if ($status.succeeded) { 0 } else { 1 })

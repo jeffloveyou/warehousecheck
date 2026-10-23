@@ -7,7 +7,7 @@ public sealed record BackupFileStatus(string Kind, string Name, double SizeMb);
 
 /// <summary>
 /// 備份狀態（M7-02）：備份腳本（以 SYSTEM／root 執行）每次結束時寫 <c>backup-status.json</c>、附件備份寫
-/// <c>backup-attachments-status.json</c> 到 Backup:StatusDirectory（預設 C:\Warehouse\data，網站服務帳號可讀）。
+/// <c>backup-attachments-status.json</c> 到 Backup:StatusDirectory（Windows 為 C:\Warehouse\status：SYSTEM 寫入、網站服務帳號只能讀）。
 /// 網站只讀這兩個檔，不連備份目錄（備份目錄只有系統管理員能讀）。
 /// </summary>
 public sealed record BackupRunStatus(

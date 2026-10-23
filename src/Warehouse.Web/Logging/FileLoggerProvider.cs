@@ -63,14 +63,15 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
     {
         StreamWriter? writer = null;
         var currentDay = "";
-        try
+        while (await _queue.Reader.WaitToReadAsync())
         {
-            while (await _queue.Reader.WaitToReadAsync())
+            try
             {
                 var day = TaipeiTime.ToLocal(_clock.GetUtcNow()).ToString("yyyyMMdd");
-                if (day != currentDay)
+                if (writer is null || day != currentDay)
                 {
                     writer?.Dispose();
+                    writer = null;
                     writer = Open(day);
                     currentDay = day;
                     DeleteOldFiles();
@@ -78,21 +79,33 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
 
                 while (_queue.Reader.TryRead(out var line))
                 {
-                    writer!.WriteLine(line);
+                    writer.WriteLine(line);
                 }
 
-                writer!.Flush();
+                writer.Flush();
+            }
+            catch (Exception ex)
+            {
+                // 寫不進去（權限、磁碟暫時滿）：丟掉這批，下一批重新開檔再試；不讓背景工作結束，也不影響網站
+                // （Windows 事件記錄仍有 Warning 以上）
+                Console.Error.WriteLine($"檔案日誌寫入失敗：{ex.Message}");
+                try
+                {
+                    writer?.Dispose();
+                }
+                catch (IOException)
+                {
+                    // 關檔時再失敗也沒關係
+                }
+
+                writer = null;
+                while (_queue.Reader.TryRead(out _))
+                {
+                }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // 日誌目錄不能寫（權限、磁碟滿）時放棄檔案日誌，不影響網站；Windows 事件記錄仍有 Warning 以上
-            Console.Error.WriteLine($"檔案日誌停止：{ex.Message}");
-        }
-        finally
-        {
-            writer?.Dispose();
-        }
+
+        writer?.Dispose();
     }
 
     private StreamWriter Open(string day)
@@ -149,21 +162,38 @@ public sealed class FileLoggerProvider : ILoggerProvider, ISupportExternalScope
                 }
 
                 json.WriteString("message", formatter(state, exception));
+                // 外層 scope 先列舉；同一個鍵只寫第一個（巢狀 scope 重複帶 RequestId 時不寫出重複的 JSON 鍵）
+                string? requestId = null;
+                string? path = null;
                 provider._scopes?.ForEachScope(
-                    (scope, writer) =>
+                    (scope, _) =>
                     {
                         if (scope is IEnumerable<KeyValuePair<string, object?>> pairs)
                         {
                             foreach (var (key, value) in pairs)
                             {
-                                if (key is "RequestId" or "RequestPath")
+                                if (key == "RequestId")
                                 {
-                                    writer.WriteString(key == "RequestId" ? "requestId" : "path", value?.ToString());
+                                    requestId ??= value?.ToString();
+                                }
+                                else if (key == "RequestPath")
+                                {
+                                    path ??= value?.ToString();
                                 }
                             }
                         }
                     },
-                    json);
+                    (object?)null);
+                if (requestId is not null)
+                {
+                    json.WriteString("requestId", requestId);
+                }
+
+                if (path is not null)
+                {
+                    json.WriteString("path", path);
+                }
+
                 json.WriteString("version", AppVersion.Current);
                 if (exception is not null)
                 {

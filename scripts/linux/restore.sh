@@ -27,10 +27,11 @@ OWNER="${TARGET}_owner"; APP="${TARGET}_app"
 pg -d postgres -c "CREATE DATABASE $TARGET OWNER $OWNER ENCODING 'UTF8' TEMPLATE template0"
 start=$(date +%s)
 # 備份檔在 0700 目錄：以 root 讀出、經標準輸入交給 postgres 帳號的 pg_restore
-sudo -u postgres pg_restore -p "$PORT" -d "$TARGET" --no-owner --role="$OWNER" --exit-on-error < "$DUMP"
+sudo -u postgres pg_restore -p "$PORT" -d "$TARGET" --no-owner --no-acl --role="$OWNER" --exit-on-error < "$DUMP"
+# 權限不從備份還原（--no-acl），一律在這裡重新授予
+pg -d postgres -c "REVOKE ALL ON DATABASE $TARGET FROM PUBLIC"
 if [[ -n "$(pg -A -t -d postgres -c "SELECT 1 FROM pg_roles WHERE rolname = '$APP'")" ]]; then
   pg -d "$TARGET" <<SQL
-REVOKE ALL ON DATABASE $TARGET FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE $TARGET TO $OWNER, $APP;
 GRANT USAGE ON SCHEMA public TO $APP;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $APP;

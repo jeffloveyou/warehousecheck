@@ -45,7 +45,8 @@ function Get-BackupSettings {
     }
     $file = Join-Path $BackupRoot 'backup-settings.json'
     if (Test-Path $file) {
-        $saved = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable
+        try { $saved = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable }
+        catch { throw "$file 格式錯誤（JSON 裡的路徑反斜線要寫兩個，例如 ""E:\\WarehouseBackup""，或改用 /）：$($_.Exception.Message)" }
         foreach ($key in @($defaults.Keys)) { if ($saved.ContainsKey($key) -and $null -ne $saved[$key]) { $defaults[$key] = $saved[$key] } }
     }
     $defaults.databases = @($defaults.databases)
@@ -71,7 +72,28 @@ function Write-StatusFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Status)
     New-Item -ItemType Directory -Force -Path (Split-Path $Path) | Out-Null
     $Status | ConvertTo-Json -Depth 6 | Set-Content "$Path.tmp" -Encoding utf8
-    [IO.File]::Move("$Path.tmp", $Path, $true)
+    # 讀取端（健康檢查）剛好開著檔案時置換會失敗：稍等重試（審查 S2）
+    for ($attempt = 1; ; $attempt++) {
+        try { [IO.File]::Move("$Path.tmp", $Path, $true); return }
+        catch [IO.IOException], [UnauthorizedAccessException] {
+            if ($attempt -ge 10) { throw }
+            Start-Sleep -Milliseconds 300
+        }
+    }
 }
 
-Export-ModuleMember -Function Find-PgTool, ConvertTo-PlainText, New-RandomSecret, Get-BackupSettings, ConvertTo-WalFileName, Write-StatusFile
+<#
+.SYNOPSIS
+    完整的基底備份目錄（有 wal-start.txt，backup.ps1 在 pg_basebackup 成功後才寫入），由舊到新。
+    輪替與時間點還原只看這些；失敗留下的殘缺目錄不算（審查 I2）。
+#>
+function Get-CompleteBaseBackups {
+    param([Parameter(Mandatory)][string]$BaseRoot)
+    if (-not (Test-Path $BaseRoot)) { return @() }
+    Get-ChildItem $BaseRoot -Directory |
+        Where-Object { $_.Name -match '^\d{8}-\d{6}$' -and (Test-Path (Join-Path $_.FullName 'wal-start.txt')) } |
+        Sort-Object Name
+}
+
+Export-ModuleMember -Function Find-PgTool, ConvertTo-PlainText, New-RandomSecret, Get-BackupSettings, ConvertTo-WalFileName,
+    Write-StatusFile, Get-CompleteBaseBackups

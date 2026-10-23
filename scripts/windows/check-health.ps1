@@ -1,7 +1,8 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    M7-02 健康檢查（工作排程器以 SYSTEM 每 5 分鐘執行）：異常時寫 Windows 事件記錄（來源 Warehouse）與 <Root>\logs\health.log。
+    M7-02 健康檢查（工作排程器以 SYSTEM 每 5 分鐘執行）：異常時寫 Windows 事件記錄（來源 Warehouse）與 <Root>\status\health.log。
+    以 SYSTEM 執行，只寫 <Root>\status（網站服務帳號只能讀），不寫服務帳號可寫的目錄（審查 S3）。
 .DESCRIPTION
     檢查：經代理的 /health/ready、最近完整備份是否成功且在 26 小時內、外部複本、附件備份是否在 1 小時內、
     備份與資料磁碟可用空間 ≥ 10 GB、WAL 封存沒有卡住。
@@ -26,7 +27,7 @@ try {
 }
 
 function Read-Status([string]$Name) {
-    $file = Join-Path $Root "data\$Name"
+    $file = Join-Path $Root "status\$Name"
     if (Test-Path $file) { try { return Get-Content $file -Raw | ConvertFrom-Json } catch { } }
     return $null
 }
@@ -53,7 +54,8 @@ foreach ($path in $BackupRoot, (Join-Path $Root 'data')) {
 try {
     $env:PGPASSFILE = Join-Path $Root 'secrets\backup.pgpass'
     $query = "SELECT current_setting('archive_mode'), failed_count > 0 AND last_failed_time > coalesce(last_archived_time, '-infinity'), coalesce(last_failed_wal, '') FROM pg_stat_archiver"
-    $row = & (Find-PgTool 'psql') -X -A -t -F '|' -h localhost -U warehouse_backup -w -d postgres -c $query
+    $port = (Get-BackupSettings $BackupRoot).port
+    $row = & (Find-PgTool 'psql') -X -A -t -F '|' -h localhost -p $port -U warehouse_backup -w -d postgres -c $query
     if ($LASTEXITCODE -ne 0) {
         $problems['database'] = '無法以備份帳號連線 PostgreSQL'
     } else {
@@ -68,13 +70,13 @@ try {
 }
 
 # 只在狀態改變或每 6 小時記錄一次
-$stateFile = Join-Path $Root 'data\health-state.json'
+$stateFile = Join-Path $Root 'status\health-state.json'
 $previous = @{}
 if (Test-Path $stateFile) { try { $previous = Get-Content $stateFile -Raw | ConvertFrom-Json -AsHashtable } catch { } }
 if ($null -eq $previous) { $previous = @{} }
 $now = Get-Date
 $next = @{}
-$log = Join-Path $Root 'logs\health.log'
+$log = Join-Path $Root 'status\health.log'
 function Write-HealthEvent([string]$Message, [string]$Type, [int]$Id) {
     try { [Diagnostics.EventLog]::WriteEntry('Warehouse', $Message, $Type, $Id) } catch { }
     Add-Content $log "$($now.ToString('o'))`t$Type`t$Message" -Encoding utf8

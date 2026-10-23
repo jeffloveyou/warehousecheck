@@ -67,11 +67,13 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "建立 $TargetDatabase 失敗。" }
 
             Write-Host "還原 $Dump → $TargetDatabase（擁有者 $owner）…"
-            & (Find-PgTool 'pg_restore') -h localhost -p $Port -U postgres -d $TargetDatabase --no-owner --role=$owner --exit-on-error $Dump
+            & (Find-PgTool 'pg_restore') -h localhost -p $Port -U postgres -d $TargetDatabase --no-owner --no-acl --role=$owner --exit-on-error $Dump
             if ($LASTEXITCODE -ne 0) { throw "pg_restore 失敗（結束碼 $LASTEXITCODE）；$TargetDatabase 內容不完整，請刪除後重試。" }
+            # 權限不從備份還原（--no-acl：新主機上原本的角色可能不存在，審查 I3），一律在這裡重新授予
+            & $psql @connect -d postgres -c "REVOKE ALL ON DATABASE $TargetDatabase FROM PUBLIC"
+            if ($LASTEXITCODE -ne 0) { throw "收回 $TargetDatabase 的公開連線權限失敗。" }
             if ($app -in $roles) {
                 $grants = @"
-REVOKE ALL ON DATABASE $TargetDatabase FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE $TargetDatabase TO $owner, $app;
 GRANT USAGE ON SCHEMA public TO $app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $app;
@@ -107,12 +109,15 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
             Write-Host "完成：$TargetDatabase（$([math]::Round($stopwatch.Elapsed.TotalSeconds, 1)) 秒）。" -ForegroundColor Green
         }
         'Pitr' {
-            $base = Get-ChildItem (Join-Path $BackupRoot 'base') -Directory |
-                Where-Object { [datetime]::ParseExact($_.Name, 'yyyyMMdd-HHmmss', $null) -lt $TargetTime } |
-                Sort-Object Name | Select-Object -Last 1
-            if (-not $base) { throw "$TargetTime 之前沒有基底備份（$BackupRoot\base）。" }
+            # 只用完整的基底備份，且要在目標時間之前「完成」（backup_manifest 寫入時間；審查 I2、S10）
+            $base = Get-CompleteBaseBackups (Join-Path $BackupRoot 'base') |
+                Where-Object { (Get-Item (Join-Path $_.FullName 'backup_manifest')).LastWriteTime -lt $TargetTime } |
+                Select-Object -Last 1
+            if (-not $base) { throw "$TargetTime 之前沒有完成的基底備份（$BackupRoot\base）。" }
             if (-not $DataDir) { $DataDir = "C:\WarehouseRestore\pitr-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
             if (Test-Path $DataDir) { throw "$DataDir 已存在。" }
+            # 還原出來的是完整資料庫：上層目錄只給 Administrators、SYSTEM（C:\ 預設讓所有登入者可讀）
+            Protect-SecretDirectory (Split-Path $DataDir)
             New-Item -ItemType Directory -Force -Path (Join-Path $DataDir 'pg_wal') | Out-Null
             Write-Host "基底備份 $($base.Name) → $DataDir"
             tar -xzf (Join-Path $base.FullName 'base.tar.gz') -C $DataDir
@@ -120,8 +125,18 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
             tar -xzf (Join-Path $base.FullName 'pg_wal.tar.gz') -C (Join-Path $DataDir 'pg_wal')
             if ($LASTEXITCODE -ne 0) { throw '解壓 pg_wal.tar.gz 失敗。' }
 
+            # 需要的 WAL 先複製到還原目錄（審查 B2）：pg_ctl 以受限權杖啟動，管理員群組權限無效、讀不到正式 wal 目錄；
+            # 也讓暫時執行個體完全不碰正式的 wal 目錄
             $wal = Join-Path $BackupRoot 'wal'
+            $archive = Join-Path $DataDir 'wal-archive'
+            New-Item -ItemType Directory -Force -Path $archive | Out-Null
+            $start = (Get-Content (Join-Path $base.FullName 'wal-start.txt') -Raw).Trim()
+            $needed = @(Get-ChildItem $wal -File | Where-Object { $_.Name -notlike '*.tmp' -and [string]::CompareOrdinal($_.Name, $start) -ge 0 })
+            $needed | Copy-Item -Destination $archive
+            Write-Host "複製 $($needed.Count) 個 WAL 檔（自 $start）"
             $target = ([datetimeoffset]$TargetTime).ToString('yyyy-MM-dd HH:mm:sszzz')
+            # 設定檔的單引號字串裡 \ 是跳脫字元，路徑的反斜線要寫兩個（審查 B1）
+            $archiveInConf = $archive.Replace('\', '\').Replace("'", "''")
             # 暫時執行個體：只聽 localhost、另一個埠、關閉封存（不能把重播產生的 WAL 寫進正式的 wal 目錄）
             Add-Content (Join-Path $DataDir 'postgresql.auto.conf') @"
 
@@ -129,7 +144,7 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
 port = $PitrPort
 listen_addresses = 'localhost'
 archive_mode = 'off'
-restore_command = 'copy "$wal\%f" "%p"'
+restore_command = 'copy "$archiveInConf\%f" "%p"'
 recovery_target_time = '$target'
 recovery_target_action = 'promote'
 "@ -Encoding utf8
