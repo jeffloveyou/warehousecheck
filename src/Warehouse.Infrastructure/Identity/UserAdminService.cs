@@ -170,8 +170,7 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
         List<Guid> wanted = allWarehouses ? [] : (warehouseIds ?? []).Distinct().Order().ToList();
         return InTransactionAsync(actor, async now =>
         {
-            // 被限制倉庫的管理員不能放寬任何人（包括自己）的範圍（M6-01b 審查 Y6）
-            await WarehouseAccess.EnsureAllAsync(db, actor, cancellationToken);
+
             // 鎖帳號列：兩位管理員同時設定同一帳號時排隊，不會同時新增同一列撞主鍵（審查 Y5）
             await db.Database.ExecuteSqlAsync($"SELECT 1 FROM users WHERE id = {id} FOR UPDATE", cancellationToken);
             var user = await FindAsync(id);
@@ -213,6 +212,9 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
         {
             throw new PermissionDeniedException("user.forbidden", "你的帳號已停用或不再是系統管理員，請重新登入。");
         }
+        // 被限制倉庫範圍的系統管理員不能管理任何帳號：新帳號預設全部倉庫、重設別人密碼都能用來繞過自己的範圍
+        // （M6-04 審查 R2）。帳號管理只交給可作業全部倉庫的系統管理員。
+        await WarehouseAccess.EnsureAllAsync(db, actor, cancellationToken);
         var now = clock.GetUtcNow();
         try
         {

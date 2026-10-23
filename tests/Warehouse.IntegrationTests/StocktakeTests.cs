@@ -356,6 +356,34 @@ public class StocktakeTests
         Assert.Equal((20m, 0m), (line.BookQuantityAtCount!.Value, line.Difference!.Value));
     }
 
+    // T-M6-04-05：錯誤操作：同一冪等鍵換成另一張盤點 → 拒絕；舊版本號核准 → 衝突；已取消的盤點不能核准
+    [Fact]
+    public async Task 盤點錯誤操作()
+    {
+        var (w, _) = await WarehouseAsync("A-01", "A-02");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await MoveAsync(StockDocumentType.Inbound, w, "A-01", item, 2m);
+        await MoveAsync(StockDocumentType.Inbound, w, "A-02", item, 2m);
+        var first = await StartAsync(w, "A-01");
+        var second = await StartAsync(w, "A-02");
+        foreach (var st in new[] { first, second })
+        {
+            await Stocktakes(s => s.CountAsync(st, new StocktakeCountInput(st == first ? "A-01" : "A-02", item, 1m), Operator, Ct));
+            await Stocktakes(async s => await s.SubmitAsync(st, await VersionAsync(st), Operator, Ct));
+        }
+        var key = "same-" + Guid.NewGuid();
+        await Stocktakes(async s => await s.ApproveAsync(first, await VersionAsync(first), key, Manager2, Ct));
+        Assert.Equal("idempotency.key_reused", await TryAsync(async () =>
+            await Stocktakes(async s => await s.ApproveAsync(second, await VersionAsync(second), key, Manager2, Ct))));
+        var stale = await VersionAsync(second);
+        await Stocktakes(async s => await s.CancelAsync(second, await VersionAsync(second), Manager2, Ct));
+        Assert.Equal("stocktake.concurrency_conflict", await TryAsync(() =>
+            Stocktakes(s => s.ApproveAsync(second, stale, "k-" + Guid.NewGuid(), Manager2, Ct))));
+        Assert.Equal("domain_rule", await TryAsync(async () =>
+            await Stocktakes(async s => await s.ApproveAsync(second, await VersionAsync(second), "k-" + Guid.NewGuid(), Manager2, Ct))));
+        Assert.Equal((1m, 2m), (await BalanceAsync(w, "A-01", item), await BalanceAsync(w, "A-02", item)));
+    }
+
     private static async Task SubmitAndApproveAsync(Guid st)
     {
         await Stocktakes(async s => await s.SubmitAsync(st, await VersionAsync(st), Operator, Ct));

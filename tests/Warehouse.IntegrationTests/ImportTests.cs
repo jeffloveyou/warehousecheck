@@ -259,6 +259,31 @@ public partial class ImportTests
         Assert.True(await db.Locations.AnyAsync(l => l.WarehouseId == warehouse && l.Code == "0101", Ct));
     }
 
+    // T-M6-03-18：上傳者之後被改成只讀使用者 → 確認自己的批次被頁面層政策擋下，資料沒有匯入
+    [Fact]
+    public async Task 上傳者失去權限_不能確認()
+    {
+        var token = "失權" + Guid.NewGuid().ToString("N")[..6];
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var name = "i" + Guid.NewGuid().ToString("N")[..10];
+        var id = await WebSession.CreateUserAsync(factory, name, Password, Roles.Operator);
+        var web = WebSession.Create(factory);
+        await web.LoginAsync(name, Password);
+        var uploaded = await UploadAsync(web, ImportKind.Items, Xlsx(["品名", "分類", "基本單位", "追蹤模式"], [[$"{token} 一", "EL", "PCS", "不追蹤"]]), "a.xlsx");
+        var url = uploaded.Headers.Location!.OriginalString;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var admin = scope.ServiceProvider.GetRequiredService<IUserAdminService>();
+            var summary = await admin.GetAsync(id, Ct);
+            await admin.UpdateAsync(new UpdateUserRequest(id, summary.DisplayName, [Roles.Viewer], summary.ConcurrencyStamp), UserCommands.CommandLineActor, Ct);
+        }
+        var again = WebSession.Create(factory);
+        await again.LoginAsync(name, Password);
+        var commit = await again.PostFormAsync(url, url + "?handler=Commit", new Dictionary<string, string>());
+        Assert.StartsWith("/Account/AccessDenied", commit.Headers.Location!.OriginalString);
+        Assert.Equal(0, await CountItemsAsync(token));
+    }
+
     private sealed class ShiftedClock(TimeSpan shift) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + shift;
