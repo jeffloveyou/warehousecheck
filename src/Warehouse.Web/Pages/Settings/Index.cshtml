@@ -4,6 +4,7 @@
     ViewData["Title"] = "系統設定";
 }
 <h1>系統設定</h1>
+<p class="muted">所有功能開關集中在這裡。<strong>關閉功能只會隱藏輸入欄位、停止檢查，既有資料一律保留</strong>，在詳情、列印與操作日誌中仍可查看；重新開啟就能繼續使用。每次變更都會記錄在操作日誌（下方「最近變更」）。</p>
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>
@@ -37,7 +38,7 @@
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
     <h2>盤點</h2>
     <p><label><input type="checkbox" name="Form.StocktakeBlindCount" value="true" checked="@Model.Form.StocktakeBlindCount" /> 盲盤：輸入實盤量時不顯示帳面量</label></p>
-    <p class="muted">預設開啟。倉庫主管審核時才看得到帳面量與差異。</p>
+    <p class="muted">預設開啟。只影響盤點畫面、盤點表與盤點匯出：作業員盤點中看不到帳面量，倉庫主管與送審後才看得到；庫存查詢頁本來就顯示結存，不受這個設定影響。</p>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveStocktake" value="true" checked="@Model.Form.AllowSelfApproveStocktake" /> 允許盤點單的建立者或送審者自己核准盤差</label></p>
     <p class="muted">預設不允許（D-07）。不論哪一種，都會記錄建立者、送審者、核准者與時間。</p>
     <h2>倉位註記</h2>
@@ -85,3 +86,26 @@
     </div>
     <div class="actions"><button type="submit" id="settings-save">儲存</button></div>
 </form>
+<h2>最近變更</h2>
+<div class="table-wrap">
+    <table id="setting-changes">
+        <thead><tr><th>時間</th><th>變更者</th><th>設定</th><th>變更前</th><th>變更後</th></tr></thead>
+        <tbody>
+            @foreach (var c in Model.RecentChanges)
+            {
+                <tr>
+                    <td>@Display.Time(c.OccurredAt)</td>
+                    <td>@c.ActorName</td>
+                    <td>@Warehouse.Web.Pages.Settings.IndexModel.LabelOf(c.EntityId)</td>
+                    <td><code class="json">@c.Before</code></td>
+                    <td><code class="json">@c.After</code></td>
+                </tr>
+            }
+            @if (Model.RecentChanges.Count == 0)
+            {
+                <tr><td colspan="5" class="muted">最近 90 天沒有變更。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<p><a href="/Admin/Audit?ActionPrefix=setting.">在操作日誌查看全部設定變更</a></p>

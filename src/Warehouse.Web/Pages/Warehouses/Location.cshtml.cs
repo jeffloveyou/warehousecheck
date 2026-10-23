@@ -112,10 +112,8 @@ public class LocationModel(
         }
         Location = location;
         Settings = await settings.GetAsync(cancellationToken);
-        if (Settings.LocationImagesEnabled)
-        {
-            Images = await images.ListAsync(id, cancellationToken);
-        }
+        // 關閉圖片功能也要讀：既有圖片仍可檢視（M6-05）
+        Images = await images.ListAsync(id, cancellationToken);
         CanManage = (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded;
         return true;
     }

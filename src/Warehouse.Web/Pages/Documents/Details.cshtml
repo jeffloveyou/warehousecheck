@@ -265,7 +265,8 @@
     <p><a href="/Stock?documentId=@d.Id">查看這張單產生的異動</a></p>
 }
 
-@if (s.DocumentAttachmentsEnabled)
+@* 關閉附件功能後，既有附件仍可檢視（唯讀），只是不能新增或移除（M6-05） *@
+@if (s.DocumentAttachmentsEnabled || Model.Attachments.Count > 0)
 {
     <h2>附件（@Model.Attachments.Count）</h2>
     @if (Model.Attachments.Count == 0)
@@ -289,7 +290,7 @@
                 <figcaption>
                     <a href="/files/document-attachments/@a.Id/file" target="_blank" rel="noopener">@a.FileName</a>
                     <span class="muted">@a.UploadedByName @Display.Time(a.UploadedAt)</span>
-                    @if (Model.CanEdit)
+                    @if (Model.CanEdit && s.DocumentAttachmentsEnabled)
                     {
                         <form method="post" asp-page-handler="RemoveAttachment" class="inline">
                             <input type="hidden" name="attachmentId" value="@a.Id" />

@@ -410,10 +410,8 @@ public class DetailsModel(
             && (await authorization.AuthorizeAsync(User, Policies.DocumentApprove)).Succeeded;
         CanReverse = doc.Status == StockDocumentStatus.Posted && canDocumentEdit && doc.DocType != StockDocumentType.Adjustment;
         CanUpload = Settings.DocumentAttachmentsEnabled && doc.Status != StockDocumentStatus.Cancelled && canDocumentEdit && owner;
-        if (Settings.DocumentAttachmentsEnabled)
-        {
-            Attachments = await attachments.ListAsync(id, cancellationToken);
-        }
+        // 關閉附件功能也要讀：既有附件仍可檢視（M6-05）
+        Attachments = await attachments.ListAsync(id, cancellationToken);
         if (CanEdit)
         {
             var current = new DocumentHeaderForm
