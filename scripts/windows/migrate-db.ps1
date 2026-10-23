@@ -9,7 +9,8 @@
       3. 輸入 YES 確認後以 psql 執行（ON_ERROR_STOP，每個 Migration 各自一個交易）
       4. 補授權給網站帳號（新資料表已由預設權限涵蓋，這步是保險）並再次確認沒有待套用項目
     Migration 都是 Expand（只新增），舊版槽位可在新結構上執行；要先套用 Migration 再 switch-release 換版。
-    需要擁有者（<Database>_owner）密碼；不需要系統管理員。
+    需要擁有者（<Database>_owner）密碼；需要系統管理員（備份檔放在只有系統管理員能讀的目錄，非管理員時以 UAC 重新執行）。
+    每個 Migration 各自一個交易；等鎖超過 5 秒就放棄（lock_timeout），避免排在長交易後面擋住全站，稍後重跑即可。
 .EXAMPLE
     .\scripts\windows\migrate-db.ps1 -ReleasePath artifacts\publish\0.1.0-abc1234-win-x64-fdd -Database warehouse_prod
 #>
@@ -19,11 +20,18 @@ param(
     [string]$Database = 'warehouse_prod',
     [int]$Port = 5432,
     [string]$BackupRoot = 'C:\WarehouseBackup',
-    [switch]$SkipBackup
+    [switch]$SkipBackup,
+    [string]$LogFile
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WarehouseDeploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'WarehouseDb.psm1') -Force
+
+if (-not (Test-Administrator)) {
+    exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'ReleasePath', 'BackupRoot')
+}
+if ($LogFile) { Start-Transcript -Path $LogFile -Force | Out-Null }
 
 $script = Join-Path $ReleasePath 'migrations.sql'
 if (-not (Test-Path $script)) { throw "找不到 $script（M7-01 以後的 publish.ps1 才會產生）。" }
@@ -37,6 +45,8 @@ $all = [regex]::Matches((Get-Content $script -Raw), "VALUES \('(\d{14}_[A-Za-z0-
 if (-not $all) { throw "$script 裡找不到任何 Migration。" }
 
 $env:PGPASSWORD = ConvertTo-PlainText (Read-Host "$owner 密碼" -AsSecureString)
+# migrations.sql 是 UTF-8（trigger 訊息、種子資料有中文）；主控台字碼頁 950 時 psql 預設會當成 BIG5（審查 H2）
+$env:PGCLIENTENCODING = 'UTF8'
 try {
     function Get-Applied {
         $exists = & $psql -X -A -t -h localhost -p $Port -U $owner -d $Database -c "SELECT to_regclass('public.""__EFMigrationsHistory""') IS NOT NULL"
@@ -62,7 +72,8 @@ try {
     if (-not $SkipBackup) {
         $pgDump = Find-PgTool 'pg_dump'
         $dir = Join-Path $BackupRoot 'pre-migrate'
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        # 完整資料庫（含密碼雜湊）：只給 Administrators、SYSTEM（審查 M2）
+        Protect-SecretDirectory $dir
         $file = Join-Path $dir "$Database-$(Get-Date -Format 'yyyyMMdd-HHmmss').dump"
         Write-Host "備份到 $file …"
         & $pgDump -h localhost -p $Port -U $owner -d $Database -Fc -f $file
@@ -75,8 +86,11 @@ try {
         exit 1
     }
 
+    $env:PGOPTIONS = '-c lock_timeout=5s'
     & $psql -X -q -h localhost -p $Port -U $owner -d $Database -v ON_ERROR_STOP=1 -f $script
-    if ($LASTEXITCODE -ne 0) { throw "套用失敗（psql 結束碼 $LASTEXITCODE）。已完成的 Migration 保留（各自一個交易），請查看上方錯誤。" }
+    $code = $LASTEXITCODE
+    Remove-Item Env:PGOPTIONS
+    if ($code -ne 0) { throw "套用失敗（psql 結束碼 $code）。已完成的 Migration 保留（各自一個交易）；若是等鎖逾時（lock timeout），等長時間作業（匯入、盤點核准）結束後重跑即可。" }
 
     & $psql -X -q -h localhost -p $Port -U $owner -d $Database -v ON_ERROR_STOP=1 -c `
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $app; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;"
@@ -90,5 +104,6 @@ try {
     Write-Host "錯誤：$($_.Exception.Message)" -ForegroundColor Red
     exit 1
 } finally {
-    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:PGPASSWORD, Env:PGCLIENTENCODING, Env:PGOPTIONS -ErrorAction SilentlyContinue
+    if ($LogFile) { Stop-Transcript | Out-Null }
 }

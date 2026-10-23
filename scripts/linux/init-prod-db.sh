@@ -38,7 +38,11 @@ q() { printf "'%s'" "${1//\'/\'\'}"; }   # SQL 字串常值
 psql_as_postgres() { sudo -u postgres psql -X -q -p "$PORT" -v ON_ERROR_STOP=1 "$@"; }
 
 # SQL 經標準輸入：密碼不出現在命令列
+export PGCLIENTENCODING=UTF8
+# 這個連線不記錄語句（含明文密碼），失敗時也不把語句寫進伺服器日誌（審查 M4）
 psql_as_postgres -d postgres <<SQL
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '$OWNER', $(q "$OWNER_PW")) WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$OWNER') \gexec
 SELECT format('CREATE ROLE %I LOGIN', '$APP') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$APP') \gexec
 ALTER ROLE $APP LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD $(q "$APP_PW");

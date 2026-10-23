@@ -23,7 +23,7 @@ mapfile -t ALL < <(grep -oE "VALUES \('[0-9]{14}_[A-Za-z0-9_]+'" "$SCRIPT" | sed
 (( ${#ALL[@]} > 0 )) || { echo "$SCRIPT 裡找不到任何 Migration。" >&2; exit 1; }
 
 read -r -s -p "$OWNER 密碼：" PGPASSWORD; echo
-export PGPASSWORD
+export PGPASSWORD PGCLIENTENCODING=UTF8
 trap 'unset PGPASSWORD' EXIT
 run_psql() { psql -X -q -h localhost -p "$PORT" -U "$OWNER" -d "$DATABASE" -v ON_ERROR_STOP=1 "$@"; }
 applied() {
@@ -33,17 +33,21 @@ applied() {
 }
 pending() { local done; done=$(applied); for m in "${ALL[@]}"; do grep -qxF "$m" <<<"$done" || echo "$m"; done; }
 
+# 先確認連得上：下面的 process substitution 失敗不會觸發 set -e，會被誤判成「全部待套用」（審查 M6）
+run_psql -c 'SELECT 1' >/dev/null || { echo "無法連線 $DATABASE（帳號 $OWNER）。" >&2; exit 1; }
+declare -A KNOWN=(); for m in "${ALL[@]}"; do KNOWN[$m]=1; done
 mapfile -t APPLIED < <(applied)
 for m in "${APPLIED[@]}"; do
   [[ -z "$m" ]] && continue
-  printf '%s\n' "${ALL[@]}" | grep -qxF "$m" || { echo "資料庫有這個版本不認得的 Migration：$m（資料庫比這個發布版本新）。" >&2; exit 1; }
+  [[ -n "${KNOWN[$m]:-}" ]] || { echo "資料庫有這個版本不認得的 Migration：$m（資料庫比這個發布版本新）。" >&2; exit 1; }
 done
 mapfile -t PENDING < <(pending)
 if (( ${#PENDING[@]} == 0 )); then echo "$DATABASE 已是最新結構（${#ALL[@]} 個 Migration）。"; exit 0; fi
 echo "待套用的 Migration（${#PENDING[@]} 個）："; printf '  %s\n' "${PENDING[@]}"
 
 if [[ "$SKIP_BACKUP" != "true" ]]; then
-  mkdir -p "$BACKUP_ROOT/pre-migrate"
+  install -d -m 0700 "$BACKUP_ROOT" "$BACKUP_ROOT/pre-migrate"   # 完整資料庫（含密碼雜湊）只給 root（審查 M2）
+  umask 077
   file="$BACKUP_ROOT/pre-migrate/$DATABASE-$(date +%Y%m%d-%H%M%S).dump"
   pg_dump -h localhost -p "$PORT" -U "$OWNER" -d "$DATABASE" -Fc -f "$file" || { echo "備份失敗，未套用任何 Migration。" >&2; exit 1; }
   echo "備份完成：$file"
@@ -51,7 +55,7 @@ fi
 read -r -p "確認套用到 $DATABASE？輸入 YES 繼續：" answer
 [[ "$answer" == "YES" ]] || { echo "已取消，資料庫未變更。"; exit 1; }
 
-run_psql -f "$SCRIPT"
+PGOPTIONS='-c lock_timeout=5s' run_psql -f "$SCRIPT" || { echo "套用失敗；若是等鎖逾時，等長時間作業結束後重跑即可。" >&2; exit 1; }
 run_psql -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $APP; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $APP;"
 mapfile -t LEFT < <(pending)
 (( ${#LEFT[@]} == 0 )) || { echo "套用後仍有待套用的 Migration：${LEFT[*]}" >&2; exit 1; }

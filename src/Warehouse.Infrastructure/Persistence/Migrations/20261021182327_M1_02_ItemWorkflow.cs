@@ -114,9 +114,15 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                 """);
 
             // 號碼接續既有資料（空資料庫時不做任何事）：申請單號 sequence 與每個前綴的料號計數
+            // M7-01：setval 包在 DO 區塊用 PERFORM。冪等腳本（migrations script --idempotent）會把整個 Migration 放進
+            // DO $EF$ 區塊，裸 SELECT 在 PL/pgSQL 內會報「查詢沒有結果資料的目的地」；已套用的資料庫結果不變。
             migrationBuilder.Sql("""
-                SELECT setval('item_request_no_seq', max(substring(request_no FROM 4)::bigint))
-                FROM items HAVING count(*) > 0;
+                DO $setval$
+                BEGIN
+                    PERFORM setval('item_request_no_seq', max(substring(request_no FROM 4)::bigint))
+                    FROM items HAVING count(*) > 0;
+                END
+                $setval$;
 
                 INSERT INTO item_code_counters (prefix, last_number)
                 SELECT split_part(item_code, '-', 1), max(split_part(item_code, '-', 2)::bigint)

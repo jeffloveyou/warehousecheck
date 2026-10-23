@@ -68,6 +68,10 @@ if ($Project -eq 'Web') {
         dotnet ef migrations script --idempotent --project src/Warehouse.Infrastructure --startup-project src/Warehouse.Web `
             --output (Join-Path $output 'migrations.sql')
     }
+    # dotnet ef 會啟動 Warehouse.Web 的主機：發布機要有 user-secrets 連線字串（不會連線，只是 Program 要求有值）
+    if (-not ((Get-Item (Join-Path $output 'migrations.sql') -ErrorAction SilentlyContinue)?.Length -gt 0)) {
+        throw 'migrations.sql 沒有產生或是空的。'
+    }
 }
 
 $dll = Join-Path $output "$entry.dll"

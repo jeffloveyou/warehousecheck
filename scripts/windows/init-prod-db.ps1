@@ -41,7 +41,11 @@ try {
     $app = "${Database}_app"
     $backup = 'warehouse_backup'
     $secretDir = Join-Path $Root 'secrets'
+    # 先重設擁有者與權限（審查 M3）：新主機上一般使用者可能先建立 C:\Warehouse\secrets 並放入自己決定的密碼檔
+    Set-RootAcl $Root
     Protect-SecretDirectory $secretDir
+    icacls $secretDir /setowner Administrators /T /C /Q | Out-Null
+    Get-ChildItem $secretDir -File | ForEach-Object { icacls $_.FullName /reset /Q | Out-Null }
     $connectionFile = Join-Path $secretDir "$Database.connection.txt"
     $pgpassFile = Join-Path $secretDir 'backup.pgpass'
 
@@ -61,8 +65,11 @@ try {
 
     # SQL 經標準輸入傳給 psql：密碼不出現在命令列（工作管理員看得到命令列參數）
     $q = { param($s) "'" + $s.Replace("'", "''") + "'" }
+    # 這個連線不記錄語句（含 CREATE/ALTER ROLE 的明文密碼），失敗時也不把語句寫進伺服器日誌（審查 M4）
     $clusterSql = @"
 \set ON_ERROR_STOP on
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '$owner', $(& $q $ownerPassword)) WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$owner') \gexec
 SELECT format('CREATE ROLE %I LOGIN', '$app') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$app') \gexec
 ALTER ROLE $app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD $(& $q $appPassword);
@@ -87,13 +94,14 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
 "@
 
     $env:PGPASSWORD = ConvertTo-PlainText $pgPassword
+    $env:PGCLIENTENCODING = 'UTF8'
     try {
         $clusterSql | & $psql -X -q -h localhost -p $Port -U postgres -d postgres
         if ($LASTEXITCODE -ne 0) { throw "建立帳號或資料庫失敗（psql 結束碼 $LASTEXITCODE）。請確認 postgres 密碼。" }
         $databaseSql | & $psql -X -q -h localhost -p $Port -U postgres -d $Database
         if ($LASTEXITCODE -ne 0) { throw "設定 $Database 權限失敗（psql 結束碼 $LASTEXITCODE）。" }
     } finally {
-        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+        Remove-Item Env:PGPASSWORD, Env:PGCLIENTENCODING -ErrorAction SilentlyContinue
     }
 
     Set-Content $connectionFile "Host=localhost;Port=$Port;Database=$Database;Username=$app;Password=$appPassword;Timeout=3" -Encoding utf8 -NoNewline
