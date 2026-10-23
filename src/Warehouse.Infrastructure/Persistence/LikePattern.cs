@@ -8,6 +8,9 @@ internal static class LikePattern
 {
     public const string Escape = "\\";
 
-    public static string Contains(string value) =>
-        "%" + value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+    public static string Contains(string value) => "%" + Escaped(value) + "%";
+
+    /// <summary>只跳脫萬用字元（呼叫端自己加 %，例如「開頭符合」）。</summary>
+    public static string Escaped(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 }

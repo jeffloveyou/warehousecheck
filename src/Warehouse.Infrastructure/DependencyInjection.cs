@@ -64,6 +64,7 @@ public static class DependencyInjection
         services.AddScoped<IUserAdminService, UserAdminService>();
         services.AddScoped<ILoginAuditLog, LoginAuditLog>();
         services.AddScoped<IWarehouseAccess, WarehouseAccessService>();
+        services.AddScoped<Warehouse.Application.Audit.IAuditQueryService, Warehouse.Infrastructure.Audit.AuditQueryService>();
         return services;
     }
 }
