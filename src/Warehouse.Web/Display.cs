@@ -172,4 +172,6 @@ public static class Display
 
     /// <summary>時間一律存 UTC，顯示時轉成伺服器當地時間（台灣 +08:00）。</summary>
     public static string Time(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    public static string Time(DateTimeOffset? value) => value is { } v ? Time(v) : "—";
 }

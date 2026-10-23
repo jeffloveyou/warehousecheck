@@ -7,6 +7,7 @@ using Warehouse.Api;
 using Warehouse.Api.Authorization;
 using Warehouse.Infrastructure;
 using Warehouse.Web;
+using Warehouse.Web.Logging;
 using Warehouse.Web.Security;
 
 // 以 Windows 服務執行時，目前目錄是 C:\Windows\System32，必須把內容根目錄設為程式所在目錄才找得到 wwwroot
@@ -16,6 +17,8 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
 });
 builder.AddExternalConfigDirectory();
+// 檔案日誌（M7-02）：安裝腳本設定 Logging__File__Directory 才啟用
+builder.AddWarehouseFileLogging();
 // 不是以 Windows 服務／systemd 服務啟動時（開發、測試）不會有任何作用
 builder.Services.AddWindowsService(options => options.ServiceName = "Warehouse");
 builder.Services.AddSystemd();
@@ -69,6 +72,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Settings", Policies.SettingsManage);
     options.Conventions.AuthorizeFolder("/Admin/Users", Policies.UsersManage);
     options.Conventions.AuthorizeFolder("/Admin/Audit", Policies.AuditRead);
+    options.Conventions.AuthorizeFolder("/Admin/System", Policies.SystemStatusRead);
     options.Conventions.AuthorizeFolder("/Opening", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Stocktakes", Policies.StockRead);
     // 匯入：頁面要登入；每種資料的權限在 handler 內依種類檢查（ItemsSubmit、ItemsIndex、WarehousesManage、OpeningEdit）

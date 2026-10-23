@@ -89,7 +89,11 @@ try {
         "ASPNETCORE_URLS=http://localhost:$Port",
         "WAREHOUSE_CONFIG_DIR=$configDir",
         "DataProtection__KeysDirectory=$keysDir",
-        "Storage__AttachmentsDirectory=$(Join-Path $Root 'data\attachments')")
+        "Storage__AttachmentsDirectory=$(Join-Path $Root 'data\attachments')",
+        # M7-02：檔案日誌（每個槽位一個檔名）、備份狀態檔位置（系統狀態頁讀取）
+        "Logging__File__Directory=$(Join-Path $Root 'logs')",
+        "Logging__File__Name=$ServiceName",
+        "Backup__StatusDirectory=$(Join-Path $Root 'data')")
     Write-Host "已建立服務 $ServiceName（帳號 $account，埠 $Port）"
 
     # 4. 服務帳號權限（虛擬帳號要等服務建立後才存在）：config 讀；data（含 keys）、logs 可寫；releases 可讀與執行

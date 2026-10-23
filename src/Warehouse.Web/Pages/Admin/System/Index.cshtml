@@ -1,0 +1,83 @@
+@page
+@model Warehouse.Web.Pages.Admin.System.IndexModel
+@{
+    ViewData["Title"] = "系統狀態";
+}
+<h1>系統狀態</h1>
+<p class="muted">開頁時查詢一次，不會自動更新。異常的處理步驟見《Windows 部署與維運手冊》（docs/12）。</p>
+
+@if (Model.Warnings.Count > 0)
+{
+    <div class="message error" id="system-warnings">
+        <strong>需要處理（@Model.Warnings.Count）</strong>
+        <ul>
+            @foreach (var warning in Model.Warnings)
+            {
+                <li>@warning</li>
+            }
+        </ul>
+    </div>
+}
+else
+{
+    <div class="message info" id="system-ok">目前沒有需要處理的項目。</div>
+}
+
+<h2>程式</h2>
+<dl class="status" id="system-app">
+    <dt>版本</dt><dd>@Model.Version</dd>
+    <dt>執行個體</dt><dd>@Model.Instance</dd>
+    <dt>伺服器時間</dt><dd>@Display.Time(Model.Now)</dd>
+    <dt>日誌目錄</dt><dd>@(Model.LogDirectory ?? "（未啟用檔案日誌）")</dd>
+</dl>
+
+<h2>資料庫</h2>
+@if (Model.Database is { } db)
+{
+    <dl class="status" id="system-db">
+        <dt>名稱</dt><dd>@db.Name</dd>
+        <dt>PostgreSQL</dt><dd>@db.ServerVersion</dd>
+        <dt>大小</dt><dd>@((db.SizeBytes / 1024d / 1024).ToString("0.0")) MB</dd>
+        <dt>WAL 封存</dt><dd>@(db.ArchiveMode == "on" ? "開啟" : "關閉")；成功 @db.ArchivedCount 個（最後 @Display.Time(db.LastArchivedAt)）；失敗 @db.FailedCount 個（最後 @Display.Time(db.LastFailedAt)）</dd>
+    </dl>
+}
+else
+{
+    <p class="message error">@Model.DatabaseError</p>
+}
+
+<h2>備份</h2>
+@if (Model.Backup is { } backup)
+{
+    <dl class="status" id="system-backup">
+        <dt>最近完整備份</dt><dd>@Display.Time(backup.FinishedAt)（@(backup.Succeeded ? "成功" : "失敗")，@(backup.DurationSeconds?.ToString("0") ?? "-") 秒）</dd>
+        @if (!string.IsNullOrEmpty(backup.Message))
+        {
+            <dt>訊息</dt><dd>@backup.Message</dd>
+        }
+        <dt>備份目錄</dt><dd>@backup.BackupRoot（可用 @(backup.FreeGb?.ToString("0.0") ?? "-") GB）</dd>
+        <dt>外部複本</dt><dd>@(string.IsNullOrEmpty(backup.ExternalCopyPath) ? "未設定" : $"{backup.ExternalCopyPath}（{Display.Time(backup.ExternalCopiedAt)}，{(backup.ExternalCopySucceeded == true ? "成功" : "失敗")}）")</dd>
+    </dl>
+    @if (backup.Files is { Count: > 0 } files)
+    {
+        <div class="table-wrap">
+            <table id="system-backup-files">
+                <thead><tr><th>種類</th><th>檔案</th><th>大小</th></tr></thead>
+                <tbody>
+                    @foreach (var file in files)
+                    {
+                        <tr><td>@file.Kind</td><td>@file.Name</td><td>@file.SizeMb.ToString("0.0") MB</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+else
+{
+    <p id="system-backup-none">沒有備份紀錄。</p>
+}
+<dl class="status" id="system-attachments">
+    <dt>附件備份</dt><dd>@(Model.AttachmentBackup is { } a ? $"{Display.Time(a.FinishedAt)}（{(a.Succeeded ? "成功" : "失敗")}）" : "沒有紀錄")</dd>
+    <dt>附件目錄</dt><dd>@(Model.AttachmentsDirectory ?? "-")（可用 @(Model.AttachmentsFreeGb?.ToString("0.0") ?? "-") GB）</dd>
+</dl>
