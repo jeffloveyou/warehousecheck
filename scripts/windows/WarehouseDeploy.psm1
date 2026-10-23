@@ -58,14 +58,26 @@ function Wait-HttpReady {
     param(
         [Parameter(Mandatory)][string]$Url,
         [int]$Seconds = 30,
-        [string]$ExpectedVersion
+        [string]$ExpectedVersion,
+        # 代理回應的 X-Warehouse-Slot 必須等於此值（M7-10）；舊版代理沒有這個標頭時只比對版本並提醒一次
+        [string]$ExpectedSlot
     )
+    $warnedNoSlot = $false
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
         try {
             # 開發用憑證由自家根 CA 簽發；此處只確認服務狀態，不做憑證驗證（憑證另由 T-M0-05-04 驗證）
             $response = Invoke-WebRequest $Url -TimeoutSec 3 -SkipHttpErrorCheck -SkipCertificateCheck
             if ($response.StatusCode -eq 200) {
+                if ($ExpectedSlot) {
+                    $slot = $response.Headers['X-Warehouse-Slot']
+                    if ($slot) {
+                        if ($slot[0] -ne $ExpectedSlot) { Start-Sleep -Milliseconds 300; continue }
+                    } elseif (-not $warnedNoSlot) {
+                        Write-Warning '代理沒有回應 X-Warehouse-Slot（M7-10 以前的代理），只能以版本確認切換。'
+                        $warnedNoSlot = $true
+                    }
+                }
                 if (-not $ExpectedVersion) { return $true }
                 if (($response.Content | ConvertFrom-Json).version -eq $ExpectedVersion) { return $true }
             }
@@ -98,7 +110,14 @@ function Set-FileAtomically {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
     $temp = "$Path.tmp"
     Set-Content $temp $Content -Encoding utf8 -NoNewline
-    [IO.File]::Move($temp, $Path, $true)
+    # 代理正在讀檔或防毒軟體掃描時置換會遇到檔案鎖：重試幾次再放棄（M0-12 審查 S8）
+    for ($attempt = 1; ; $attempt++) {
+        try { [IO.File]::Move($temp, $Path, $true); return }
+        catch [IO.IOException], [UnauthorizedAccessException] {
+            if ($attempt -ge 10) { throw }
+            Start-Sleep -Milliseconds 200
+        }
+    }
 }
 
 <#
@@ -153,5 +172,29 @@ function New-UpstreamContent {
     } | ConvertTo-Json -Depth 8
 }
 
+<#
+.SYNOPSIS
+    部署狀態 <Root>\deploy-state.json（M7-10）：每個槽位安裝的版本，以及是否「曾成功上線」。
+    回滾只允許回到成功上線過的版本：更新失敗（未就緒、冒煙失敗）的槽位會留著新版，不能被 -Rollback 切過去（M0-12 審查 S1）。
+#>
+function Get-DeployState {
+    param([Parameter(Mandatory)][string]$Root)
+    $file = Join-Path $Root 'deploy-state.json'
+    if (Test-Path $file) { return Get-Content $file -Raw | ConvertFrom-Json -AsHashtable }
+    return @{}
+}
+
+function Set-SlotState {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][ValidateSet('A', 'B')][string]$Slot,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][bool]$Good
+    )
+    $state = Get-DeployState $Root
+    $state[$Slot] = [ordered]@{ version = $Version; good = $Good; updatedAt = (Get-Date).ToString('o') }
+    Set-FileAtomically (Join-Path $Root 'deploy-state.json') ($state | ConvertTo-Json -Depth 4)
+}
+
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
-    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent
+    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState
