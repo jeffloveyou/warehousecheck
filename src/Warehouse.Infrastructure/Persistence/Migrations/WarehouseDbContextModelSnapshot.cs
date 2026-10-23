@@ -22,6 +22,8 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("adjustment_doc_no_seq");
+
             modelBuilder.HasSequence("inbound_doc_no_seq");
 
             modelBuilder.HasSequence("item_request_no_seq");
@@ -29,6 +31,8 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
             modelBuilder.HasSequence("opening_doc_no_seq");
 
             modelBuilder.HasSequence("outbound_doc_no_seq");
+
+            modelBuilder.HasSequence("stocktake_no_seq");
 
             modelBuilder.HasSequence("transfer_doc_no_seq");
 
@@ -773,7 +777,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_stock_documents_status", "status IN ('Draft', 'Submitted', 'Posted', 'Cancelled')");
 
-                            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer')");
+                            t.HasCheckConstraint("ck_stock_documents_type", "doc_type IN ('Opening', 'Inbound', 'Outbound', 'Transfer', 'Adjustment')");
                         });
                 });
 
@@ -790,6 +794,11 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("ExpiryDate")
                         .HasColumnType("date")
                         .HasColumnName("expiry_date");
+
+                    b.Property<bool>("IsDecrease")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_decrease");
 
                     b.Property<Guid?>("ItemId")
                         .HasColumnType("uuid")
@@ -1070,6 +1079,230 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_stock_reservations_quantity", "quantity > 0 AND remaining_quantity >= 0 AND remaining_quantity <= quantity");
 
                             t.HasCheckConstraint("ck_stock_reservations_status", "status IN ('Open', 'Consumed', 'Released')");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.Stocktake", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AdjustmentDocumentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("adjustment_document_id");
+
+                    b.Property<bool>("AllLocations")
+                        .HasColumnType("boolean")
+                        .HasColumnName("all_locations");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_by_id");
+
+                    b.Property<string>("ApprovedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("approved_by_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("created_by_name");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("RecountComment")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("recount_comment");
+
+                    b.Property<DateTimeOffset>("SnapshotAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("snapshot_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StocktakeNo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("stocktake_no");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<Guid?>("SubmittedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("submitted_by_id");
+
+                    b.Property<string>("SubmittedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("submitted_by_name");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stocktakes");
+
+                    b.HasIndex("AdjustmentDocumentId")
+                        .HasDatabaseName("ix_stocktakes_adjustment_document_id");
+
+                    b.HasIndex("StocktakeNo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_stocktakes_stocktake_no");
+
+                    b.HasIndex("WarehouseId", "Status", "CreatedAt")
+                        .HasDatabaseName("ix_stocktakes_warehouse_id_status_created_at");
+
+                    b.ToTable("stocktakes", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stocktakes_status", "status IN ('Counting', 'Submitted', 'Approved', 'Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.StocktakeLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal?>("BookQuantityAtCount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("book_quantity_at_count");
+
+                    b.Property<DateTimeOffset?>("CountedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("counted_at");
+
+                    b.Property<Guid?>("CountedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("counted_by_id");
+
+                    b.Property<string>("CountedByName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("counted_by_name");
+
+                    b.Property<decimal?>("CountedQuantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("counted_quantity");
+
+                    b.Property<bool>("IsAdded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_added");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_no");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<Guid?>("LotId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lot_id");
+
+                    b.Property<string>("LotNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("lot_no");
+
+                    b.Property<bool>("RecountRequested")
+                        .HasColumnType("boolean")
+                        .HasColumnName("recount_requested");
+
+                    b.Property<Guid?>("SerialId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("serial_id");
+
+                    b.Property<string>("SerialNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("serial_no");
+
+                    b.Property<decimal>("SnapshotQuantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("snapshot_quantity");
+
+                    b.Property<string>("StockStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("stock_status");
+
+                    b.Property<Guid>("StocktakeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stocktake_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stocktake_lines");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_stocktake_lines_item_id");
+
+                    b.HasIndex("LocationId")
+                        .HasDatabaseName("ix_stocktake_lines_location_id");
+
+                    b.HasIndex("LotId")
+                        .HasDatabaseName("ix_stocktake_lines_lot_id");
+
+                    b.HasIndex("SerialId")
+                        .HasDatabaseName("ix_stocktake_lines_serial_id");
+
+                    b.HasIndex("StocktakeId", "LineNo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_stocktake_lines_stocktake_id_line_no");
+
+                    b.HasIndex("StocktakeId", "LocationId", "ItemId", "LotNo", "SerialNo", "StockStatus")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stocktake_lines_key");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("StocktakeId", "LocationId", "ItemId", "LotNo", "SerialNo", "StockStatus"), false);
+
+                    b.ToTable("stocktake_lines", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stocktake_lines_count_pair", "(counted_quantity IS NULL) = (book_quantity_at_count IS NULL)");
+
+                            t.HasCheckConstraint("ck_stocktake_lines_counted", "counted_quantity IS NULL OR counted_quantity >= 0");
                         });
                 });
 
@@ -2328,6 +2561,32 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Persistence.Configurations.StocktakeLocation", b =>
+                {
+                    b.Property<Guid>("StocktakeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stocktake_id");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<bool>("IsOpen")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_open");
+
+                    b.HasKey("StocktakeId", "LocationId")
+                        .HasName("pk_stocktake_locations");
+
+                    b.HasIndex("LocationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stocktake_locations_open")
+                        .HasFilter("is_open");
+
+                    b.ToTable("stocktake_locations", (string)null);
+                });
+
             modelBuilder.Entity("Warehouse.Infrastructure.Persistence.ItemCodeCounter", b =>
                 {
                     b.Property<string>("Prefix")
@@ -2701,6 +2960,58 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_stock_reservations_warehouses_warehouse_id");
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Inventory.Stocktake", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Inventory.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("AdjustmentDocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stocktakes_stock_documents_adjustment_document_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktakes_warehouses_warehouse_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.StocktakeLine", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktake_lines_items_item_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktake_lines_locations_location_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.InventoryLot", null)
+                        .WithMany()
+                        .HasForeignKey("LotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stocktake_lines_inventory_lots_lot_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.ItemSerial", null)
+                        .WithMany()
+                        .HasForeignKey("SerialId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stocktake_lines_item_serials_serial_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.Stocktake", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("StocktakeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktake_lines_stocktakes_stocktake_id");
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.Item", b =>
                 {
                     b.HasOne("Warehouse.Domain.Items.Unit", null)
@@ -2840,7 +3151,29 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_user_warehouses_warehouses_warehouse_id");
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Persistence.Configurations.StocktakeLocation", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Warehousing.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktake_locations_locations_location_id");
+
+                    b.HasOne("Warehouse.Domain.Inventory.Stocktake", null)
+                        .WithMany()
+                        .HasForeignKey("StocktakeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_stocktake_locations_stocktakes_stocktake_id");
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockDocument", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.Stocktake", b =>
                 {
                     b.Navigation("Lines");
                 });

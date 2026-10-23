@@ -188,6 +188,12 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         {
             throw new DomainRuleException("儲位還有庫存，不能停用；請先移出（M4）或盤點調整（M6）。");
         }
+        // 未結束的盤點範圍內的儲位不能停用：停用後在這裡找到的物料無法過帳，盤點只能取消（M6-02 審查 Y6）
+        if (status == LocationStatus.Inactive
+            && await db.StocktakeLocations.AnyAsync(x => x.LocationId == id && x.IsOpen, cancellationToken))
+        {
+            throw new DomainRuleException("儲位正在盤點中，請先完成或取消盤點再停用。");
+        }
         var before = location.Status;
         var now = clock.GetUtcNow();
         location.ChangeStatus(status, now);

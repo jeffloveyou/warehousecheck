@@ -1,0 +1,90 @@
+@page
+@model Warehouse.Web.Pages.Stocktakes.IndexModel
+@using Warehouse.Domain.Inventory
+@{
+    ViewData["Title"] = "盤點";
+}
+<h1>盤點</h1>
+<p class="muted">開始盤點時記錄快照，<strong>不凍結儲位</strong>：盤點期間照常進出倉。每一行輸入實盤量時，系統同時記下當下的帳面量，差異＝實盤 − 當下帳面；請點完一格立即輸入。核准後自動產生盤點調整單。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+@if (Model.CanStart)
+{
+    <form method="post" asp-page-handler="Start" class="panel" id="stocktake-start-form">
+        <h2>開始盤點</h2>
+        <input type="hidden" name="Start.RequestId" value="@Model.Start.RequestId" />
+        <div class="form-grid">
+            <label for="Start_WarehouseId">倉庫</label>
+            <select id="Start_WarehouseId" name="Start.WarehouseId" required>
+                <option value="">選擇倉庫</option>
+                @foreach (var w in Model.Warehouses.Where(w => w.IsActive && Model.Operable.Allows(w.Id)))
+                {
+                    <option value="@w.Id" selected="@(w.Id == Model.Start.WarehouseId)">@w.Code @w.Name</option>
+                }
+            </select>
+            <label for="Start_LocationCodes">儲位</label>
+            <textarea id="Start_LocationCodes" name="Start.LocationCodes" rows="2" placeholder="空白＝全部儲位；指定時用逗號或換行分隔，例：A-01, A-02">@Model.Start.LocationCodes</textarea>
+            <label for="Start_Note">備註</label>
+            <input type="text" id="Start_Note" name="Start.Note" value="@Model.Start.Note" maxlength="500" />
+        </div>
+        <p class="muted">一張盤點單最多 2000 行；同一儲位同時只能在一張未結束的盤點單內。</p>
+        <div class="actions"><button type="submit" id="stocktake-start">開始盤點（建立快照）</button></div>
+    </form>
+}
+<form method="get" class="filters" id="stocktake-filter">
+    <select name="WarehouseId" aria-label="倉庫">
+        <option value="">全部倉庫</option>
+        @foreach (var w in Model.Warehouses)
+        {
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+        }
+    </select>
+    <select name="Status" aria-label="狀態">
+        <option value="">全部狀態</option>
+        @foreach (var s in Enum.GetValues<StocktakeStatus>())
+        {
+            <option value="@s" selected="@(s == Model.Status)">@Display.Of(s)</option>
+        }
+    </select>
+    <button type="submit">查詢</button>
+</form>
+<div class="table-wrap">
+    <table id="stocktake-list">
+        <thead><tr><th>盤點單號</th><th>倉庫</th><th>範圍</th><th>狀態</th><th>已盤／行數</th><th>建立者</th><th>建立時間</th></tr></thead>
+        <tbody>
+            @foreach (var s in Model.Result.Items)
+            {
+                <tr>
+                    <td><a href="/Stocktakes/Details/@s.Id">@s.StocktakeNo</a></td>
+                    <td>@s.WarehouseCode</td>
+                    <td>@(s.AllLocations ? "全部儲位" : "指定儲位")</td>
+                    <td>@Display.Of(s.Status)</td>
+                    <td class="num">@s.CountedCount / @s.LineCount</td>
+                    <td>@s.CreatedByName</td>
+                    <td>@Display.Time(s.CreatedAt)</td>
+                </tr>
+            }
+            @if (Model.Result.Items.Count == 0)
+            {
+                <tr><td colspan="7" class="muted">沒有盤點單。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+<div class="pager">
+    @if (Model.Result.Page > 1)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a>
+    }
+    <span>第 @Model.Result.Page / @Model.Result.TotalPages 頁（共 @Model.Result.TotalCount 筆）</span>
+    @if (Model.Result.Page < Model.Result.TotalPages)
+    {
+        <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
+    }
+</div>

@@ -94,7 +94,7 @@ public sealed class StockDocumentService(
             select new DocumentLineRow(
                 l.Id, l.LineNo, l.LocationId, loc.Code, l.TargetLocationId, targetWarehouse.Code, target.Code,
                 item.Id, item.ItemCode, item.Name, unit.Code, item.TrackingMode,
-                l.LotNo, l.SerialNo, l.ExpiryDate, l.Quantity, l.ReservationId))
+                l.LotNo, l.SerialNo, l.ExpiryDate, l.Quantity, l.ReservationId, l.IsDecrease))
             .ToListAsync(cancellationToken);
 
         var d = head.Doc;
@@ -326,6 +326,10 @@ public sealed class StockDocumentService(
         if (original.ReversalOfDocumentId is not null)
         {
             throw new DomainRuleException("沖銷單不能再沖銷；要更正請另開新單。");
+        }
+        if (original.DocType == StockDocumentType.Adjustment)
+        {
+            throw new DomainRuleException("盤點調整單不能沖銷；盤點有誤請重新盤點該儲位。");
         }
         if (await db.StockDocuments.AnyAsync(d => d.ReversalOfDocumentId == id && d.Status != StockDocumentStatus.Cancelled, cancellationToken))
         {

@@ -70,8 +70,17 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         FROM unnest(@items) AS p(item_id)
         """;
 
+    /// <summary>料號全倉合計結存（不扣預留）：盤點調整的負庫存下限檢查用（<see cref="StockApplyOptions.IgnoreReservations"/>）。</summary>
+    internal const string ItemBalanceSql = """
+        SELECT p.item_id,
+            COALESCE((SELECT SUM(b.quantity) FROM stock_balances b JOIN locations l ON l.id = b.location_id
+                      WHERE b.item_id = p.item_id AND b.stock_status = 'Available' AND l.status = 'Available'), 0)
+        FROM unnest(@items) AS p(item_id)
+        """;
+
     public async Task ApplyAsync(
-        Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+        Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken,
+        StockApplyOptions? options = null)
     {
         if (changes.Count == 0)
         {
@@ -85,7 +94,7 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         {
             throw new DomainRuleException("只有扣減可以沖銷預留。");
         }
-        await BusyGuardAsync(() => ApplyCoreAsync(documentId, changes, actor, now.ToUniversalTime(), cancellationToken));
+        await BusyGuardAsync(() => ApplyCoreAsync(documentId, changes, actor, now.ToUniversalTime(), options ?? new StockApplyOptions(), cancellationToken));
     }
 
     public async Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken) =>
@@ -240,7 +249,8 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
     }
 
     private async Task ApplyCoreAsync(
-        Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+        Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, StockApplyOptions options,
+        CancellationToken cancellationToken)
     {
         await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
 
@@ -366,7 +376,9 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         {
             availabilityNet[pair] = availabilityNet.GetValueOrDefault(pair) + quantity;
         }
-        var toCheck = availabilityNet.Where(x => x.Value < 0 && !items[x.Key.Item].AllowNegative).Select(x => x.Key).ToList();
+        // 盤點調整（IgnoreReservations）：一般物料只靠「結存不可為負」的 trigger，不檢查扣除預留後的可用量
+        var toCheck = options.IgnoreReservations ? []
+            : availabilityNet.Where(x => x.Value < 0 && !items[x.Key.Item].AllowNegative).Select(x => x.Key).ToList();
         if (toCheck.Count > 0)
         {
             foreach (var (pair, available) in await QueryAvailableAsync(toCheck, cancellationToken))
@@ -385,8 +397,8 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
             .ToArray();
         if (negativeItems.Length > 0)
         {
-            var totals = await QueryAsync(db, ItemAvailableSql, r => (Id: r.GetGuid(0), Available: r.GetDecimal(1)), cancellationToken,
-                Param("items", negativeItems));
+            var totals = await QueryAsync(db, options.IgnoreReservations ? ItemBalanceSql : ItemAvailableSql,
+                r => (Id: r.GetGuid(0), Available: r.GetDecimal(1)), cancellationToken, Param("items", negativeItems));
             foreach (var (id, available) in totals)
             {
                 if (available < -items[id].NegativeLimit)

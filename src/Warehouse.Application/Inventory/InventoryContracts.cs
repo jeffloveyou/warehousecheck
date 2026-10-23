@@ -12,6 +12,13 @@ public sealed record StockChange(
     Guid LineId, Guid ItemId, Guid LocationId, Guid? LotId, Guid? SerialId, StockStatus Status, decimal Delta,
     Guid? ReservationId = null);
 
+/// <summary>
+/// 過帳選項。<see cref="IgnoreReservations"/>：只給盤點調整單（M6-02，使用者 2026-10-23 決定「盤虧不受預留限制」）——
+/// 實物就是少了，扣減時不檢查「可用量（扣除預留）」；但結存仍不可為負（trigger）、待驗不可為負，
+/// 允許負庫存的物料仍維持全倉結存 ≥ −下限（不扣預留）。預留大於庫存的情況由庫存異常頁列出。
+/// </summary>
+public sealed record StockApplyOptions(bool IgnoreReservations = false);
+
 /// <summary>建立倉庫層級預留（ADR-0004 決策二）。<see cref="ReferenceType"/> 例如 <c>Manual</c>、<c>StockDocument</c>。</summary>
 public sealed record ReservationRequest(
     Guid ItemId, Guid WarehouseId, decimal Quantity, string ReferenceType, Guid? ReferenceId, string? Note, DateTimeOffset? ExpiresAt = null);
@@ -27,7 +34,9 @@ public interface IInventoryPostingService
     /// 套用結存變化。錯誤：<c>stock.insufficient</c>（結存或倉庫可用量不足）、<c>stock.negative_limit</c>（超過負庫存下限）、
     /// <c>stock.busy</c>（等鎖逾時或死結，可重試）；儲位停用、倉庫停用、序號重複為 <c>domain_rule</c>。
     /// </summary>
-    Task ApplyAsync(Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
+    Task ApplyAsync(
+        Guid documentId, IReadOnlyList<StockChange> changes, Actor actor, DateTimeOffset now, CancellationToken cancellationToken,
+        StockApplyOptions? options = null);
 
     /// <summary>建立預留；倉庫可用量（扣除既有預留）不足時拒絕（<c>stock.insufficient</c>，負庫存物料也不例外）。回傳預留 ID。</summary>
     Task<Guid> ReserveAsync(ReservationRequest request, Actor actor, DateTimeOffset now, CancellationToken cancellationToken);
@@ -129,6 +138,9 @@ public sealed record DocumentEventRow(DateTimeOffset OccurredAt, string ActorNam
 /// <summary>久未處理：草稿或待核准超過門檻的單據。</summary>
 public sealed record StaleDocumentRow(Guid Id, string DocNo, StockDocumentType DocType, StockDocumentStatus Status, string CreatedByName, DateTimeOffset Since);
 
+/// <summary>預留大於庫存的料號＋倉庫。</summary>
+public sealed record OverReservedRow(string ItemCode, string ItemName, string WarehouseCode, decimal Reserved, decimal Balance);
+
 /// <summary>需要注意的預留：建立超過門檻，或即將到期。</summary>
 public sealed record StaleReservationRow(
     Guid Id, string ItemCode, string WarehouseCode, decimal RemainingQuantity, string ReferenceType, string? ReferenceDocNo,
@@ -151,6 +163,12 @@ public interface IStockAnomalyService
     Task<PagedResult<StaleDocumentRow>> GetStaleDocumentsAsync(int page, CancellationToken cancellationToken);
 
     Task<PagedResult<StaleReservationRow>> GetStaleReservationsAsync(int page, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 預留大於庫存（M6-02）：料號＋倉庫的未到期預留合計 &gt; 可用結存（Available 且儲位有效）。
+    /// 盤虧調整不受預留限制（使用者 2026-10-23 決定），調整後可能出現，請倉庫主管釋放或調整預留。
+    /// </summary>
+    Task<PagedResult<OverReservedRow>> GetOverReservedAsync(int page, CancellationToken cancellationToken);
 }
 
 /// <summary>記錄被拒絕的過帳嘗試。實作必須在獨立連線寫入，而且自己吞掉錯誤（記錄失敗不能影響原本的錯誤回應）。</summary>

@@ -408,7 +408,7 @@ public class DetailsModel(
         CanCancel = (draft || doc.Status == StockDocumentStatus.Submitted) && canDocumentEdit && owner;
         CanApprove = doc.Status == StockDocumentStatus.Submitted
             && (await authorization.AuthorizeAsync(User, Policies.DocumentApprove)).Succeeded;
-        CanReverse = doc.Status == StockDocumentStatus.Posted && canDocumentEdit;
+        CanReverse = doc.Status == StockDocumentStatus.Posted && canDocumentEdit && doc.DocType != StockDocumentType.Adjustment;
         CanUpload = Settings.DocumentAttachmentsEnabled && doc.Status != StockDocumentStatus.Cancelled && canDocumentEdit && owner;
         if (Settings.DocumentAttachmentsEnabled)
         {

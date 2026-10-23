@@ -42,7 +42,7 @@
                     <td>@l.LotNo</td>
                     <td>@l.SerialNo</td>
                     <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
-                    <td class="num">@Display.Qty(l.Quantity)</td>
+                    <td class="num">@Display.Qty(l.SignedQuantity)</td>
                     <td>@l.UnitCode</td>
                     <td>
                         @if (Model.CanEdit)

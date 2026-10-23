@@ -15,6 +15,7 @@ public class AnomaliesModel(IStockAnomalyService anomalies, TimeProvider clock) 
     public const string TabEvents = "events";
     public const string TabStaleDocuments = "stale-documents";
     public const string TabStaleReservations = "stale-reservations";
+    public const string TabOverReserved = "over-reserved";
 
     [BindProperty(SupportsGet = true, Name = "tab")]
     public string? TabName { get; set; }
@@ -23,7 +24,7 @@ public class AnomaliesModel(IStockAnomalyService anomalies, TimeProvider clock) 
     public int PageNumber { get; set; } = 1;
 
     /// <summary>目前分頁籤；不認得的值當成第一個。</summary>
-    public string Tab => TabName is TabEvents or TabStaleDocuments or TabStaleReservations ? TabName : TabFailures;
+    public string Tab => TabName is TabEvents or TabStaleDocuments or TabStaleReservations or TabOverReserved ? TabName : TabFailures;
 
     public PagedResult<PostingFailureRow>? Failures { get; private set; }
 
@@ -32,6 +33,8 @@ public class AnomaliesModel(IStockAnomalyService anomalies, TimeProvider clock) 
     public PagedResult<StaleDocumentRow>? StaleDocuments { get; private set; }
 
     public PagedResult<StaleReservationRow>? StaleReservations { get; private set; }
+
+    public PagedResult<OverReservedRow>? OverReserved { get; private set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
@@ -42,6 +45,9 @@ public class AnomaliesModel(IStockAnomalyService anomalies, TimeProvider clock) 
                 break;
             case TabStaleDocuments:
                 StaleDocuments = await anomalies.GetStaleDocumentsAsync(PageNumber, cancellationToken);
+                break;
+            case TabOverReserved:
+                OverReserved = await anomalies.GetOverReservedAsync(PageNumber, cancellationToken);
                 break;
             case TabStaleReservations:
                 StaleReservations = await anomalies.GetStaleReservationsAsync(PageNumber, cancellationToken);
@@ -58,6 +64,7 @@ public class AnomaliesModel(IStockAnomalyService anomalies, TimeProvider clock) 
         : Events is { } e ? (e.Page, e.TotalPages, e.TotalCount)
         : StaleDocuments is { } d ? (d.Page, d.TotalPages, d.TotalCount)
         : StaleReservations is { } r ? (r.Page, r.TotalPages, r.TotalCount)
+        : OverReserved is { } o ? (o.Page, o.TotalPages, o.TotalCount)
         : (1, 1, 0);
 
     public string PageUrl(int page) => Url.Page("/Stock/Anomalies", new { tab = Tab, p = page })!;

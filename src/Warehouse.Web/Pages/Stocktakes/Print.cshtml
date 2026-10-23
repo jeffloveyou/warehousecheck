@@ -1,0 +1,60 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Stocktakes.PrintModel
+@{
+    Layout = null;
+    var d = Model.Doc;
+}
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>@d.StocktakeNo 盤點表</title>
+    <link rel="stylesheet" href="~/css/print.css" asp-append-version="true" />
+</head>
+<body>
+    <div class="print-toolbar">
+        <button type="button" id="print-button" onclick="window.print()">列印</button>
+        <a href="/Stocktakes/Details/@d.Id">回盤點單</a>
+    </div>
+    <div class="print-page">
+        @if (Model.CompanyName.Length > 0)
+        {
+            <p class="print-company">@Model.CompanyName</p>
+        }
+        <h1 class="print-title">盤點表</h1>
+        <table class="print-header">
+            <tr><th>盤點單號</th><td>@d.StocktakeNo</td><th>倉庫</th><td>@d.WarehouseCode</td></tr>
+            <tr><th>快照時間</th><td>@Display.Time(d.SnapshotAt)</td><th>狀態</th><td>@Display.Of(d.Status)</td></tr>
+        </table>
+        <table class="print-lines" id="print-lines">
+            <thead>
+                <tr>
+                    <th>#</th><th>儲位</th><th>料號</th><th>品名</th><th>批號／序號</th>
+                    @if (!d.QuantitiesHidden) { <th>帳面（快照）</th> }
+                    <th>實盤</th><th>單位</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Model.Lines)
+                {
+                    <tr>
+                        <td>@l.LineNo</td>
+                        <td>@l.LocationCode</td>
+                        <td>@l.ItemCode</td>
+                        <td>@l.ItemName</td>
+                        <td>@(l.LotNo ?? l.SerialNo)</td>
+                        @if (!d.QuantitiesHidden) { <td class="num">@(l.SnapshotQuantity is { } s ? Display.Qty(s) : "")</td> }
+                        <td class="num">@(l.CountedQuantity is { } c ? Display.Qty(c) : "")</td>
+                        <td>@l.UnitCode</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p>現場找到、帳上沒有的物料請寫在下方空白處，回到系統後用「輸入實盤量」登記。</p>
+        <table class="print-sign"><tr><td>盤點人員</td><td>複盤</td><td>主管</td></tr></table>
+        <p class="print-footer">列印時間 @Display.Time(DateTimeOffset.UtcNow)</p>
+    </div>
+</body>
+</html>
