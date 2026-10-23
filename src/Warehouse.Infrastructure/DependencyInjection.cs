@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Warehouse.Application.Abstractions;
+using Warehouse.Application.Accounts;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
 using Warehouse.Application.MasterData;
@@ -10,6 +11,7 @@ using Warehouse.Application.Scanning;
 using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
 using Warehouse.Infrastructure.Files;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Inventory;
 using Warehouse.Infrastructure.Items;
 using Warehouse.Infrastructure.MasterData;
@@ -59,6 +61,8 @@ public static class DependencyInjection
         services.AddScoped<IMasterDataService, MasterDataService>();
         services.AddScoped<IItemLocationService, ItemLocationService>();
         services.AddScoped<ILocationImageService, LocationImageService>();
+        services.AddScoped<IUserAdminService, UserAdminService>();
+        services.AddScoped<ILoginAuditLog, LoginAuditLog>();
         return services;
     }
 }

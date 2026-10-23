@@ -117,3 +117,4 @@ input[type=file] { max-width: 100%; }
 /* M5-02：離線、新版提示列（pwa.js） */
 .banner { margin: 0; border-radius: 0; position: sticky; top: 0; z-index: 10; }
 .banner button { margin-left: 8px; }
+.inline-check { margin-right: 1em; white-space: nowrap; display: inline-block; }

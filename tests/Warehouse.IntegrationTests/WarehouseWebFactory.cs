@@ -27,6 +27,8 @@ public sealed class WarehouseWebFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(_environment);
+        // 測試會在同一分鐘內登入很多次（測試主機的來源 IP 都一樣）；限流本身另有測試以 settings 覆寫
+        builder.UseSetting("Login:RateLimitPerMinute", "100000");
         if (_connectionString is not null)
         {
             builder.UseSetting("ConnectionStrings:Warehouse", _connectionString);

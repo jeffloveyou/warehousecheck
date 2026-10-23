@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Identity;
 namespace Warehouse.Infrastructure.Identity;
 
 /// <summary>
-/// 登入帳號（ASP.NET Core Identity，ADR-0012）。帳號由命令列 <c>users create</c> 建立（M6-01 才有管理畫面）。
+/// 登入帳號（ASP.NET Core Identity，ADR-0012）。由帳號管理畫面（M6-01）或命令列 <c>users create</c> 建立。
 /// </summary>
 public class AppUser : IdentityUser<Guid>
 {
@@ -22,12 +22,15 @@ public class AppUser : IdentityUser<Guid>
 /// <summary>內建角色的固定 ID（種子資料，之後不可修改）。</summary>
 public static class RoleSeed
 {
+    public static readonly Guid SystemAdminId = Guid.Parse("0b1f6a10-0003-4c3a-9a00-000000000001");
+
     public static readonly IReadOnlyList<IdentityRole<Guid>> All =
     [
         Role("0b1f6a10-0003-4c3a-9a00-000000000001", Application.Abstractions.Roles.SystemAdmin),
         Role("0b1f6a10-0003-4c3a-9a00-000000000002", Application.Abstractions.Roles.ItemManager),
         Role("0b1f6a10-0003-4c3a-9a00-000000000003", Application.Abstractions.Roles.Operator),
         Role("0b1f6a10-0003-4c3a-9a00-000000000004", Application.Abstractions.Roles.WarehouseManager),
+        Role("0b1f6a10-0003-4c3a-9a00-000000000005", Application.Abstractions.Roles.Viewer),
     ];
 
     // ConcurrencyStamp 固定，否則每次產生 Migration 都會出現 UpdateData

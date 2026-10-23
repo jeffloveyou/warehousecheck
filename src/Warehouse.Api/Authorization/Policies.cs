@@ -56,6 +56,12 @@ public static class Policies
     /// <summary>維護分類與單位：物料管理員。</summary>
     public const string MasterDataManage = "MasterData.Manage";
 
+    /// <summary>帳號管理（新增、角色、停用、重設密碼）：系統管理員（M6-01）。</summary>
+    public const string UsersManage = "Users.Manage";
+
+    /// <summary>查詢與匯出操作日誌（audit_logs）：系統管理員（M6-01）。</summary>
+    public const string AuditRead = "Audit.Read";
+
     public static IServiceCollection AddWarehouseAuthorization(this IServiceCollection services)
     {
         services.AddAuthorizationBuilder()
@@ -74,7 +80,9 @@ public static class Policies
             .AddPolicy(PartnersManage, p => p.RequireRole(Roles.WarehouseManager, Roles.ItemManager))
             .AddPolicy(ReservationManage, p => p.RequireRole(Roles.Operator, Roles.WarehouseManager))
             .AddPolicy(NegativePolicy, p => p.RequireRole(Roles.ItemManager))
-            .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin));
+            .AddPolicy(SettingsManage, p => p.RequireRole(Roles.SystemAdmin))
+            .AddPolicy(UsersManage, p => p.RequireRole(Roles.SystemAdmin))
+            .AddPolicy(AuditRead, p => p.RequireRole(Roles.SystemAdmin));
         return services;
     }
 }

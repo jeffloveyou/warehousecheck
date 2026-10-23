@@ -91,6 +91,13 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                             ConcurrencyStamp = "0b1f6a10-0003-4c3a-9a00-000000000004",
                             Name = "WarehouseManager",
                             NormalizedName = "WAREHOUSEMANAGER"
+                        },
+                        new
+                        {
+                            Id = new Guid("0b1f6a10-0003-4c3a-9a00-000000000005"),
+                            ConcurrencyStamp = "0b1f6a10-0003-4c3a-9a00-000000000005",
+                            Name = "Viewer",
+                            NormalizedName = "VIEWER"
                         });
                 });
 
