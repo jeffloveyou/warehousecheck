@@ -12,6 +12,8 @@
       5. 排空等待 -DrainSeconds 後停止舊槽位（服務保留、改為手動啟動），新槽位改為自動（延遲）啟動
     回滾（-Rollback）：啟動待命槽位 → 就緒 → 切回 → 排空 → 停止目前槽位。
     每次動作記錄在 <Root>\logs\deploy.log。
+    M7-10：同時只能一個切換（具名 Mutex）；以代理回應的 X-Warehouse-Slot＋版本確認切換；
+    <Root>\deploy-state.json 記錄各槽位版本與是否曾成功上線，-Rollback 只回到成功上線過的版本並先做冒煙。
 .EXAMPLE
     .\scripts\windows\switch-release.ps1 -ReleasePath artifacts\publish\0.1.0-abc1234-win-x64-fdd
     .\scripts\windows\switch-release.ps1 -Rollback
@@ -51,8 +53,14 @@ function Get-SlotVersion($Slot) {
 function Switch-Traffic($From, $To, [string]$ExpectedVersion) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     Set-FileAtomically $upstreamFile (New-UpstreamContent $To.Name)
-    if (-not (Wait-HttpReady $proxyReadyUrl -Seconds 15 -ExpectedVersion $ExpectedVersion)) {
-        Set-FileAtomically $upstreamFile (New-UpstreamContent $From.Name)
+    # 以代理回應的槽位標頭＋版本確認（M7-10：兩槽位同版本時也能確認）
+    if (-not (Wait-HttpReady $proxyReadyUrl -Seconds 15 -ExpectedVersion $ExpectedVersion -ExpectedSlot $To.Name)) {
+        try {
+            Set-FileAtomically $upstreamFile (New-UpstreamContent $From.Name)
+        } catch {
+            Write-DeployLog "嚴重：無法改回 upstream.json（$($_.Exception.Message)），目前指向槽位 $($To.Name)；請檢查 $upstreamFile 與兩個槽位的服務。"
+            throw
+        }
         throw "代理未在 15 秒內轉到槽位 $($To.Name)（版本 $ExpectedVersion），已改回槽位 $($From.Name)。"
     }
     Write-DeployLog "流量已切換：$($From.Name) → $($To.Name)（$([math]::Round($sw.Elapsed.TotalSeconds, 1)) 秒確認）"
@@ -68,26 +76,56 @@ function Complete-Switch($From, $To) {
     Write-DeployLog "已停止槽位 $($From.Name)（$($From.Service)，保留供回滾）"
 }
 
+# 冒煙：版本＝預期、資料庫已連線；失敗時停止目標槽位（例外在這裡接住，逾時也一樣）
+function Test-Smoke($Slot, [string]$ExpectedVersion) {
+    try { $info = Invoke-RestMethod "http://localhost:$($Slot.Port)/api/system/info" -TimeoutSec 5 } catch { $info = $null }
+    if (-not $info -or ($ExpectedVersion -and $info.version -ne $ExpectedVersion) -or -not $info.databaseConnected) {
+        Stop-Service $Slot.Service -ErrorAction SilentlyContinue
+        throw "冒煙測試失敗：版本 $($info.version)、資料庫連線 $($info.databaseConnected)；流量維持目前槽位。"
+    }
+    Write-Host "冒煙測試通過：版本 $($info.version)、資料庫已連線" -ForegroundColor Green
+    return $info.version
+}
+
+# 同時只能有一個切換（M0-12 審查 S4）：兩個切換同時改 upstream.json 與服務會互相覆蓋
+$mutex = [Threading.Mutex]::new($false, 'Global\WarehouseSwitchRelease')
+$locked = $false
 try {
+    try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
+    if (-not $locked) { throw '另一個 switch-release 正在執行，請等它完成後再試。' }
+
     if (-not (Test-Path $upstreamFile)) { throw "找不到 $upstreamFile，請先執行 install-proxy.ps1。" }
     New-Item -ItemType Directory -Force -Path (Split-Path $deployLog) | Out-Null
     $current = Get-Slot ((Get-Content $upstreamFile -Raw | ConvertFrom-Json).ActiveSlot)
     $target = Get-Slot $current.Other
     $currentVersion = Get-SlotVersion $current
+    $state = Get-DeployState $Root
 
     if ($Rollback) {
         if (-not (Get-Service $target.Service -ErrorAction SilentlyContinue)) { throw "待命槽位 $($target.Name) 沒有安裝服務，無法回滾。" }
-        Write-DeployLog "開始回滾：$($current.Name)（$currentVersion）→ $($target.Name)"
+        # 只回到曾成功上線的版本（M0-12 審查 S1）：更新失敗留在待命槽位的新版不能被切過去
+        $known = $state[$target.Name]
+        if ($known -and -not $known.good) {
+            throw "待命槽位 $($target.Name) 的版本 $($known.version) 未曾成功上線（更新失敗後留下的），拒絕回滾。"
+        }
+        if (-not $known) { Write-Warning "沒有槽位 $($target.Name) 的部署紀錄（M7-10 以前安裝），無法確認它曾成功上線。" }
+        Write-DeployLog "開始回滾：$($current.Name)（$currentVersion）→ $($target.Name)（$($known.version)）"
         Start-Service $target.Service
         if (-not (Wait-HttpReady "http://localhost:$($target.Port)/health/ready")) {
             Stop-Service $target.Service
             throw "槽位 $($target.Name) 未就緒，回滾中止，流量維持 $($current.Name)。"
         }
-        $targetVersion = Get-SlotVersion $target
+        # 版本以部署紀錄為準；沒有紀錄時取冒煙回應的版本（單次查詢逾時可能取不到，審查 L1）
+        $targetVersion = Test-Smoke $target $(if ($known) { $known.version } else { $null })
+        if (-not $targetVersion) { Stop-Service $target.Service; throw "無法取得槽位 $($target.Name) 的版本，回滾中止。" }
     } else {
         $release = Get-ReleaseInfo $ReleasePath
         $targetVersion = $release.version
         Write-DeployLog "開始更新：$($current.Name)（$currentVersion）→ $($target.Name)（$targetVersion）"
+        # 目前槽位正在服務，視為成功上線（第一次使用 M7-10 腳本時補上紀錄）
+        if ($currentVersion -and -not $state[$current.Name]) { Set-SlotState $Root $current.Name $currentVersion $true }
+        # 先記錄「未成功上線」，安裝或冒煙失敗時 -Rollback 不會切到這個版本
+        Set-SlotState $Root $target.Name $targetVersion $false
 
         # 1～2. 安裝到待命槽位
         if (Get-Service $target.Service -ErrorAction SilentlyContinue) {
@@ -101,22 +139,19 @@ try {
         }
 
         # 3. 冒煙測試
-        # 逾時或錯誤也要停止目標槽位，所以例外在這裡接住
-        try { $info = Invoke-RestMethod "http://localhost:$($target.Port)/api/system/info" -TimeoutSec 5 } catch { $info = $null }
-        if (-not $info -or $info.version -ne $targetVersion -or -not $info.databaseConnected) {
-            Stop-Service $target.Service
-            throw "冒煙測試失敗：版本 $($info.version)、資料庫連線 $($info.databaseConnected)；流量維持 $($current.Name)。"
-        }
-        Write-Host "冒煙測試通過：版本 $($info.version)、資料庫已連線" -ForegroundColor Green
+        Test-Smoke $target $targetVersion | Out-Null
     }
 
     if ($targetVersion -eq $currentVersion) {
-        Write-Warning "兩個槽位版本相同（$targetVersion），代理切換只能以版本以外的方式確認。"
+        Write-Warning "兩個槽位版本相同（$targetVersion）：只能靠代理的 X-Warehouse-Slot 確認切換（M7-10 以前的代理無法確認）。"
     }
 
     # 4～5. 切換並停止舊槽位
     Switch-Traffic $current $target $targetVersion
     if (Get-Service $current.Service -ErrorAction SilentlyContinue) { Complete-Switch $current $target }
+    # 流量已切換：寫紀錄失敗只警告，不能讓收尾（停舊槽位、設開機啟動）被中斷（審查 M1）
+    try { Set-SlotState $Root $target.Name $targetVersion $true }
+    catch { Write-DeployLog "警告：無法更新部署紀錄（$($_.Exception.Message)）；槽位 $($target.Name) 之後無法作為回滾目標，請檢查 $(Join-Path $Root 'deploy-state.json')。" }
     Write-DeployLog "完成：目前槽位 $($target.Name)，版本 $targetVersion"
     exit 0
 } catch {
@@ -124,5 +159,7 @@ try {
     if (Test-Path (Split-Path $deployLog)) { Add-Content $deployLog "$(Get-Date -Format o)`t失敗：$($_.Exception.Message)" -Encoding utf8 }
     exit 1
 } finally {
+    if ($locked) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
     if ($LogFile) { Stop-Transcript | Out-Null }
 }
