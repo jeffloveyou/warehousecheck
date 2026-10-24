@@ -227,6 +227,18 @@ function Set-ConsoleEncoding {
     try { [Console]::OutputEncoding = $Encoding } catch { }
 }
 
+<#
+.SYNOPSIS
+    設定或刪除這個程序的環境變數。值是 $null 或空字串時刪除：PowerShell 會把 $null 轉成 ""，
+    [Environment]::SetEnvironmentVariable(名稱, $null) 因此留下「空值」變數，而空的 ConnectionStrings__Warehouse
+    會蓋過設定檔、讓網站讀不到連線字串（2026-10-24 U4 實跑）。
+#>
+function Set-ProcessVariable {
+    param([Parameter(Mandatory)][string]$Name, [AllowNull()][AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrEmpty($Value)) { Remove-Item "Env:$Name" -ErrorAction SilentlyContinue }
+    else { Set-Item "Env:$Name" $Value }
+}
+
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
     Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput,
-    Set-ConsoleEncoding
+    Set-ConsoleEncoding, Set-ProcessVariable

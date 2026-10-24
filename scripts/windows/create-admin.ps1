@@ -31,7 +31,7 @@ $restoreEnv = @{}
 $pushed = $false
 function Set-ProcessEnv([string]$Name, [string]$Value) {
     if (-not $restoreEnv.ContainsKey($Name)) { $restoreEnv[$Name] = [Environment]::GetEnvironmentVariable($Name) }
-    [Environment]::SetEnvironmentVariable($Name, $Value)
+    Set-ProcessVariable $Name $Value
 }
 try {
     if (-not $DisplayName) { $DisplayName = $User }
@@ -71,5 +71,5 @@ try {
     exit 1
 } finally {
     if ($pushed) { Pop-Location }
-    foreach ($name in $restoreEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $restoreEnv[$name]) }
+    foreach ($name in $restoreEnv.Keys) { Set-ProcessVariable $name $restoreEnv[$name] }
 }
