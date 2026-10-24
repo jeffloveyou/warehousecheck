@@ -272,6 +272,6 @@ ROLLBACK;
     Set-ConsoleEncoding $originalOutputEncoding
     if ($web -and -not $web.HasExited) { Stop-Process -Id $web.Id -ErrorAction SilentlyContinue }
     if ($probeFile) { Remove-Item $probeFile -ErrorAction SilentlyContinue }
-    foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name]) }
+    foreach ($name in $envNames) { Set-ProcessVariable $name $savedEnv[$name] }
     if ($LogFile) { Stop-Transcript | Out-Null }
 }
