@@ -9,9 +9,11 @@
     -Dump <檔案> -TargetDatabase <新資料庫名>
         以 postgres 建立新資料庫（擁有者：<名稱>_owner 若存在，否則 postgres），pg_restore（--no-owner），
         有 <名稱>_app 時授權給它。-CompareWith <資料庫> 會逐表比對筆數（還原演練用）。
-    -Pitr -TargetTime '2026-10-24 14:30'
+    -Pitr [-TargetTime '2026-10-24 14:30']
         取目標時間之前最近的基底備份，解壓到 -DataDir（預設 C:\WarehouseRestore\pitr-<時間>），
         以 <BackupRoot>\wal 的 WAL 重播到目標時間，在 -Port（預設 5499，只聽 localhost）啟動暫時執行個體。
+        不指定 -TargetTime：重播完所有已封存的 WAL（還原到最新，例如硬碟故障後）。
+        指定時間之後必須還有交易（PostgreSQL 要看到晚於目標的交易才停得下來）；沒人使用的系統請改用「還原到最新」。
         用 psql -p 5499 檢查；要拿出資料：pg_dump -p 5499 -d warehouse_prod -Fc -f x.dump，再用 -Dump 還原成新資料庫。
         結束：pg_ctl stop -D <DataDir>。暫時執行個體關閉 WAL 封存，不會寫進正式的 wal 目錄。
     -Attachments [-Destination <目錄>]
@@ -26,7 +28,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Dump')][ValidatePattern('^[a-z][a-z0-9_]{2,40}$')][string]$TargetDatabase,
     [Parameter(ParameterSetName = 'Dump')][string]$CompareWith,
     [Parameter(Mandatory, ParameterSetName = 'Pitr')][switch]$Pitr,
-    [Parameter(Mandatory, ParameterSetName = 'Pitr')][datetime]$TargetTime,
+    [Parameter(ParameterSetName = 'Pitr')][Nullable[datetime]]$TargetTime,
     [Parameter(ParameterSetName = 'Pitr')][string]$DataDir,
     [Parameter(ParameterSetName = 'Pitr')][int]$PitrPort = 5499,
     [Parameter(Mandatory, ParameterSetName = 'Attachments')][switch]$Attachments,
@@ -110,10 +112,11 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
         }
         'Pitr' {
             # 只用完整的基底備份，且要在目標時間之前「完成」（backup_manifest 寫入時間；審查 I2、S10）
+            $baseBefore = if ($TargetTime) { $TargetTime } else { Get-Date }
             $base = Get-CompleteBaseBackups (Join-Path $BackupRoot 'base') |
-                Where-Object { (Get-Item (Join-Path $_.FullName 'backup_manifest')).LastWriteTime -lt $TargetTime } |
+                Where-Object { (Get-Item (Join-Path $_.FullName 'backup_manifest')).LastWriteTime -lt $baseBefore } |
                 Select-Object -Last 1
-            if (-not $base) { throw "$TargetTime 之前沒有完成的基底備份（$BackupRoot\base）。" }
+            if (-not $base) { throw "$baseBefore 之前沒有完成的基底備份（$BackupRoot\base）。" }
             if (-not $DataDir) { $DataDir = "C:\WarehouseRestore\pitr-$(Get-Date -Format 'yyyyMMdd-HHmmss')" }
             if (Test-Path $DataDir) { throw "$DataDir 已存在。" }
             # 還原出來的是完整資料庫：上層目錄只給 Administrators、SYSTEM（C:\ 預設讓所有登入者可讀）
@@ -134,7 +137,8 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
             $needed = @(Get-ChildItem $wal -File | Where-Object { $_.Name -notlike '*.tmp' -and [string]::CompareOrdinal($_.Name, $start) -ge 0 })
             $needed | Copy-Item -Destination $archive
             Write-Host "複製 $($needed.Count) 個 WAL 檔（自 $start）"
-            $target = ([datetimeoffset]$TargetTime).ToString('yyyy-MM-dd HH:mm:sszzz')
+            $target = if ($TargetTime) { ([datetimeoffset]$TargetTime).ToString('yyyy-MM-dd HH:mm:sszzz') } else { $null }
+            $targetLine = if ($target) { "recovery_target_time = '$target'" } else { '# 不指定目標：重播完所有已封存的 WAL' }
             # 設定檔的單引號字串裡 \ 是跳脫字元，路徑的反斜線要寫兩個（審查 B1）
             # （2026-10-24 U4 實跑：原本寫成 Replace('\', '\') 沒有作用，copy 找不到檔案，重播停在基底備份）
             $archiveInConf = $archive.Replace('\', '\\').Replace("'", "''")
@@ -146,7 +150,7 @@ port = $PitrPort
 listen_addresses = 'localhost'
 archive_mode = 'off'
 restore_command = 'copy "$archiveInConf\\%f" "%p"'
-recovery_target_time = '$target'
+$targetLine
 recovery_target_action = 'promote'
 "@ -Encoding utf8
             New-Item -ItemType File -Path (Join-Path $DataDir 'recovery.signal') | Out-Null
@@ -179,11 +183,18 @@ recovery_target_action = 'promote'
                 if ($latest) { Write-Host ((Get-Content $latest.FullName -Tail 15) -join "`n") }
                 & $pgCtl -D $DataDir status | Out-Null
                 if ($LASTEXITCODE -eq 0) { & $pgCtl -D $DataDir stop -m fast | Out-Null }
-                throw "時間點還原沒有完成（重播未到 $target 就結束，或超過 10 分鐘）。伺服器記錄：$($latest.FullName)"
+                $lastTx = ([regex]::Match($text, 'last completed transaction was at log time ([^\r\n]+)')).Groups[1].Value
+                if ($text -match 'recovery ended before configured recovery target was reached') {
+                    throw ("時間點還原沒有完成：備份的 WAL 裡最後一筆交易在 $lastTx，之後沒有任何交易，PostgreSQL 停不在 $target。" +
+                        "請改用更早、而且之後還有人操作過的時間，或不指定 -TargetTime 還原到最新。伺服器記錄：$($latest.FullName)")
+                }
+                throw "時間點還原沒有完成（伺服器中途結束或超過 10 分鐘）。伺服器記錄：$($latest.FullName)"
             }
             $stopped = ([regex]::Match($text, 'recovery stopping (before|after)[^\r\n]*time ([^\r\n]+)')).Value
             if ($stopped) { Write-Host "重播停在：$stopped" }
-            Write-Host "完成：已還原到 $target，暫時執行個體在 localhost:$PitrPort（$([math]::Round($stopwatch.Elapsed.TotalSeconds, 1)) 秒）。" -ForegroundColor Green
+            $lastTx = ([regex]::Match($text, 'last completed transaction was at log time ([^\r\n]+)')).Groups[1].Value
+            $reached = if ($target) { $target } else { "最新（最後一筆交易 $lastTx）" }
+            Write-Host "完成：已還原到 $reached，暫時執行個體在 localhost:$PitrPort（$([math]::Round($stopwatch.Elapsed.TotalSeconds, 1)) 秒）。" -ForegroundColor Green
             Write-Host "檢查：psql -h localhost -p $PitrPort -U postgres -d warehouse_prod"
             Write-Host "取出：pg_dump -h localhost -p $PitrPort -U postgres -d warehouse_prod -Fc -f <檔案>，再以 -Dump 還原成新資料庫"
             Write-Host "結束：& '$pgCtl' stop -D '$DataDir'"
