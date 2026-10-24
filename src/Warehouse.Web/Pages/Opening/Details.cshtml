@@ -53,8 +53,11 @@
             <input type="number" id="Line_Quantity" name="Line.Quantity" value="@Model.Line.Quantity" min="0" step="any" />
             <label for="Line_LotNo">批號</label>
             <input type="text" id="Line_LotNo" name="Line.LotNo" value="@Model.Line.LotNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="批號管理的物料必填" />
-            <label for="Line_ExpiryDate">有效期限</label>
+            @if (Model.LineSettings.LineExpiryEnabled)
+            {
+                <label for="Line_ExpiryDate">有效期限</label>
             <input type="date" id="Line_ExpiryDate" name="Line.ExpiryDate" value="@(Model.Line.ExpiryDate?.ToString("yyyy-MM-dd"))" />
+            }
             <label for="Line_SerialNo">序號</label>
             <input type="text" id="Line_SerialNo" name="Line.SerialNo" value="@Model.Line.SerialNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="序號管理的物料：每個序號一行、數量 1" />
             <span></span>
@@ -118,6 +121,7 @@
     @if (Model.CanEdit)
     {
         <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/picker.js" asp-append-version="true"></script>
         <script src="~/js/doc-scan.js" asp-append-version="true"></script>
         <script src="~/js/scan-field.js" asp-append-version="true"></script>
     }

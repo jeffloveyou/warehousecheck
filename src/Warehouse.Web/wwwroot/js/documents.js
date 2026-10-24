@@ -23,6 +23,48 @@
         applyType();
     }
 
+    // 明細表勾選（M8-03）：全選、勾了才能按「刪除勾選的明細」、顯示勾選數。明細表被掃碼面板重繪後要再綁一次（doc-scan.js 呼叫）
+    var bindLines = function (root) {
+        var all = root.querySelector('#lines-select-all');
+        var button = root.querySelector('#lines-remove-selected');
+        var count = root.querySelector('#lines-selected-count');
+        if (!all || !button) {
+            return;
+        }
+        var boxes = root.querySelectorAll('input.line-select');
+        var update = function () {
+            var checked = 0;
+            boxes.forEach(function (box) { if (box.checked) { checked++; } });
+            button.disabled = checked === 0;
+            all.checked = checked > 0 && checked === boxes.length;
+            if (count) {
+                count.textContent = checked ? '已勾選 ' + checked + ' 行' : '';
+            }
+        };
+        all.addEventListener('change', function () {
+            boxes.forEach(function (box) { box.checked = all.checked; });
+            update();
+        });
+        boxes.forEach(function (box) { box.addEventListener('change', update); });
+        // 一次刪多行先確認行數（沒有 JS 時照常送出）
+        var form = root.querySelector('#lines-bulk-form');
+        if (form) {
+            form.addEventListener('submit', function (event) {
+                var checked = 0;
+                boxes.forEach(function (box) { if (box.checked) { checked++; } });
+                if (!window.confirm('確定刪除勾選的 ' + checked + ' 行明細？')) {
+                    event.preventDefault();
+                }
+            });
+        }
+        update();
+    };
+    window.WhLines = { bind: bindLines };
+    var linesSection = document.querySelector('[data-scan-lines]');
+    if (linesSection) {
+        bindLines(linesSection);
+    }
+
     // 明細表單：「帶入」連結把儲位、批號、序號填進表單
     var setValue = function (id, value) {
         var element = document.getElementById(id);

@@ -9,10 +9,23 @@
 }
 <div id="document-lines-section" data-scan-lines data-version="@Model.Version">
 <h2>明細（@d.Lines.Count 行）</h2>
+@if (Model.CanEdit && d.Lines.Count > 0)
+{
+    @* 勾選多行一次刪除（M8-03）：勾選框用 form 屬性掛到這個表單，每行原本的「刪除」表單不受影響 *@
+    <form method="post" asp-page-handler="RemoveLines" id="lines-bulk-form" class="actions lines-bulk">
+        <label><input type="checkbox" id="lines-select-all" /> 全選</label>
+        <button type="submit" class="secondary" id="lines-remove-selected">刪除勾選的明細</button>
+        <span class="muted" id="lines-selected-count"></span>
+    </form>
+}
 <div class="table-wrap">
     <table id="document-lines">
         <thead>
             <tr>
+                @if (Model.CanEdit)
+                {
+                    <th><span class="visually-hidden">勾選</span></th>
+                }
                 <th>#</th><th>儲位</th>
                 @if (isTransfer)
                 {
@@ -25,6 +38,10 @@
             @foreach (var l in d.Lines)
             {
                 <tr>
+                    @if (Model.CanEdit)
+                    {
+                        <td><input type="checkbox" name="lineIds" value="@l.Id" form="lines-bulk-form" class="line-select" aria-label="勾選第 @l.LineNo 行" /></td>
+                    }
                     <td>@l.LineNo</td>
                     <td>@l.LocationCode</td>
                     @if (isTransfer)
@@ -57,7 +74,7 @@
             }
             @if (d.Lines.Count == 0)
             {
-                <tr><td colspan="@(isTransfer ? 11 : 10)" class="muted">尚無明細。</td></tr>
+                <tr><td colspan="@((isTransfer ? 11 : 10) + (Model.CanEdit ? 1 : 0))" class="muted">尚無明細。</td></tr>
             }
         </tbody>
     </table>

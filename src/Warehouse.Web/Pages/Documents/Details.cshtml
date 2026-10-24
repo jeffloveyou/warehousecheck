@@ -73,7 +73,8 @@
 
 @if (Model.CanEdit)
 {
-    <div class="panel" id="document-add-line-panel">
+    @* 沒有 JS 時的傳統表單（ADR-0003）：有 JS 時 doc-scan.js 收起來，只用上方的明細輸入區 *@
+    <div class="panel" id="document-add-line-panel" data-entry-fallback>
         <h2>新增明細（搜尋＋點選）</h2>
         <form method="get" class="filters" id="item-search-form">
             <input type="text" name="ItemQuery" value="@Model.ItemQuery" maxlength="200" placeholder="輸入或掃描料號，按 Enter 搜尋" aria-label="搜尋料號" autocomplete="off" />
@@ -168,19 +169,22 @@
                 <input type="text" id="Line_LotNo" name="Line.LotNo" value="@Model.Line.LotNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="批號管理的物料必填" />
                 <label for="Line_SerialNo">序號</label>
                 <input type="text" id="Line_SerialNo" name="Line.SerialNo" value="@Model.Line.SerialNo" maxlength="@StockDocumentLine.CodeMaxLength" placeholder="序號管理的物料：每個序號一行、數量 1" />
-                @if (isInbound)
+                @if (isInbound && Model.Settings.LineExpiryEnabled)
                 {
                     <label for="Line_ExpiryDate">有效期限</label>
                     <input type="date" id="Line_ExpiryDate" name="Line.ExpiryDate" value="@(Model.Line.ExpiryDate?.ToString("yyyy-MM-dd"))" />
                 }
                 @if (isTransfer)
                 {
+                    @if (Model.Settings.LineCrossTransferEnabled)
+                    {
                     <label for="Line_TargetWarehouseCode">目的倉庫碼</label>
                     <input type="text" id="Line_TargetWarehouseCode" name="Line.TargetWarehouseCode" value="@Model.Line.TargetWarehouseCode" maxlength="8" placeholder="空白＝同倉；掃別倉儲位 QR 時用 QR 上的倉庫" />
+                    }
                     <label for="Line_TargetLocationCode">目的儲位碼 <span class="required-mark">*</span></label>
                     <input type="text" id="Line_TargetLocationCode" name="Line.TargetLocationCode" value="@Model.Line.TargetLocationCode" maxlength="200" placeholder="可掃別倉儲位 QR" />
                 }
-                @if (isOutbound)
+                @if (isOutbound && Model.Settings.LineReservationEnabled)
                 {
                     <label for="Line_ReservationText">預留 ID</label>
                     <div>
@@ -316,6 +320,7 @@
     @if (Model.CanEdit)
     {
         <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/picker.js" asp-append-version="true"></script>
         <script src="~/js/doc-scan.js" asp-append-version="true"></script>
     }
 }

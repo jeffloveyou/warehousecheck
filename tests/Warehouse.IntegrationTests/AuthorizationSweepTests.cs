@@ -55,6 +55,7 @@ public partial class AuthorizationSweepTests
         ["Documents.DetailsModel.OnPostConfirmAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostRemoveAttachmentAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostRemoveLineAsync"] = Policies.DocumentEdit,
+        ["Documents.DetailsModel.OnPostRemoveLinesAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostReturnAsync"] = Policies.DocumentApprove,
         ["Documents.DetailsModel.OnPostReverseAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostScanAddLineAsync"] = Policies.DocumentEdit,

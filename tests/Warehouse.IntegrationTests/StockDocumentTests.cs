@@ -256,6 +256,60 @@ public class StockDocumentTests
         Assert.Equal("L3", Assert.Single(await queries.LotsAsync(w, itemId, null, "l3", Ct)).LotNo);
     }
 
+    // M8-03：勾選多行一次刪除；其中一行已不存在時整批不刪
+    [Fact]
+    public async Task 勾選刪除明細_一次刪多行_有一行不存在就整批不刪()
+    {
+        var (w, _) = await WarehouseAsync("A-01", "A-02", "A-03");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var doc = await DocAsync(StockDocumentType.Inbound, w, PurchaseIn, [("A-01", item, 1m), ("A-02", item, 2m), ("A-03", item, 3m)], null);
+        var lines = (await Docs(s => s.GetAsync(doc, Ct)))!.Lines.Select(l => l.Id).ToList();
+
+        Assert.Contains("找不到", await MessageAsync(() => Docs(s => s.RemoveLinesAsync(doc, [lines[0], Guid.NewGuid()], Operator, Ct))));
+        Assert.Equal(3, (await Docs(s => s.GetAsync(doc, Ct)))!.Lines.Count);
+
+        await Docs(s => s.RemoveLinesAsync(doc, [lines[0], lines[2]], Operator, Ct));
+        var left = Assert.Single((await Docs(s => s.GetAsync(doc, Ct)))!.Lines);
+        Assert.Equal("A-02", left.LocationCode);
+        Assert.Contains("勾選", await MessageAsync(() => Docs(s => s.RemoveLinesAsync(doc, [], Operator, Ct))));
+    }
+
+    // M8-03：全公司明細欄位開關在服務裡檢查（畫面、API 一致）：關閉後有效期限、預留、跨倉移庫明確拒絕；別人的草稿不能勾選刪除
+    [Fact]
+    public async Task 明細欄位開關_關閉後明確拒絕_別人不能勾選刪除()
+    {
+        var (w, _) = await WarehouseAsync("A-01", "A-02");
+        var (_, c2) = await WarehouseAsync("B-01");
+        var lotItem = await ItemCodeAsync(TrackingMode.Lot);
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await SetLineFieldsAsync(false);
+        try
+        {
+            var inbound = await CreateAsync(StockDocumentType.Inbound, w, PurchaseIn);
+            Assert.Contains("有效期限", await MessageAsync(() =>
+                Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("A-01", lotItem, 1m, "L1", null, new DateOnly(2027, 1, 1)), Operator, Ct))));
+            await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("A-01", item, 5m), Operator, Ct)); // 沒填關閉的欄位照常
+            await ConfirmAsync(inbound, Operator);
+
+            var transfer = await CreateAsync(StockDocumentType.Transfer, w, null);
+            Assert.Contains("跨倉", await MessageAsync(() =>
+                Docs(s => s.AddLineAsync(transfer, new DocumentLineInput("A-01", item, 1m, TargetWarehouseCode: c2, TargetLocationCode: "B-01"), Operator, Ct))));
+            await Docs(s => s.AddLineAsync(transfer, new DocumentLineInput("A-01", item, 1m, TargetLocationCode: "A-02"), Operator, Ct)); // 同倉照常
+
+            var outbound = await CreateAsync(StockDocumentType.Outbound, w, ProductionOut);
+            Assert.Contains("預留", await MessageAsync(() =>
+                Docs(s => s.AddLineAsync(outbound, new DocumentLineInput("A-01", item, 1m, ReservationId: Guid.NewGuid()), Operator, Ct))));
+
+            var line = (await Docs(s => s.GetAsync(transfer, Ct)))!.Lines.Single().Id;
+            Assert.NotNull(await MessageAsync(() => Docs(s => s.RemoveLinesAsync(transfer, [line], Operator2, Ct))));
+            Assert.Single((await Docs(s => s.GetAsync(transfer, Ct)))!.Lines);
+        }
+        finally
+        {
+            await SetLineFieldsAsync(true);
+        }
+    }
+
     // T-M4-02-02：草稿不影響結存；審核關閉時不能送審；出庫不足整張回滾、單據仍是草稿
     [Fact]
     public async Task 草稿不影響結存_不能送審_出庫不足整張回滾()
@@ -662,6 +716,18 @@ public class StockDocumentTests
         catch (DomainRuleException)
         {
             return "domain_rule";
+        }
+    }
+
+    private static async Task SetLineFieldsAsync(bool enabled)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        var service = new SettingsService(db, TimeProvider.System);
+        var current = await service.GetAsync(Ct);
+        var updated = current with { LineExpiryEnabled = enabled, LineReservationEnabled = enabled, LineCrossTransferEnabled = enabled };
+        if (updated != current)
+        {
+            await service.UpdateAsync(current, updated, Admin, Ct);
         }
     }
 

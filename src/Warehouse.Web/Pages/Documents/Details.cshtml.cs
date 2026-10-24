@@ -168,6 +168,14 @@ public class DetailsModel(
             return "已新增明細。";
         }, cancellationToken);
 
+    /// <summary>明細表勾選多行一次刪除（M8-03）。</summary>
+    public Task<IActionResult> OnPostRemoveLinesAsync(Guid id, [FromForm] List<Guid> lineIds, CancellationToken cancellationToken) =>
+        RunAsync(id, Policies.DocumentEdit, async actor =>
+        {
+            await documents.RemoveLinesAsync(id, lineIds, actor, cancellationToken);
+            return $"已刪除 {lineIds.Distinct().Count()} 行明細。";
+        }, cancellationToken);
+
     public Task<IActionResult> OnPostRemoveLineAsync(Guid id, Guid lineId, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
@@ -236,7 +244,10 @@ public class DetailsModel(
             return "已移除附件。";
         }, cancellationToken);
 
-    /// <summary>連續掃碼面板（M5-03）的設定：步驟依單據類型；解析與加入明細都打本頁的 handler。</summary>
+    /// <summary>移庫目的倉庫選單（可作業、啟用中；關閉跨倉移庫時是空的）。</summary>
+    public IReadOnlyList<(string Code, string Name)> TargetWarehouses { get; private set; } = [];
+
+    /// <summary>明細輸入區（M5-03 連續掃碼，M8-03 合併搜尋與選擇清單）的設定：步驟依單據類型；解析、查詢與加入明細都打本頁的 handler。</summary>
     public ScanPanelModel ScanPanel => new(
         Doc.DocType switch
         {
@@ -246,7 +257,17 @@ public class DetailsModel(
         },
         Doc.WarehouseId,
         Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
-        Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!);
+        Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!)
+    {
+        ItemSearchUrl = Url.Page("/Documents/Details", "ItemSearch", new { id = Doc.Id }),
+        LocationsUrl = Url.Page("/Documents/Details", "Locations", new { id = Doc.Id }),
+        LotsUrl = Doc.DocType == StockDocumentType.Inbound ? null : Url.Page("/Documents/Details", "Lots", new { id = Doc.Id }),
+        WarehouseCode = Doc.WarehouseCode,
+        TargetWarehouses = TargetWarehouses,
+        LotSerialEnabled = Settings.LineLotSerialEnabled,
+        ExpiryEnabled = Settings.LineExpiryEnabled,
+        ReservationEnabled = Settings.LineReservationEnabled,
+    };
 
     /// <summary>
     /// 掃碼面板解析一筆掃碼（GET，回傳 JSON）。只做精確比對（<see cref="IScanResolver"/>），物料另附本倉結存或建議儲位、可選的手動預留。
@@ -457,6 +478,15 @@ public class DetailsModel(
             && (await authorization.AuthorizeAsync(User, Policies.DocumentApprove)).Succeeded;
         CanReverse = doc.Status == StockDocumentStatus.Posted && canDocumentEdit && doc.DocType != StockDocumentType.Adjustment;
         CanUpload = Settings.DocumentAttachmentsEnabled && doc.Status != StockDocumentStatus.Cancelled && canDocumentEdit && owner;
+        if (CanEdit && doc.DocType == StockDocumentType.Transfer && Settings.LineCrossTransferEnabled)
+        {
+            // 移庫目的倉庫選單：可作業、啟用中的倉庫（本倉排第一）
+            var operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
+            TargetWarehouses = (await HttpContext.RequestServices.GetRequiredService<IWarehouseService>().ListWarehousesAsync(cancellationToken))
+                .Where(w => w.IsActive && (w.Id == doc.WarehouseId || operable.Allows(w.Id)))
+                .OrderBy(w => w.Id == doc.WarehouseId ? 0 : 1).ThenBy(w => w.Code)
+                .Select(w => (w.Code, w.Name)).ToList();
+        }
         // 關閉附件功能也要讀：既有附件仍可檢視（M6-05）
         Attachments = await attachments.ListAsync(id, cancellationToken);
         if (CanEdit)

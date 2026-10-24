@@ -104,6 +104,11 @@ public sealed class OpeningService(
     public Task AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken) =>
         MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
+            // 全公司的明細欄位開關（M8-03）：關閉有效期限時有值就拒絕（畫面、API 一致）
+            if (input.ExpiryDate is not null && !(await settings.GetAsync(cancellationToken)).LineExpiryEnabled)
+            {
+                throw new DomainRuleException("系統已關閉明細的有效期限欄位。");
+            }
             var location = await FindLocationAsync(doc.WarehouseId, input.LocationCode, cancellationToken);
             var lineId = Guid.NewGuid();
             if (string.IsNullOrWhiteSpace(input.ItemCode))

@@ -375,7 +375,8 @@ public class ScanBarcodeTests
     [Fact]
     public async Task 條碼與儲位碼互斥()
     {
-        var locationCode = "LOC-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        // 中間加字母：六碼剛好全是數字時（約 6%）會像料號格式（如 LOC-123456），被另一條規則先擋下，測試偶發失敗
+        var locationCode = "LOC-X" + Guid.NewGuid().ToString("N")[..5].ToUpperInvariant();
         await WarehouseAsync(locationCode);
         var (item, _) = await ActiveItemAsync();
         var taken = await Assert.ThrowsAsync<ConflictException>(() =>

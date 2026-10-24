@@ -1,23 +1,56 @@
 @model Warehouse.Web.Pages.Shared.ScanPanelModel
 @*
-    連續掃碼面板（M5-03，docs/04 §6）：條碼槍、PDA、手機相機共用。
-    行為在 wwwroot/js/scan-input.js（輸入佇列、焦點、回饋、相機）與 doc-scan.js（步驟與加入明細）。
-    沒有 JS 時面板維持隱藏，下方原本的表單照常可用（ADR-0003：搜尋＋點選必須能完成作業）。
+    明細輸入區（M5-03 連續掃碼，M8-03 合併搜尋與選擇清單，docs/04 §6）：條碼槍、PDA、手機相機、鍵盤搜尋都填同一組欄位。
+    行為在 wwwroot/js/scan-input.js（輸入佇列、焦點、回饋、相機）、picker.js（可輸入縮小範圍的選擇清單）與 doc-scan.js（步驟與加入明細）。
+    沒有 JS 時這一區維持隱藏，下方原本的表單照常可用（ADR-0003：搜尋＋點選必須能完成作業）。
+    data-field：可由全公司設定或每個人自己隱藏的欄位（lot、serial、expiry、reservation、target-warehouse）。
 *@
 <div class="panel scan-panel" id="scan-panel" hidden
      data-mode="@Model.Mode"
      data-warehouse-id="@Model.WarehouseId"
+     data-warehouse-code="@Model.WarehouseCode"
      data-resolve-url="@Model.ResolveUrl"
-     data-add-url="@Model.AddUrl">
-    <h2>連續掃碼</h2>
+     data-add-url="@Model.AddUrl"
+     data-item-search-url="@Model.ItemSearchUrl"
+     data-locations-url="@Model.LocationsUrl"
+     data-lots-url="@Model.LotsUrl"
+     data-lot-serial-enabled="@Model.LotSerialEnabled.ToString().ToLowerInvariant()">
+    <h2>新增明細（掃碼或搜尋）</h2>
     <div class="scan-bar">
         <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
-               enterkeyhint="done" maxlength="200" placeholder="用條碼槍掃描，或輸入後按 Enter" aria-label="掃碼輸入" />
+               enterkeyhint="done" maxlength="200" placeholder="用條碼槍掃描，或輸入料號、儲位後按 Enter" aria-label="掃碼輸入" />
         <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
     </div>
     <div class="scan-options">
-        <label><input type="checkbox" id="scan-accumulate" /> 逐件累加（每掃一次加入或累加數量）</label>
+        <label>加入方式
+            <select id="scan-add-mode" aria-label="加入方式">
+                <option value="manual">手動：欄位齊了跳到數量，按 Enter 加入</option>
+                <option value="auto">自動：欄位齊了就加入（數量用包裝量）</option>
+                <option value="each">逐件累加：每掃一次加一個包裝量</option>
+            </select>
+        </label>
         <label><input type="checkbox" id="scan-mute" /> 靜音</label>
+        <details class="scan-field-menu" id="scan-field-menu">
+            <summary>欄位</summary>
+            <p class="muted">勾掉自己用不到的欄位（只影響這台裝置）。料號需要批號或序號時一律顯示。</p>
+            @if (Model.LotSerialEnabled)
+            {
+                <label><input type="checkbox" data-field-toggle="lot" checked /> 批號</label>
+                <label><input type="checkbox" data-field-toggle="serial" checked /> 序號</label>
+            }
+            @if (Model.ShowExpiry)
+            {
+                <label><input type="checkbox" data-field-toggle="expiry" checked /> 有效期限</label>
+            }
+            @if (Model.ShowReservation)
+            {
+                <label><input type="checkbox" data-field-toggle="reservation" checked /> 預留</label>
+            }
+            @if (Model.ShowTargetWarehouse)
+            {
+                <label><input type="checkbox" data-field-toggle="target-warehouse" checked /> 目的倉庫</label>
+            }
+        </details>
         <span id="scan-caps" class="bad" hidden>大寫鎖定開著（不影響比對）</span>
     </div>
     <div class="message warn" id="scan-focus-warning" hidden>
@@ -32,31 +65,48 @@
     <div class="scan-next" id="scan-next"></div>
 
     <div class="form-grid scan-fields">
-        <label for="scan-location" id="scan-location-label">@Model.LocationLabel</label>
-        <input type="text" id="scan-location" autocomplete="off" maxlength="200" />
-        @if (Model.Mode == "transfer")
-        {
-            <label for="scan-target">目的儲位</label>
-            <input type="text" id="scan-target" autocomplete="off" maxlength="200" />
-        }
         <label for="scan-item">物料</label>
         <div>
-            <input type="text" id="scan-item" autocomplete="off" maxlength="200" />
+            <input type="text" id="scan-item" autocomplete="off" maxlength="200" placeholder="料號、條碼、品名或型號，按 Enter 搜尋" />
             <div class="muted" id="scan-item-info"></div>
+            <div class="scan-results" id="scan-item-results" hidden></div>
         </div>
-        <label for="scan-lot">批號</label>
-        <input type="text" id="scan-lot" autocomplete="off" maxlength="50" />
-        <label for="scan-serial">序號</label>
-        <input type="text" id="scan-serial" autocomplete="off" maxlength="50" />
+        <label for="scan-location" id="scan-location-label">@Model.LocationLabel</label>
+        <div>
+            <input type="text" id="scan-location" autocomplete="off" maxlength="200" placeholder="輸入儲位碼或名稱選擇，或掃儲位 QR" />
+            <div class="muted" id="scan-location-info"></div>
+        </div>
+        @if (Model.Mode == "transfer")
+        {
+            @if (Model.ShowTargetWarehouse)
+            {
+                <label for="scan-target-warehouse" data-field="target-warehouse">目的倉庫</label>
+                <select id="scan-target-warehouse" data-field="target-warehouse">
+                    @foreach (var (code, name) in Model.TargetWarehouses)
+                    {
+                        <option value="@code">@code @name@(code == Model.WarehouseCode ? "（本倉）" : "")</option>
+                    }
+                </select>
+            }
+            <label for="scan-target">目的儲位</label>
+            <div>
+                <input type="text" id="scan-target" autocomplete="off" maxlength="200" placeholder="輸入儲位碼或名稱選擇，或掃儲位 QR" />
+                <div class="muted" id="scan-target-info"></div>
+            </div>
+        }
+        <label for="scan-lot" data-field="lot">批號</label>
+        <input type="text" id="scan-lot" autocomplete="off" maxlength="50" data-field="lot" />
+        <label for="scan-serial" data-field="serial">序號</label>
+        <input type="text" id="scan-serial" autocomplete="off" maxlength="50" data-field="serial" />
         @if (Model.ShowExpiry)
         {
-            <label for="scan-expiry">有效期限</label>
-            <input type="date" id="scan-expiry" />
+            <label for="scan-expiry" data-field="expiry">有效期限</label>
+            <input type="date" id="scan-expiry" data-field="expiry" />
         }
-        @if (Model.Mode == "outbound")
+        @if (Model.ShowReservation)
         {
-            <label for="scan-reservation">預留</label>
-            <select id="scan-reservation"><option value="">（不指定）</option></select>
+            <label for="scan-reservation" data-field="reservation">預留</label>
+            <select id="scan-reservation" data-field="reservation"><option value="">（不指定）</option></select>
         }
         <label for="scan-quantity">數量（基本單位）</label>
         <input type="text" id="scan-quantity" inputmode="decimal" autocomplete="off" maxlength="200" />

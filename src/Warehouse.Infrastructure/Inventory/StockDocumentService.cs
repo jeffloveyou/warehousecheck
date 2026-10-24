@@ -178,6 +178,16 @@ public sealed class StockDocumentService(
         var lineId = Guid.NewGuid();
         await MutateAsync(id, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
+            // 全公司的明細欄位開關（M8-03）：在服務裡檢查，畫面、API 都一樣；關閉的欄位有值就明確拒絕，不靜默改寫或丟掉
+            var current = await settings.GetAsync(cancellationToken);
+            if (!current.LineExpiryEnabled && input.ExpiryDate is not null)
+            {
+                throw new DomainRuleException("系統已關閉明細的有效期限欄位。");
+            }
+            if (!current.LineReservationEnabled && input.ReservationId is not null)
+            {
+                throw new DomainRuleException("系統已關閉出倉指定預留。");
+            }
             var source = await FindLocationAsync(doc.WarehouseId, input.LocationCode, cancellationToken);
             Location? target = null;
             if (doc.DocType == StockDocumentType.Transfer)
@@ -193,6 +203,10 @@ public sealed class StockDocumentService(
                 var targetWarehouseId = targetWarehouseCode is null
                     ? doc.WarehouseId
                     : await FindWarehouseIdAsync(targetWarehouseCode, cancellationToken);
+                if (!current.LineCrossTransferEnabled && targetWarehouseId != doc.WarehouseId)
+                {
+                    throw new DomainRuleException("系統已關閉跨倉移庫：目的儲位必須在同一個倉庫。");
+                }
                 target = await FindLocationAsync(targetWarehouseId, input.TargetLocationCode, cancellationToken, isTarget: true);
                 await WarehouseAccess.EnsureAsync(db, actor, target.WarehouseId, cancellationToken);
             }
@@ -237,6 +251,27 @@ public sealed class StockDocumentService(
             doc.RemoveLine(lineId);
             return Task.FromResult<(string, object?)>(("document.line_remove", new { LineId = lineId }));
         });
+
+    public Task RemoveLinesAsync(Guid id, IReadOnlyCollection<Guid> lineIds, Actor actor, CancellationToken cancellationToken)
+    {
+        if (lineIds.Count == 0)
+        {
+            throw new DomainRuleException("請先勾選要刪除的明細。");
+        }
+        if (lineIds.Count > StockDocument.MaxLines)
+        {
+            throw new DomainRuleException($"一次最多刪除 {StockDocument.MaxLines} 行。");
+        }
+        // 同一個交易：勾選的任一行不存在（已被別人刪除）就整批不刪，避免以為刪了其實少刪
+        return MutateAsync(id, null, actor, editorOnly: true, cancellationToken, (doc, now) =>
+        {
+            foreach (var lineId in lineIds.Distinct())
+            {
+                doc.RemoveLine(lineId);
+            }
+            return Task.FromResult<(string, object?)>(("document.line_remove", new { LineIds = lineIds.Distinct().ToList() }));
+        });
+    }
 
     public Task SubmitAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
         IdempotentAsync(SubmitCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken, async (doc, current, now) =>

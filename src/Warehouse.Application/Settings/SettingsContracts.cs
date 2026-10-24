@@ -44,6 +44,18 @@ public sealed record SystemSettings(
     /// <summary>盲盤（預設 true）：輸入實盤量的畫面與 API 不顯示帳面量，倉庫主管審核時才看得到差異。</summary>
     public bool StocktakeBlindCount { get; init; } = true;
 
+    /// <summary>明細輸入欄位開關（M8-03，預設都開）：關閉的欄位在明細輸入區不顯示；料號本身需要批號或序號時仍會顯示並必填。</summary>
+    public bool LineExpiryEnabled { get; init; } = true;
+
+    /// <summary>出倉明細可指定手動預留。</summary>
+    public bool LineReservationEnabled { get; init; } = true;
+
+    /// <summary>移庫可移到其他倉庫（關閉時目的儲位只能在同一倉庫）。</summary>
+    public bool LineCrossTransferEnabled { get; init; } = true;
+
+    /// <summary>顯示批號、序號欄（關閉時只在料號需要時顯示）。</summary>
+    public bool LineLotSerialEnabled { get; init; } = true;
+
     /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
     public string PrintCompanyName { get; init; } = string.Empty;
 
@@ -114,6 +126,10 @@ public static class SettingKeys
     public const string PrintCompanyName = "print.company_name";
     public const string AllowSelfApproveStocktake = "stock.stocktake.allow_self_approval";
     public const string StocktakeBlindCount = "stock.stocktake.blind_count";
+    public const string LineExpiryEnabled = "stock.documents.line.expiry.enabled";
+    public const string LineReservationEnabled = "stock.documents.line.reservation.enabled";
+    public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
+    public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
     public const string RetentionAuditYears = "retention.audit_years";
     public const string RetentionLoginDays = "retention.login_days";
     public const string RetentionProcessedCommandsDays = "retention.processed_commands_days";
