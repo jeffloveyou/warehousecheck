@@ -25,7 +25,9 @@ public class ItemSchemaTests
         var ct = TestContext.Current.CancellationToken;
         await using var db = MigratedDatabaseFixture.CreateContext();
 
-        var units = await db.Units.OrderBy(u => u.Code).Select(u => u.Code).ToListAsync(ct);
+        // 只看種子資料：同一個集合的其他測試會新增單位（如 U017），執行順序改變時不應影響這項
+        var seedUnitIds = SeedData.Units.Select(u => u.Id).ToList();
+        var units = await db.Units.Where(u => seedUnitIds.Contains(u.Id)).OrderBy(u => u.Code).Select(u => u.Code).ToListAsync(ct);
         var prefixes = await db.ItemCategories.Select(c => c.ItemCodePrefix).ToListAsync(ct);
 
         Assert.Equal(["BOX", "G", "KG", "L", "M", "PCS", "ROLL", "SET"], units);

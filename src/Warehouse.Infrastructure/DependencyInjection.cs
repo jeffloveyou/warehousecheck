@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddSingleton<IPostingFailureLog, PostingFailureLog>();
         services.AddScoped<IStockAnomalyService, StockAnomalyService>();
         services.AddSingleton<IQrCodeRenderer, Warehouse.Infrastructure.Labels.QrSvgRenderer>();
+        services.AddScoped<Warehouse.Infrastructure.Maintenance.DataRetentionService>();
         services.AddScoped<StockReservationService>();
         services.AddScoped<IStockReservationService>(sp => sp.GetRequiredService<StockReservationService>());
         services.AddScoped<IItemNegativePolicyService>(sp => sp.GetRequiredService<StockReservationService>());

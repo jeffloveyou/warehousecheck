@@ -76,6 +76,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
     private static SystemSettings From(IReadOnlyDictionary<string, string> values)
     {
         bool Flag(string key, bool fallback) => values.TryGetValue(key, out var v) ? v == "true" : fallback;
+        int Number(string key, int fallback) => values.TryGetValue(key, out var v) && int.TryParse(v, out var n) ? n : fallback;
         return new SystemSettings(
             Flag(SettingKeys.AllowSelfApproveOpening, Defaults.AllowSelfApproveOpening),
             Flag(SettingKeys.LocationNotesEnabled, Defaults.LocationNotesEnabled),
@@ -96,6 +97,11 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             AllowSelfApproveStocktake = Flag(SettingKeys.AllowSelfApproveStocktake, Defaults.AllowSelfApproveStocktake),
             StocktakeBlindCount = Flag(SettingKeys.StocktakeBlindCount, Defaults.StocktakeBlindCount),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
+            RetentionAuditYears = Number(SettingKeys.RetentionAuditYears, Defaults.RetentionAuditYears),
+            RetentionLoginDays = Number(SettingKeys.RetentionLoginDays, Defaults.RetentionLoginDays),
+            RetentionProcessedCommandsDays = Number(SettingKeys.RetentionProcessedCommandsDays, Defaults.RetentionProcessedCommandsDays),
+            RetentionPostingFailuresDays = Number(SettingKeys.RetentionPostingFailuresDays, Defaults.RetentionPostingFailuresDays),
+            RetentionImportBatchesDays = Number(SettingKeys.RetentionImportBatchesDays, Defaults.RetentionImportBatchesDays),
         };
     }
 
@@ -104,7 +110,31 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         SystemSettings original, SystemSettings updated, SystemSettings current) =>
         Flags(original, updated, current)
             .Select(p => (p.Key, Text(p.Before), Text(p.After), Text(p.Current)))
-            .Append((SettingKeys.PrintCompanyName, Clean(original.PrintCompanyName), Clean(updated.PrintCompanyName), Clean(current.PrintCompanyName)));
+            .Append((SettingKeys.PrintCompanyName, Clean(original.PrintCompanyName), Clean(updated.PrintCompanyName), Clean(current.PrintCompanyName)))
+            .Concat(Numbers(original, updated, current)
+                .Select(p => (p.Key, p.Before.ToString(),
+                    p.After == p.Before ? p.After.ToString() : Checked(p.After, p.Min, p.Max, p.Label), p.Current.ToString())));
+
+    /// <summary>數字設定：超出範圍丟錯（不默默改成下限），訊息說明下限的理由在設定頁。</summary>
+    private static string Checked(int value, int min, int max, string label) =>
+        value >= min && value <= max
+            ? value.ToString()
+            : throw new DomainRuleException($"{label}必須介於 {min} 到 {max}。");
+
+    private static IEnumerable<(string Key, int Before, int After, int Current, int Min, int Max, string Label)> Numbers(
+        SystemSettings original, SystemSettings updated, SystemSettings current) =>
+    [
+        (SettingKeys.RetentionAuditYears, original.RetentionAuditYears, updated.RetentionAuditYears, current.RetentionAuditYears,
+            RetentionLimits.AuditYearsMin, RetentionLimits.YearsMax, "操作日誌保留年數"),
+        (SettingKeys.RetentionLoginDays, original.RetentionLoginDays, updated.RetentionLoginDays, current.RetentionLoginDays,
+            RetentionLimits.LoginDaysMin, RetentionLimits.DaysMax, "登入紀錄保留天數"),
+        (SettingKeys.RetentionProcessedCommandsDays, original.RetentionProcessedCommandsDays, updated.RetentionProcessedCommandsDays, current.RetentionProcessedCommandsDays,
+            RetentionLimits.ProcessedCommandsDaysMin, RetentionLimits.DaysMax, "冪等紀錄保留天數"),
+        (SettingKeys.RetentionPostingFailuresDays, original.RetentionPostingFailuresDays, updated.RetentionPostingFailuresDays, current.RetentionPostingFailuresDays,
+            RetentionLimits.PostingFailuresDaysMin, RetentionLimits.DaysMax, "過帳失敗紀錄保留天數"),
+        (SettingKeys.RetentionImportBatchesDays, original.RetentionImportBatchesDays, updated.RetentionImportBatchesDays, current.RetentionImportBatchesDays,
+            RetentionLimits.ImportBatchesDaysMin, RetentionLimits.DaysMax, "匯入批次保留天數"),
+    ];
 
     private static string Text(bool value) => value ? "true" : "false";
 
