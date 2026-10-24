@@ -200,5 +200,22 @@ function Set-SlotState {
     Set-FileAtomically (Join-Path $Root 'deploy-state.json') ($state | ConvertTo-Json -Depth 4)
 }
 
+<#
+.SYNOPSIS
+    讀取子程序轉向到檔案的輸出。子程序可能寫 UTF-8（dotnet run、自行設定編碼的程式），
+    也可能寫主控台字碼頁（例如 950）；先以嚴格 UTF-8 解碼，失敗才用主控台字碼頁，避免中文亂碼、解析不到結果。
+#>
+function Read-ChildOutput {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) { return '' }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    try {
+        return [Text.UTF8Encoding]::new($false, $true).GetString($bytes).TrimStart([char]0xFEFF)
+    } catch [Text.DecoderFallbackException] {
+        # 主控台 OEM 字碼頁（繁中 Windows 為 950）；[Console]::OutputEncoding 在 UTF-8 視窗會是 65001，不能當備案
+        return [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetString($bytes)
+    }
+}
+
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
-    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState
+    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput
