@@ -134,21 +134,19 @@ WHERE c.oid = 'public.audit_logs'::regclass AND r.rolname = current_user
         throw "UiCheck 超過 15 分鐘沒有結束，已停止（輸出在 $uiLog）。"
     }
     $uiCode = $ui.ExitCode
-    # 子程序轉向輸出用主控台字碼頁（例如 950），不是 UTF-8
-    $uiOutput = (Get-Content $uiLog -Raw -Encoding ([Console]::OutputEncoding)) + (Get-Content "$uiLog.err" -Raw -Encoding ([Console]::OutputEncoding))
+    # 子程序轉向輸出可能是 UTF-8（dotnet run）或主控台字碼頁（950），自動判斷
+    $uiOutput = (Read-ChildOutput $uiLog) + (Read-ChildOutput "$uiLog.err")
     Write-Report "$uiOutput".Trim()
-    $failedLine = ("$uiOutput" -split "`n" | Where-Object { $_ -match '^(全部通過|失敗 \d+ 項)' } | Select-Object -Last 1)
+    $failedLine = ("$uiOutput" -split "\r?\n" | Where-Object { $_ -match '^(全部通過|失敗 \d+ 項)' } | Select-Object -Last 1)
     Add-Result '2 畫面冒煙（UiCheck）' ($uiCode -eq 0) "結束碼 $uiCode；$failedLine"
 
-    # UiCheck 建的三個測試帳號（含系統管理員；密碼有固定前綴）立即停用
-    if ("$uiOutput" -match '資料：倉庫 UI([0-9A-F]{5})') {
-        $suffix = $Matches[1].ToLowerInvariant()
-        foreach ($name in "uiop$suffix", "uiwm$suffix", "uiad$suffix") {
-            & dotnet (Join-Path $webDir 'bin\Debug\net10.0\Warehouse.Web.dll') users disable --user $name 2>&1 | Out-Null
-            Write-Report "  停用測試帳號 $name：$(if ($LASTEXITCODE -eq 0) { '完成' } else { "失敗（結束碼 $LASTEXITCODE），請到 /Admin/Users 停用" })"
-        }
-    } else {
-        Write-Report '  找不到 UiCheck 建立的測試帳號代碼；請到 /Admin/Users 停用 uiop／uiwm／uiad 開頭的帳號。'
+    # UiCheck 建的測試帳號（含系統管理員；密碼有固定前綴）一律停用，包含之前執行留下的
+    $testUsers = @(& $psql @connect -c "SELECT user_name FROM users WHERE is_active AND user_name ~ '^ui(op|wm|ad)[0-9a-f]{5}$' ORDER BY 1" | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { Write-Report '  ✘ 查不到測試帳號清單；請到 /Admin/Users 停用 uiop／uiwm／uiad 開頭的帳號。' }
+    foreach ($name in $testUsers) {
+        $name = "$name".Trim()
+        & dotnet (Join-Path $webDir 'bin\Debug\net10.0\Warehouse.Web.dll') users disable --user $name 2>&1 | Out-Null
+        Write-Report "  停用測試帳號 $name：$(if ($LASTEXITCODE -eq 0) { '完成' } else { "失敗（結束碼 $LASTEXITCODE），請到 /Admin/Users 停用" })"
     }
     Stop-Process -Id $web.Id -ErrorAction SilentlyContinue
     $web = $null
