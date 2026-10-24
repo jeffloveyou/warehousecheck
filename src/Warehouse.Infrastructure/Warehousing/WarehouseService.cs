@@ -60,7 +60,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     {
         // 先鎖倉庫列再查結存：正在過帳的交易（持有 FOR SHARE）commit 之後才檢查，看得到它寫入的結存（M3-03 審查 #2）
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await DbCommands.ExecuteAsync(db, "SELECT 1 FROM warehouses WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
+        await LockForUpdateAsync(id, cancellationToken);
         var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, id, cancellationToken);
         if (warehouse.IsActive == isActive)
@@ -97,7 +97,7 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
     {
         // 和停用相同：先鎖倉庫列（過帳、建立預留、開單、盤點、期初、新增儲位等都會先取倉庫 FOR SHARE，見 WarehouseLock），再檢查，檢查結果在 commit 前不會被改變
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await DbCommands.ExecuteAsync(db, "SELECT 1 FROM warehouses WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
+        await LockForUpdateAsync(id, cancellationToken);
         var warehouse = await LoadAsync(db.Warehouses, id, expectedVersion, "warehouse", "找不到倉庫。", cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, id, cancellationToken);
         if (warehouse.IsDeleted)
@@ -163,12 +163,12 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
             await db.Locations.Where(l => l.WarehouseId == id).ExecuteDeleteAsync(cancellationToken);
             await db.Warehouses.Where(w => w.Id == id).ExecuteDeleteAsync(cancellationToken);
         }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.ForeignKeyViolation)
+        catch (Exception ex) when ((ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
             // 保底：上面的檢查漏掉某種引用時，資料庫的外鍵（RESTRICT）會擋下，整個交易回復（資料表名稱只進日誌，不給使用者看）
             throw new DomainRuleException("倉庫的資料仍被其他紀錄引用，不能刪除；請改用停用。");
         }
-        catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.LockNotAvailable)
+        catch (Exception ex) when ((ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState is PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.LockNotAvailable)
         {
             throw new DomainRuleException("倉庫正在被其他作業使用（過帳、盤點等），請稍後再試。");
         }
@@ -286,6 +286,23 @@ public sealed class WarehouseService(WarehouseDbContext db, TimeProvider clock) 
         if (transaction is not null)
         {
             await transaction.CommitAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 停用、刪除倉庫前鎖倉庫列（FOR UPDATE）。最多等 5 秒：大檔匯入、試算會在整批交易中持有倉庫 FOR SHARE，
+    /// 不讓管理員的請求一直等到逾時（M8-01 第二輪審查 B）。
+    /// </summary>
+    private async Task LockForUpdateAsync(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DbCommands.ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
+            await DbCommands.ExecuteAsync(db, "SELECT 1 FROM warehouses WHERE id = @id FOR UPDATE", cancellationToken, DbCommands.Param("id", id));
+        }
+        catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.LockNotAvailable)
+        {
+            throw new DomainRuleException("倉庫正在被其他作業使用（過帳、匯入、盤點等），請稍後再試。");
         }
     }
 

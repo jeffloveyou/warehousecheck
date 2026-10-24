@@ -8,7 +8,12 @@ namespace Warehouse.Infrastructure.Warehousing;
 /// <summary>
 /// 寫入前鎖住倉庫列（FOR SHARE）並在鎖內確認倉庫可用（M8-01 審查 #1）：停用、刪除倉庫時會先取 FOR UPDATE，
 /// 所以「先檢查、後新增」（開單、盤點、期初、新增儲位、常用儲位、儲位圖片、帳號範圍）不會在刪除的同時插入資料。
-/// 鎖的順序一律「倉庫 → 儲位」，避免和刪除互相等待（死結）。必須在交易內呼叫。
+/// 鎖的順序（M8-01 第二輪審查 D）：
+/// - 倉庫鎖除了停用、刪除（FOR UPDATE）以外一律 FOR SHARE，彼此相容不互等。
+/// - 過帳、期初確認是「儲位 FOR UPDATE → 倉庫 FOR SHARE」；這裡的路徑是「倉庫 FOR SHARE → 儲位」。兩種並存安全的前提：
+///   停用與標記刪除不鎖儲位；真刪除只在沒有未結束單據時才刪儲位，萬一死結（40P01）轉成「請稍後再試」。
+/// - 不要把這些路徑的倉庫鎖改成 FOR UPDATE，否則會和過帳形成死結。
+/// 必須在交易內呼叫。
 /// </summary>
 internal static class WarehouseLock
 {
