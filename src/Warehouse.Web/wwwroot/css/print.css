@@ -35,7 +35,8 @@ body { margin: 0; font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; fon
 .label-sheet {
     display: grid;
     width: 194mm;
-    height: 281mm;
+    height: 279mm; /* 可列印高度 281mm 留 2mm：剛好等高時 Chrome 的捨入會多出一張空白頁 */
+    overflow: hidden;
     margin: 0 auto 8mm;
     box-sizing: border-box;
     page-break-after: always;
@@ -60,7 +61,7 @@ body { margin: 0; font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; fon
 .label-small .label-code { font-size: 13pt; }
 .label-large .label-code { font-size: 20pt; }
 .label-warehouse, .label-company { font-size: 8pt; color: #555; }
-.label-name { font-size: 9pt; word-break: break-all; }
+.label-name { font-size: 9pt; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* 具名頁面：只有標籤頁改成 8mm 邊界，其他列印頁維持上面的 12mm（Chrome 85+） */
 .label-sheet { page: labels; }
 @page labels { size: A4 portrait; margin: 8mm; }

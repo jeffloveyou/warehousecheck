@@ -4,6 +4,7 @@ using Warehouse.Application.Abstractions;
 using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain.Warehousing;
+using Warehouse.Web.Security;
 
 namespace Warehouse.Web.Pages.Warehouses;
 
@@ -53,23 +54,38 @@ public class LabelsModel(IWarehouseService warehouses, IQrCodeRenderer qr, ISett
 
     public string CompanyName { get; private set; } = "";
 
-    public async Task OnGetAsync(CancellationToken cancellationToken)
+    public async Task<IActionResult> OnGetAsync(CancellationToken cancellationToken)
     {
-        if (!Layouts.ContainsKey(Layout))
+        // 空字串會被綁定成 null（審查 1）
+        if (Layout is null || !Layouts.ContainsKey(Layout))
         {
             Layout = "small";
         }
 
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
-        CompanyName = (await settings.GetAsync(cancellationToken)).PrintCompanyName;
-        if (WarehouseId is null)
+        // 第一次開頁（網址沒有 Status）預設只印「有效」的儲位；選「全部狀態」送出時 Status 參數是空字串，照全部
+        if (!Request.Query.ContainsKey(nameof(Status)))
         {
-            return; // 先選倉庫，避免一次列出所有倉庫的儲位
+            Status = LocationStatus.Available;
+        }
+
+        // 倉庫範圍（M6-01b）：標籤是儲位維護作業，只列可作業的倉庫；手改網址指定其他倉庫則拒絕
+        var operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
+        Warehouses = (await warehouses.ListWarehousesAsync(cancellationToken)).Where(w => operable.Allows(w.Id)).ToList();
+        CompanyName = (await settings.GetAsync(cancellationToken)).PrintCompanyName;
+        if (WarehouseId is not { } warehouseId)
+        {
+            return Page(); // 先選倉庫，避免一次列出所有倉庫的儲位
+        }
+
+        if (!operable.Allows(warehouseId))
+        {
+            return Forbid();
         }
 
         Result = await warehouses.SearchLocationsAsync(
             new LocationSearch(WarehouseId, Keyword, Status, PageNumber, PerSheet * SheetsPerPage), cancellationToken);
         Labels = Result.Items.Select(l => (l, qr.RenderSvg(l.QrContent))).ToList();
+        return Page();
     }
 
     public string PageUrl(int page) =>

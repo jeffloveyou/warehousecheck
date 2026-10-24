@@ -8,7 +8,8 @@ namespace Warehouse.Infrastructure.Labels;
 /// <summary>
 /// <see cref="IQrCodeRenderer"/> 實作：QRCoder 1.6.0（MIT；net6.0 以上沒有相依套件）只用來編碼，
 /// SVG 由模組矩陣自己組（同一列連續的黑格合併成一個矩形），不經過 System.Drawing，Windows／Linux 結果相同。
-/// 一個儲位碼約 25×25 格（含靜區 33×33），SVG 約 1～2 KB。
+/// 實測 SVG 1.8～2.4 KB（小標籤一頁 96 個約 230 KB）。
+/// 頁面以 Html.Raw 輸出：SVG 只能含數字座標，**不可加入任何未編碼的文字**（例如 &lt;title&gt;儲位碼），否則會變成 XSS。
 /// </summary>
 public sealed class QrSvgRenderer : IQrCodeRenderer
 {

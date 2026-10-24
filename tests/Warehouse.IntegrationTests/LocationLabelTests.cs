@@ -95,6 +95,8 @@ public partial class LocationLabelTests
         var filtered = await web.GetStringAsync($"/Warehouses/Labels?WarehouseId={warehouse}&q=B-");
         Assert.Single(Regex.Matches(filtered, "<svg "));
         Assert.Contains("location-labels-link", await web.GetStringAsync($"/Warehouses/Locations?WarehouseId={warehouse}"));
+        // 手改網址的空白版型不出錯（審查 1）；未指定狀態時預設只印有效儲位
+        Assert.Equal(3, Regex.Matches(await web.GetStringAsync($"/Warehouses/Labels?WarehouseId={warehouse}&Layout="), "<svg ").Count);
 
         foreach (var role in new[] { Roles.Operator, Roles.ItemManager, Roles.Viewer })
         {
