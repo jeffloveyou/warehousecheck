@@ -102,7 +102,7 @@ public class IndexModel(
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken); // 歷史查詢可選已刪除的倉庫
         Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
         Result = await documents.ListAsync(Type, Status, WarehouseId, PageNumber, cancellationToken);
         CanEdit = (await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded;

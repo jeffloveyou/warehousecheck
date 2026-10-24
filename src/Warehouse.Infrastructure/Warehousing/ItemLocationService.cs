@@ -26,6 +26,7 @@ public sealed class ItemLocationService(WarehouseDbContext db, TimeProvider cloc
             where x.ItemId == itemId
             join l in db.Locations on x.LocationId equals l.Id
             join w in db.Warehouses on x.WarehouseId equals w.Id
+            where w.DeletedAt == null
             orderby w.Code, x.IsDefault descending, l.Code
             select new ItemLocationRow(x.Id, w.Id, w.Code, l.Id, l.Code, l.Status, x.IsDefault))
             .ToListAsync(cancellationToken);
@@ -34,6 +35,8 @@ public sealed class ItemLocationService(WarehouseDbContext db, TimeProvider cloc
         Guid itemId, Guid warehouseId, string locationCode, bool isDefault, Actor actor, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // 先鎖倉庫（與刪除倉庫同順序）：已刪除的倉庫不能再設定常用倉位（M8-01 審查 #3）
+        await WarehouseLock.LockNotDeletedAsync(db, [warehouseId], cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         if (!await db.Items.AnyAsync(i => i.Id == itemId && i.Status == ItemStatus.Active, cancellationToken))
         {

@@ -35,6 +35,36 @@
         <p class="muted">代碼 1～8 碼大寫英數，建立後不可修改（儲位 QR 內容會用到）。</p>
     </form>
 }
+@if (Model.CanManage && Model.DeleteTarget is { } target)
+{
+    <form method="post" asp-page-handler="Delete" class="panel" id="warehouse-delete-confirm">
+        <h2>刪除倉庫 @target.Code @target.Name？</h2>
+        <input type="hidden" name="id" value="@target.Id" />
+        <input type="hidden" name="version" value="@target.Version" />
+        <ul>
+            <li>倉庫裡所有儲位的結存都必須是 0，而且沒有未結束的預留、草稿或送審中的單據、進行中的盤點。</li>
+            <li>從未使用過的倉庫：連同它的 @target.LocationCount 個儲位、儲位圖片、常用儲位設定一起刪除，不能復原。</li>
+            <li>使用過的倉庫：從清單與選單移除並停用；歷史單據、異動照常保留，倉庫碼 @target.Code 不能再給新倉庫使用，之後可以還原。</li>
+        </ul>
+        <div class="actions">
+            <button type="submit" class="danger" id="warehouse-delete-submit">確定刪除</button>
+            <a href="/Warehouses">取消</a>
+        </div>
+    </form>
+}
+@if (Model.CanManage)
+{
+    <p>
+        @if (Model.ShowDeleted)
+        {
+            <a href="/Warehouses">只看使用中的倉庫</a>
+        }
+        else
+        {
+            <a href="/Warehouses?deleted=true" id="warehouse-show-deleted">顯示已刪除的倉庫</a>
+        }
+    </p>
+}
 <div class="table-wrap">
     <table id="warehouse-list">
         <thead><tr><th>代碼</th><th>名稱</th><th>儲位數</th><th>狀態</th><th></th></tr></thead>
@@ -45,10 +75,18 @@
                     <td>@w.Code</td>
                     <td>@w.Name</td>
                     <td><a href="/Warehouses/Locations?warehouseId=@w.Id">@w.LocationCount</a></td>
-                    <td>@(w.IsActive ? "啟用" : "停用")</td>
+                    <td>@(w.IsDeleted ? "已刪除" : w.IsActive ? "啟用" : "停用")</td>
                     <td>
                         <a href="/Warehouses/Locations?warehouseId=@w.Id">儲位</a>
-                        @if (Model.CanManage)
+                        @if (Model.CanManage && w.IsDeleted)
+                        {
+                            <form method="post" asp-page-handler="Restore" class="inline">
+                                <input type="hidden" name="id" value="@w.Id" />
+                                <input type="hidden" name="version" value="@w.Version" />
+                                <button type="submit" class="link">還原</button>
+                            </form>
+                        }
+                        else if (Model.CanManage)
                         {
                             <a href="/Warehouses?edit=@w.Id">改名</a>
                             <form method="post" asp-page-handler="Toggle" class="inline">
@@ -57,6 +95,7 @@
                                 <input type="hidden" name="isActive" value="@((!w.IsActive).ToString().ToLowerInvariant())" />
                                 <button type="submit" class="link">@(w.IsActive ? "停用" : "啟用")</button>
                             </form>
+                            <a href="/Warehouses?delete=@w.Id" class="danger-link">刪除</a>
                         }
                     </td>
                 </tr>

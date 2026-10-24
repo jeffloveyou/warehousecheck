@@ -6,6 +6,7 @@ using Warehouse.Application.Accounts;
 using Warehouse.Application.Errors;
 using Warehouse.Domain;
 using Warehouse.Infrastructure.Persistence;
+using Warehouse.Infrastructure.Warehousing;
 
 namespace Warehouse.Infrastructure.Identity;
 
@@ -174,10 +175,8 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
             // 鎖帳號列：兩位管理員同時設定同一帳號時排隊，不會同時新增同一列撞主鍵（審查 Y5）
             await db.Database.ExecuteSqlAsync($"SELECT 1 FROM users WHERE id = {id} FOR UPDATE", cancellationToken);
             var user = await FindAsync(id);
-            if (wanted.Count > 0 && await db.Warehouses.CountAsync(w => wanted.Contains(w.Id), cancellationToken) != wanted.Count)
-            {
-                throw new DomainRuleException("有不存在的倉庫，請重新整理後再選。");
-            }
+            // 鎖住要指定的倉庫（FOR SHARE）並確認沒有被刪除：刪除倉庫時不會同時把它加進帳號範圍（M8-01 審查 #1）
+            await WarehouseLock.LockNotDeletedAsync(db, wanted, cancellationToken);
             var existing = await db.UserWarehouses.Where(x => x.UserId == id).ToListAsync(cancellationToken);
             var before = new { user.AllWarehouses, Warehouses = existing.Select(x => x.WarehouseId).Order().ToList() };
             db.UserWarehouses.RemoveRange(existing.Where(x => !wanted.Contains(x.WarehouseId)));

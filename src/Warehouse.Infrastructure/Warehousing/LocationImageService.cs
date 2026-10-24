@@ -78,6 +78,8 @@ public sealed class LocationImageService(
 
         // FOR NO KEY UPDATE：讓同一儲位的上傳排隊計數，但不擋其他交易對這個儲位的外鍵檢查（過帳、常用倉位，審查 Y3）
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // 先鎖倉庫再鎖儲位（與刪除倉庫同順序）；已刪除倉庫的儲位不能再上傳（M8-01 審查 #3）
+        await WarehouseLock.LockNotDeletedAsync(db, [locationWarehouse.Value], cancellationToken);
         await DbCommands.ExecuteAsync(db, "SELECT 1 FROM locations WHERE id = @id FOR NO KEY UPDATE", cancellationToken,
             DbCommands.Param("id", locationId));
         await EnsureBelowLimitAsync(locationId, cancellationToken);

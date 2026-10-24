@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
@@ -66,6 +67,128 @@ public class StockDocumentTests
         Assert.Matches("^IN-[0-9]{6}$", (await Docs(s => s.GetAsync(inbound, Ct)))!.DocNo);
         Assert.Matches("^OUT-[0-9]{6}$", (await Docs(s => s.GetAsync(outbound, Ct)))!.DocNo);
         _ = c1;
+    }
+
+    // M8-01：從未使用的倉庫連同儲位真刪除；刪除後列表看不到、帳號範圍與稽核正確
+    [Fact]
+    public async Task 刪除倉庫_從未使用_連同儲位刪除()
+    {
+        var (w, code) = await WarehouseAsync("A-01", "A-02");
+        var version = (await Warehouses(s => s.ListWarehousesAsync(Ct))).Single(x => x.Id == w).Version;
+
+        Assert.Equal(WarehouseDeleteResult.Removed, await Warehouses(s => s.DeleteWarehouseAsync(w, version, Manager, Ct)));
+
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        Assert.False(await db.Warehouses.AnyAsync(x => x.Id == w, Ct));
+        Assert.False(await db.Locations.AnyAsync(l => l.WarehouseId == w, Ct));
+        Assert.True(await db.AuditLogs.AnyAsync(a => a.Action == "warehouse.delete" && a.EntityId == w.ToString(), Ct));
+        // 倉庫碼釋出，可以建立同代碼的新倉庫
+        await Warehouses(s => s.CreateWarehouseAsync(new WarehouseInput(code, "重建"), Manager, Ct));
+    }
+
+    // M8-01：有庫存不能刪；出清後「刪除」＝移除：列表與選單看不到、歷史單據仍顯示倉庫碼、不能直接啟用、可還原
+    [Fact]
+    public async Task 刪除倉庫_有庫存拒絕_清空後移除_歷史保留_可還原()
+    {
+        var (w, code) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var inbound = await DocAsync(StockDocumentType.Inbound, w, PurchaseIn, ("A-01", item, 5m));
+        await ConfirmAsync(inbound, Operator);
+        async Task<uint> WarehouseVersionAsync() => (await Warehouses(s => s.ListWarehousesAsync(true, Ct))).Single(x => x.Id == w).Version;
+
+        var stocked = await MessageAsync(async () => await Warehouses(async s => await s.DeleteWarehouseAsync(w, await WarehouseVersionAsync(), Manager, Ct)));
+        Assert.Contains("還有庫存", stocked);
+
+        var outbound = await DocAsync(StockDocumentType.Outbound, w, ProductionOut, ("A-01", item, 5m));
+        await ConfirmAsync(outbound, Operator);
+        Assert.Equal(WarehouseDeleteResult.Hidden,
+            await Warehouses(async s => await s.DeleteWarehouseAsync(w, await WarehouseVersionAsync(), Manager, Ct)));
+
+        Assert.DoesNotContain(await Warehouses(s => s.ListWarehousesAsync(Ct)), x => x.Id == w);
+        var hidden = (await Warehouses(s => s.ListWarehousesAsync(true, Ct))).Single(x => x.Id == w);
+        Assert.Equal((true, false), (hidden.IsDeleted, hidden.IsActive));
+        Assert.Equal(code, (await Docs(s => s.GetAsync(inbound, Ct)))!.WarehouseCode);
+        Assert.Contains("請先還原", await MessageAsync(async () =>
+            await Warehouses(async s => await s.SetWarehouseActiveAsync(w, await WarehouseVersionAsync(), true, Manager, Ct))));
+        Assert.Contains("倉庫代碼已存在", await MessageAsync(() => Warehouses(s => s.CreateWarehouseAsync(new WarehouseInput(code, "重用"), Manager, Ct))));
+
+        await Warehouses(async s => await s.RestoreWarehouseAsync(w, await WarehouseVersionAsync(), Manager, Ct));
+        var restored = (await Warehouses(s => s.ListWarehousesAsync(Ct))).Single(x => x.Id == w);
+        Assert.Equal((false, false), (restored.IsDeleted, restored.IsActive));
+    }
+
+    // M8-01：草稿單、移入這個倉庫的草稿移庫單、未結束的預留都會擋下刪除
+    [Fact]
+    public async Task 刪除倉庫_有草稿單或移入的移庫單或預留_拒絕()
+    {
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        async Task<string?> TryDeleteAsync() => await MessageAsync(async () =>
+            await Warehouses(async s => await s.DeleteWarehouseAsync(
+                w, (await s.ListWarehousesAsync(true, Ct)).Single(x => x.Id == w).Version, Manager, Ct)));
+
+        var draft = await DocAsync(StockDocumentType.Inbound, w, PurchaseIn, ("A-01", item, 1m));
+        Assert.Contains("草稿或送審中", await TryDeleteAsync());
+        await Docs(async s => await s.CancelAsync(draft, await VersionAsync(draft), Operator, Ct));
+
+        var (source, _) = await WarehouseAsync("S-01");
+        var inbound = await DocAsync(StockDocumentType.Inbound, source, PurchaseIn, ("S-01", item, 3m));
+        await ConfirmAsync(inbound, Operator);
+        var targetCode = (await Warehouses(s => s.ListWarehousesAsync(Ct))).Single(x => x.Id == w).Code;
+        var transfer = await CreateAsync(StockDocumentType.Transfer, source, null);
+        await Docs(s => s.AddLineAsync(transfer, new DocumentLineInput("S-01", item, 1m, TargetWarehouseCode: targetCode, TargetLocationCode: "A-01"), Operator, Ct));
+        Assert.Contains("草稿或送審中", await TryDeleteAsync());
+        await Docs(async s => await s.CancelAsync(transfer, await VersionAsync(transfer), Operator, Ct));
+
+        // 用過（有已取消的單據）而且清空：可以刪除（移除）
+        Assert.Null(await TryDeleteAsync());
+    }
+
+    // M8-01：被預留的庫存擋下刪除；已刪除的倉庫不能再開單、新增儲位、設定常用倉位，資料庫也不允許把它改回啟用
+    [Fact]
+    public async Task 刪除倉庫_預留的庫存擋下_刪除後不能再寫入_資料庫擋啟用()
+    {
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await ConfirmAsync(await DocAsync(StockDocumentType.Inbound, w, PurchaseIn, ("A-01", item, 2m)), Operator);
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var itemId = await db.Items.Where(i => i.ItemCode == item).Select(i => i.Id).SingleAsync(Ct);
+            await new ItemLocationService(db, TimeProvider.System).AddAsync(itemId, w, "A-01", true, Manager, Ct);
+        }
+        async Task<string?> TryDeleteAsync() => await MessageAsync(async () =>
+            await Warehouses(async s => await s.DeleteWarehouseAsync(
+                w, (await s.ListWarehousesAsync(true, Ct)).Single(x => x.Id == w).Version, Manager, Ct)));
+
+        var reservation = await ManualReservationAsync(item, w, 1m);
+        await ConfirmAsync(await DocAsync(StockDocumentType.Outbound, w, ProductionOut, ("A-01", item, 1m)), Operator);
+        Assert.Contains("還有庫存", await TryDeleteAsync()); // 被預留的量仍是庫存（預留建立時必須有可用量，所以有預留就一定有結存）
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(Ct);
+            await new InventoryPostingService(db).ReleaseReservationAsync(reservation, Operator, DateTimeOffset.UtcNow, Ct);
+            await db.SaveChangesAsync(Ct);
+            await tx.CommitAsync(Ct);
+        }
+        await ConfirmAsync(await DocAsync(StockDocumentType.Outbound, w, ProductionOut, ("A-01", item, 1m)), Operator);
+        Assert.Null(await TryDeleteAsync());
+
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            Assert.False(await db.ItemLocations.AnyAsync(x => x.WarehouseId == w, Ct)); // 常用倉位一起清掉
+        }
+        Assert.Contains("已刪除", await MessageAsync(() => CreateAsync(StockDocumentType.Inbound, w, PurchaseIn)));
+        Assert.Contains("已刪除", await MessageAsync(() =>
+            Warehouses(s => s.CreateLocationAsync(w, new LocationInput("A-02", Empty), Manager, Ct))));
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var itemId = await db.Items.Where(i => i.ItemCode == item).Select(i => i.Id).SingleAsync(Ct);
+            Assert.Contains("已刪除", await MessageAsync(() =>
+                new ItemLocationService(db, TimeProvider.System).AddAsync(itemId, w, "A-01", false, Manager, Ct)));
+        }
+        // A/B 相容窗口內舊版按「啟用」：資料庫 CHECK 擋下
+        var ex = await Assert.ThrowsAsync<PostgresException>(() => SqlAsync($"UPDATE warehouses SET is_active = true WHERE id = {w}"));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, ex.SqlState);
     }
 
     // T-M4-02-02：草稿不影響結存；審核關閉時不能送審；出庫不足整張回滾、單據仍是草稿
@@ -446,6 +569,20 @@ public class StockDocumentTests
     private static async Task ApproveAsync(Guid doc, Actor actor) =>
         await Docs(async s => await s.ApproveAsync(doc, await VersionAsync(doc), "key-" + Guid.NewGuid(), actor, Ct));
 
+    /// <summary>執行並回傳錯誤訊息（成功回傳 null），用來確認是哪一條規則擋下。</summary>
+    private static async Task<string?> MessageAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return null;
+        }
+        catch (Exception ex) when (ex is AppException or DomainRuleException)
+        {
+            return ex.Message;
+        }
+    }
+
     private static async Task<string?> TryAsync(Func<Task> action)
     {
         try
@@ -550,6 +687,18 @@ public class StockDocumentTests
     {
         await using var db = MigratedDatabaseFixture.CreateContext();
         await action(new StockDocumentService(db, new InventoryPostingService(db), new SettingsService(db, TimeProvider.System), TimeProvider.System));
+    }
+
+    private static async Task<T> Warehouses<T>(Func<IWarehouseService, Task<T>> action)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        return await action(new WarehouseService(db, TimeProvider.System));
+    }
+
+    private static async Task Warehouses(Func<IWarehouseService, Task> action)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        await action(new WarehouseService(db, TimeProvider.System));
     }
 
     private static async Task<T> Master<T>(Func<IDocumentMasterDataService, Task<T>> action)

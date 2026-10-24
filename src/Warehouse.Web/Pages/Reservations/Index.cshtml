@@ -22,7 +22,7 @@
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
         {
-            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name@(w.IsDeleted ? "（已刪除）" : "")</option>
         }
     </select>
     <select name="status" aria-label="狀態">

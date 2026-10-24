@@ -11,6 +11,7 @@ using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
+using Warehouse.Infrastructure.Warehousing;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
 
@@ -86,12 +87,7 @@ public sealed class OpeningService(
     public async Task<Guid> CreateAsync(Guid warehouseId, string? note, Actor actor, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var warehouse = await db.Warehouses.AsNoTracking().SingleOrDefaultAsync(w => w.Id == warehouseId, cancellationToken)
-            ?? throw new NotFoundException("warehouse.not_found", "找不到倉庫。");
-        if (!warehouse.IsActive)
-        {
-            throw new DomainRuleException("倉庫已停用，不能建立期初單。");
-        }
+        var warehouseCode = await WarehouseLock.LockUsableAsync(db, warehouseId, "倉庫已停用，不能建立期初單。", cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         var number = (await QueryAsync(db, $"SELECT nextval('{WarehouseDbContext.OpeningDocNoSequence}')",
             r => r.GetInt64(0), cancellationToken)).Single();
@@ -99,7 +95,7 @@ public sealed class OpeningService(
         var doc = StockDocument.CreateOpening(Guid.NewGuid(), $"OB-{number:D6}", warehouseId, note, actor.Id, actor.Name, now);
         db.StockDocuments.Add(doc);
         AuditLog.Add(db, actor, now, "opening.create", "stock_document", doc.Id.ToString(), null,
-            new { doc.DocNo, WarehouseCode = warehouse.Code, doc.Note });
+            new { doc.DocNo, WarehouseCode = warehouseCode, doc.Note });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return doc.Id;

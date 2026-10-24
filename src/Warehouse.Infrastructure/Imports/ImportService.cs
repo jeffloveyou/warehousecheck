@@ -384,7 +384,7 @@ public sealed class ImportService(
     {
         switch (kind)
         {
-            case ImportKind.Locations when targetId is null || !await db.Warehouses.AnyAsync(w => w.Id == targetId, cancellationToken):
+            case ImportKind.Locations when targetId is null || !await db.Warehouses.AnyAsync(w => w.Id == targetId && w.DeletedAt == null, cancellationToken):
                 throw new ConflictException("import.bad_file", "請選擇要匯入儲位的倉庫。");
             case ImportKind.OpeningLines when targetId is null
                 || !await db.StockDocuments.AnyAsync(d => d.Id == targetId && d.DocType == StockDocumentType.Opening && d.Status == StockDocumentStatus.Draft, cancellationToken):

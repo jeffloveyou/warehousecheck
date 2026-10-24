@@ -498,7 +498,8 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         IEnumerable<Guid> ids, CancellationToken cancellationToken)
     {
         var sorted = ids.Distinct().Order().ToArray();
-        var rows = (await QueryAsync(db, "SELECT id, code, is_active FROM warehouses WHERE id = ANY(@ids) ORDER BY id FOR SHARE",
+        // 已刪除的倉庫一律視為停用（資料庫另有 ck_warehouses_deleted_inactive，M8-01 審查 #2）
+        var rows = (await QueryAsync(db, "SELECT id, code, is_active AND deleted_at IS NULL FROM warehouses WHERE id = ANY(@ids) ORDER BY id FOR SHARE",
             r => (Id: r.GetGuid(0), Code: r.GetString(1), Active: r.GetBoolean(2)), cancellationToken, Param("ids", sorted)))
             .ToDictionary(w => w.Id, w => (w.Code, w.Active));
         if (rows.Count != sorted.Length)

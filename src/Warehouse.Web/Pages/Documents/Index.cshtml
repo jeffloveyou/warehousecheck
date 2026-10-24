@@ -34,7 +34,7 @@
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
         {
-            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name@(w.IsDeleted ? "（已刪除）" : "")</option>
         }
     </select>
     <button type="submit">查詢</button>
@@ -56,7 +56,7 @@
             <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
             <select id="Create_WarehouseId" name="Create.WarehouseId" required>
                 <option value="">選擇倉庫</option>
-                @foreach (var w in Model.Warehouses.Where(w => w.IsActive && Model.Operable.Allows(w.Id)))
+                @foreach (var w in Model.Warehouses.Where(w => w.IsActive && !w.IsDeleted && Model.Operable.Allows(w.Id)))
                 {
                     <option value="@w.Id" selected="@(w.Id == Model.Create.WarehouseId)">@w.Code @w.Name</option>
                 }

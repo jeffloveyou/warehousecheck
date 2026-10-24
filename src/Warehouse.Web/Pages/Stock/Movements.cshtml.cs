@@ -44,7 +44,7 @@ public class MovementsModel(IStockQueryService stock, IWarehouseService warehous
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken); // 歷史查詢可選已刪除的倉庫
         if (DateError() is { } dateError)
         {
             Notice = dateError;

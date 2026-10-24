@@ -75,9 +75,10 @@ public class LocationsModel(
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        // 含已刪除的倉庫：從倉庫頁「顯示已刪除」點進來時仍看得到儲位，但不能再新增、匯入、印標籤
+        Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken);
         Settings = await settings.GetAsync(cancellationToken);
-        CanManage = (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded;
+        CanManage = (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded && CurrentWarehouse is not { IsDeleted: true };
         Result = await warehouses.SearchLocationsAsync(
             new LocationSearch(WarehouseId, Keyword, Status, PageNumber), cancellationToken);
     }

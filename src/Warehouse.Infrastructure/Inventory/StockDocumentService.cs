@@ -11,6 +11,7 @@ using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
+using Warehouse.Infrastructure.Warehousing;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
 
@@ -147,12 +148,8 @@ public sealed class StockDocumentService(
         StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, Guid id, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var warehouse = await db.Warehouses.AsNoTracking().SingleOrDefaultAsync(w => w.Id == warehouseId, cancellationToken)
-            ?? throw new NotFoundException("warehouse.not_found", "找不到倉庫。");
-        if (!warehouse.IsActive)
-        {
-            throw new DomainRuleException("倉庫已停用，不能建立單據。");
-        }
+        // 鎖內確認倉庫可用：刪除倉庫（FOR UPDATE）時不會同時建出草稿單（M8-01 審查 #1）
+        var warehouseCode = await WarehouseLock.LockUsableAsync(db, warehouseId, "倉庫已停用，不能建立單據。", cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
         var current = await settings.GetAsync(cancellationToken);
         var effective = await EffectiveHeaderAsync(type, header, null, current, cancellationToken);
@@ -161,7 +158,7 @@ public sealed class StockDocumentService(
             id, await NextDocNoAsync(type, cancellationToken), type, warehouseId, effective, null, actor.Id, actor.Name, now);
         db.StockDocuments.Add(doc);
         AuditLog.Add(db, actor, now, "document.create", "stock_document", doc.Id.ToString(), null,
-            new { doc.DocNo, DocType = type.ToString(), WarehouseCode = warehouse.Code, effective.PurposeId, effective.PartnerId, doc.ExternalNo, doc.Note });
+            new { doc.DocNo, DocType = type.ToString(), WarehouseCode = warehouseCode, effective.PurposeId, effective.PartnerId, doc.ExternalNo, doc.Note });
         await SaveAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return doc.Id;
