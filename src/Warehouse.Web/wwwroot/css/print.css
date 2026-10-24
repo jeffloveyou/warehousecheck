@@ -28,3 +28,42 @@ body { margin: 0; font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; fon
     .print-page { padding: 8px; overflow-x: auto; }
     .print-watermark { font-size: 40px; }
 }
+
+/* M7-03 儲位標籤（/Warehouses/Labels）：A4、每張一個 .label-sheet，格線由頁面依版型給欄列數 */
+.label-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.label-pages { margin-left: 8px; }
+.label-sheet {
+    display: grid;
+    width: 194mm;
+    height: 281mm;
+    margin: 0 auto 8mm;
+    box-sizing: border-box;
+    page-break-after: always;
+    break-after: page;
+    background: #fff;
+}
+.label-sheet:last-child { page-break-after: auto; break-after: auto; }
+.label {
+    display: flex;
+    align-items: center;
+    gap: 2mm;
+    padding: 2mm;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 0.2mm dashed #bbb; /* 裁切參考線，標籤紙可在列印前取消（印出來很淡） */
+}
+.label-qr { flex: none; }
+.label-small .label-qr { width: 28mm; height: 28mm; }
+.label-large .label-qr { width: 44mm; height: 44mm; }
+.label-text { min-width: 0; line-height: 1.2; }
+.label-code { font-weight: bold; font-family: Consolas, "Courier New", monospace; word-break: break-all; }
+.label-small .label-code { font-size: 13pt; }
+.label-large .label-code { font-size: 20pt; }
+.label-warehouse, .label-company { font-size: 8pt; color: #555; }
+.label-name { font-size: 9pt; word-break: break-all; }
+/* 具名頁面：只有標籤頁改成 8mm 邊界，其他列印頁維持上面的 12mm（Chrome 85+） */
+.label-sheet { page: labels; }
+@page labels { size: A4 portrait; margin: 8mm; }
+@media print {
+    .label-sheet { margin: 0; }
+}
