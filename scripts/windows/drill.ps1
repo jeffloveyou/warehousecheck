@@ -52,7 +52,8 @@ function Start-Load([int]$Seconds, [string]$Name) {
 
 function Complete-Phase([string]$Name, $Load, [bool]$Expected, [string]$Note) {
     $Load.Process.WaitForExit()
-    $runText = Get-Content $Load.Output -Raw
+    # 子程序轉向輸出用主控台字碼頁（例如 950），不是 UTF-8；用同一個編碼讀，否則中文亂碼、解析不到張數
+    $runText = Get-Content $Load.Output -Raw -Encoding ([Console]::OutputEncoding)
     $verify = (& dotnet $tool verify 2>&1) -join "`n"
     $retries = if ($runText -match '同鍵重試 (\d+) 次') { [int]$Matches[1] } else { -1 }
     $confirmed = if ($runText -match '確認成功 (\d+) 張') { [int]$Matches[1] } else { -1 }
