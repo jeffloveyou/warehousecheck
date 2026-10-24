@@ -99,6 +99,20 @@ public class DetailsModel(
         Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!);
 
     /// <summary>掃碼面板解析一筆掃碼（GET，回傳 JSON）；物料另附建議儲位。只做精確比對。</summary>
+    /// <summary>明細輸入區：物料搜尋（按 Enter 才查，M8-02）。</summary>
+    public async Task<IActionResult> OnGetItemSearchAsync(
+        Guid id, string? q, [FromServices] Warehouse.Application.Search.IItemSearchService search, CancellationToken cancellationToken) =>
+        await openings.GetAsync(id, cancellationToken) is null
+            ? NotFound()
+            : await LineEntryJson.ItemsAsync(search, q, cancellationToken);
+
+    /// <summary>明細輸入區：儲位選擇清單（期初與進倉相同：常用儲位、已有庫存的儲位排在前面，M8-02）。</summary>
+    public async Task<IActionResult> OnGetLocationsAsync(
+        Guid id, string? q, Guid? itemId, [FromServices] ILineEntryQueryService queries, CancellationToken cancellationToken) =>
+        await openings.GetAsync(id, cancellationToken) is not { } doc
+            ? NotFound()
+            : await LineEntryJson.LocationsAsync(queries, doc.WarehouseId, q, itemId, LocationListMode.Inbound, cancellationToken);
+
     public async Task<IActionResult> OnGetScanResolveAsync(
         Guid id, string? code, [FromServices] IScanResolver resolver, CancellationToken cancellationToken)
     {
