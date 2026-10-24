@@ -202,7 +202,7 @@ Check((await page.InnerTextAsync("#scan-status")).Contains("B12"), "英數短碼
 await page.ClickAsync("#scan-clear");
 
 // 5. 逐件累加：A-02 連掃 8 種物料共 50 筆（Enter）、再 50 筆（Tab），不等處理完；結果每種物料的數量＝掃的次數
-await page.CheckAsync("#scan-accumulate");
+await page.SelectOptionAsync("#scan-add-mode", "each");
 await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-02");
 await WaitIdleAsync(page);
 var random = new Random(42);
@@ -218,7 +218,7 @@ var expected = sequence.GroupBy(c => c).ToDictionary(g => g.Key, g => (decimal)g
 var actual = await LinesAsync(docId, "A-02");
 Check(actual.Count == expected.Count && expected.All(e => actual.TryGetValue(e.Key, out var q) && q == e.Value),
     $"逐件累加 100 筆（Enter 50、Tab 50）：每種物料數量＝掃描次數，無遺失無重複（打字 {typedMs} ms，總計 {watch.ElapsedMilliseconds} ms）");
-await page.UncheckAsync("#scan-accumulate");
+await page.SelectOptionAsync("#scan-add-mode", "manual");
 
 // 6. 序號物料：掃物料 → 掃序號（其他文字填進序號欄）→ 自動加入一行，連續 3 個
 await ScanAsync(page, "WH:ITEM:" + serialCode);

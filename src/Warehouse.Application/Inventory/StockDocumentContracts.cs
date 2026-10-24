@@ -68,6 +68,9 @@ public interface IStockDocumentService
 
     Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken);
 
+    /// <summary>一次刪除多行草稿明細（M8-03，明細表勾選）：同一交易，任一行不存在就整批不刪。</summary>
+    Task RemoveLinesAsync(Guid id, IReadOnlyCollection<Guid> lineIds, Actor actor, CancellationToken cancellationToken);
+
     /// <summary>送審（只在審核開啟時）。出倉單依料號合計建立預留，可用量不足就無法送審。</summary>
     Task SubmitAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
 

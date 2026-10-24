@@ -33,6 +33,10 @@
     <input type="hidden" name="Original.PrintCompanyName" value="@Model.Original.PrintCompanyName" />
     <input type="hidden" name="Original.AllowSelfApproveStocktake" value="@Model.Original.AllowSelfApproveStocktake.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.StocktakeBlindCount" value="@Model.Original.StocktakeBlindCount.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.LineExpiryEnabled" value="@Model.Original.LineExpiryEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.LineReservationEnabled" value="@Model.Original.LineReservationEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.LineCrossTransferEnabled" value="@Model.Original.LineCrossTransferEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.LineLotSerialEnabled" value="@Model.Original.LineLotSerialEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.RetentionAuditYears" value="@Model.Original.RetentionAuditYears" />
     <input type="hidden" name="Original.RetentionLoginDays" value="@Model.Original.RetentionLoginDays" />
     <input type="hidden" name="Original.RetentionProcessedCommandsDays" value="@Model.Original.RetentionProcessedCommandsDays" />
@@ -56,6 +60,12 @@
     <p class="muted">關閉時（預設）：草稿確認即過帳。開啟後出倉單送審時會預留庫存。已在待核准的單據不受影響。</p>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveDocuments" value="true" checked="@Model.Form.AllowSelfApproveDocuments" /> 允許建立者核准自己的進出倉單</label></p>
     <p class="muted">預設不允許；與期初單的自核設定分開。不論哪一種，都會記錄建立者、核准者與時間。</p>
+    <h3>明細輸入欄位</h3>
+    <p><label><input type="checkbox" name="Form.LineLotSerialEnabled" value="true" checked="@Model.Form.LineLotSerialEnabled" /> 批號、序號欄</label></p>
+    <p><label><input type="checkbox" name="Form.LineExpiryEnabled" value="true" checked="@Model.Form.LineExpiryEnabled" /> 有效期限（進倉、期初）</label></p>
+    <p><label><input type="checkbox" name="Form.LineReservationEnabled" value="true" checked="@Model.Form.LineReservationEnabled" /> 出倉指定預留</label></p>
+    <p><label><input type="checkbox" name="Form.LineCrossTransferEnabled" value="true" checked="@Model.Form.LineCrossTransferEnabled" /> 跨倉移庫（目的儲位可在其他倉庫）</label></p>
+    <p class="muted">關閉的欄位在明細輸入區不顯示，所有人都一樣；每個人還可以在輸入區的「欄位」選單再隱藏自己用不到的欄位。料號本身是批號或序號管理時，批號、序號欄一律顯示並必填。</p>
     <div class="table-wrap">
         <table id="document-field-settings">
             <thead><tr><th>表頭欄位</th><th>啟用</th><th>必填（確認或送審時檢查）</th></tr></thead>

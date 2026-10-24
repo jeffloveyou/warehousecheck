@@ -96,6 +96,10 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             DocumentAttachmentsEnabled = Flag(SettingKeys.DocumentAttachmentsEnabled, Defaults.DocumentAttachmentsEnabled),
             AllowSelfApproveStocktake = Flag(SettingKeys.AllowSelfApproveStocktake, Defaults.AllowSelfApproveStocktake),
             StocktakeBlindCount = Flag(SettingKeys.StocktakeBlindCount, Defaults.StocktakeBlindCount),
+            LineExpiryEnabled = Flag(SettingKeys.LineExpiryEnabled, Defaults.LineExpiryEnabled),
+            LineReservationEnabled = Flag(SettingKeys.LineReservationEnabled, Defaults.LineReservationEnabled),
+            LineCrossTransferEnabled = Flag(SettingKeys.LineCrossTransferEnabled, Defaults.LineCrossTransferEnabled),
+            LineLotSerialEnabled = Flag(SettingKeys.LineLotSerialEnabled, Defaults.LineLotSerialEnabled),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
             RetentionAuditYears = Number(SettingKeys.RetentionAuditYears, Defaults.RetentionAuditYears),
             RetentionLoginDays = Number(SettingKeys.RetentionLoginDays, Defaults.RetentionLoginDays),
@@ -167,5 +171,9 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.DocumentAttachmentsEnabled, original.DocumentAttachmentsEnabled, updated.DocumentAttachmentsEnabled, current.DocumentAttachmentsEnabled),
         (SettingKeys.AllowSelfApproveStocktake, original.AllowSelfApproveStocktake, updated.AllowSelfApproveStocktake, current.AllowSelfApproveStocktake),
         (SettingKeys.StocktakeBlindCount, original.StocktakeBlindCount, updated.StocktakeBlindCount, current.StocktakeBlindCount),
+        (SettingKeys.LineExpiryEnabled, original.LineExpiryEnabled, updated.LineExpiryEnabled, current.LineExpiryEnabled),
+        (SettingKeys.LineReservationEnabled, original.LineReservationEnabled, updated.LineReservationEnabled, current.LineReservationEnabled),
+        (SettingKeys.LineCrossTransferEnabled, original.LineCrossTransferEnabled, updated.LineCrossTransferEnabled, current.LineCrossTransferEnabled),
+        (SettingKeys.LineLotSerialEnabled, original.LineLotSerialEnabled, updated.LineLotSerialEnabled, current.LineLotSerialEnabled),
     ];
 }

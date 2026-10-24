@@ -81,7 +81,8 @@ input[type=file] { max-width: 100%; }
 .scan-bar .scan-input { flex: 1; font-size: 18px; padding: 8px 10px; min-height: 44px; border: 2px solid #243447; }
 .scan-bar button { min-height: 44px; }
 .scan-options { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
-.scan-options label { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+.scan-options label { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; white-space: nowrap; }
+.scan-options select { max-width: 100%; white-space: normal; }
 .scan-status { margin: 8px 0 4px; padding: 6px 10px; border-radius: 3px; font-weight: bold; min-height: 1.6em; }
 .scan-status.scan-ok { background: #e6f4ea; color: #0d652d; }
 .scan-status.scan-bad { background: #fde8e7; color: #8c1d18; }
@@ -93,7 +94,21 @@ input[type=file] { max-width: 100%; }
 .scan-log { margin: 8px 0 0; padding-left: 24px; max-height: 180px; overflow-y: auto; font-size: 13px; }
 .scan-log li.bad { color: #b3261e; }
 .scan-camera-box video { width: 100%; max-width: 480px; background: #000; border-radius: 4px; }
-#scan-panel[hidden], #scan-panel [hidden] { display: none; }
+#scan-panel[hidden], #scan-panel [hidden], [data-entry-fallback][hidden] { display: none; }
+/* M8-03：可輸入縮小範圍的選擇清單（picker.js）、物料搜尋結果、欄位選單、明細勾選 */
+.picker { position: relative; }
+.picker > input { width: 100%; box-sizing: border-box; }
+.picker-list { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin: 2px 0 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; background: #fff; border: 1px solid #889; border-radius: 3px; box-shadow: 0 2px 6px rgba(0, 0, 0, .15); }
+.picker-list li { padding: 8px 10px; min-height: 24px; cursor: pointer; border-bottom: 1px solid #eef; }
+.picker-list li.active, .picker-list li:hover { background: #e8eef6; }
+.picker-list li.picker-empty { color: #667; cursor: default; }
+.scan-results { margin-top: 6px; padding: 6px 8px; border: 1px solid #ccd; border-radius: 3px; background: #fafbfc; }
+.scan-result-list { margin: 4px 0 0; padding-left: 18px; }
+.scan-result-list li { margin: 4px 0; min-height: 28px; }
+.scan-result-list button.link { font-weight: bold; min-height: 28px; }
+.scan-field-menu summary { cursor: pointer; min-height: 32px; line-height: 32px; }
+.scan-field-menu label { display: flex; align-items: center; gap: 4px; min-height: 32px; }
+.lines-bulk { align-items: center; margin: 4px 0; }
 @media (max-width: 600px) {
     .scan-bar { flex-wrap: wrap; }
     .scan-bar button, .actions button { min-height: 44px; }

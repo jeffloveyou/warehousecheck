@@ -61,6 +61,14 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
 
         public bool StocktakeBlindCount { get; set; }
 
+        public bool LineExpiryEnabled { get; set; }
+
+        public bool LineReservationEnabled { get; set; }
+
+        public bool LineCrossTransferEnabled { get; set; }
+
+        public bool LineLotSerialEnabled { get; set; }
+
         /// <summary>列印抬頭的公司名稱（空白＝不印）；表單空白時綁定為 null。</summary>
         public string? PrintCompanyName { get; set; }
 
@@ -90,6 +98,10 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 DocumentAttachmentsEnabled = DocumentAttachmentsEnabled,
                 AllowSelfApproveStocktake = AllowSelfApproveStocktake,
                 StocktakeBlindCount = StocktakeBlindCount,
+                LineExpiryEnabled = LineExpiryEnabled,
+                LineReservationEnabled = LineReservationEnabled,
+                LineCrossTransferEnabled = LineCrossTransferEnabled,
+                LineLotSerialEnabled = LineLotSerialEnabled,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
                 RetentionAuditYears = RetentionAuditYears,
                 RetentionLoginDays = RetentionLoginDays,
@@ -117,6 +129,10 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             DocumentAttachmentsEnabled = s.DocumentAttachmentsEnabled,
             AllowSelfApproveStocktake = s.AllowSelfApproveStocktake,
             StocktakeBlindCount = s.StocktakeBlindCount,
+            LineExpiryEnabled = s.LineExpiryEnabled,
+            LineReservationEnabled = s.LineReservationEnabled,
+            LineCrossTransferEnabled = s.LineCrossTransferEnabled,
+            LineLotSerialEnabled = s.LineLotSerialEnabled,
             PrintCompanyName = s.PrintCompanyName,
             RetentionAuditYears = s.RetentionAuditYears,
             RetentionLoginDays = s.RetentionLoginDays,
@@ -161,6 +177,10 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.PrintCompanyName => "列印公司名稱",
         SettingKeys.AllowSelfApproveStocktake => "盤差允許自核",
         SettingKeys.StocktakeBlindCount => "盲盤",
+        SettingKeys.LineExpiryEnabled => "明細：有效期限",
+        SettingKeys.LineReservationEnabled => "明細：指定預留",
+        SettingKeys.LineCrossTransferEnabled => "明細：跨倉移庫",
+        SettingKeys.LineLotSerialEnabled => "明細：批號序號欄",
         SettingKeys.RetentionAuditYears => "操作日誌保留年數",
         SettingKeys.RetentionLoginDays => "登入紀錄保留天數",
         SettingKeys.RetentionProcessedCommandsDays => "冪等紀錄保留天數",

@@ -7,6 +7,7 @@ using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
 using Warehouse.Application.Scanning;
+using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
@@ -96,9 +97,18 @@ public class DetailsModel(
     public ScanPanelModel ScanPanel => new(
         "opening", Doc.WarehouseId,
         Url.Page("/Opening/Details", "ScanResolve", new { id = Doc.Id })!,
-        Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!);
+        Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!)
+    {
+        ItemSearchUrl = Url.Page("/Opening/Details", "ItemSearch", new { id = Doc.Id }),
+        LocationsUrl = Url.Page("/Opening/Details", "Locations", new { id = Doc.Id }),
+        WarehouseCode = Doc.WarehouseCode,
+        LotSerialEnabled = LineSettings.LineLotSerialEnabled,
+        ExpiryEnabled = LineSettings.LineExpiryEnabled,
+    };
 
-    /// <summary>掃碼面板解析一筆掃碼（GET，回傳 JSON）；物料另附建議儲位。只做精確比對。</summary>
+    /// <summary>全公司的明細欄位開關（M8-03）。</summary>
+    public SystemSettings LineSettings { get; private set; } = new(false, true, true, true);
+
     /// <summary>明細輸入區：物料搜尋（按 Enter 才查，M8-02）。</summary>
     public async Task<IActionResult> OnGetItemSearchAsync(
         Guid id, string? q, [FromServices] Warehouse.Application.Search.IItemSearchService search, CancellationToken cancellationToken) =>
@@ -113,6 +123,7 @@ public class DetailsModel(
             ? NotFound()
             : await LineEntryJson.LocationsAsync(queries, doc.WarehouseId, q, itemId, LocationListMode.Inbound, cancellationToken);
 
+    /// <summary>掃碼面板解析一筆掃碼（GET，回傳 JSON）；物料另附建議儲位。只做精確比對。</summary>
     public async Task<IActionResult> OnGetScanResolveAsync(
         Guid id, string? code, [FromServices] IScanResolver resolver, CancellationToken cancellationToken)
     {
@@ -253,6 +264,7 @@ public class DetailsModel(
         }
         Doc = doc;
         Version = doc.Version;
+        LineSettings = await HttpContext.RequestServices.GetRequiredService<ISettingsService>().GetAsync(cancellationToken);
         var actor = User.ToActor();
         CanEdit = doc.Status == StockDocumentStatus.Draft
             && (await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded

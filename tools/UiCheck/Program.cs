@@ -53,7 +53,7 @@ await using (var db = new WarehouseDbContext(new DbContextOptionsBuilder<Warehou
     var warehouses = new WarehouseService(db, TimeProvider.System);
     warehouseId = await warehouses.CreateWarehouseAsync(new WarehouseInput(warehouseCode, "畫面實測倉"), manager, default);
     var empty = new LocationDetails(null, null, null, null, null, null, null, null, false, false);
-    await warehouses.CreateLocationAsync(warehouseId, new LocationInput("A-01", empty), manager, default);
+    await warehouses.CreateLocationAsync(warehouseId, new LocationInput("A-01", empty with { Name = "一號料架" }), manager, default);
     await warehouses.CreateLocationAsync(warehouseId, new LocationInput("A-02", empty), manager, default);
     var itemManager = new Actor(Guid.NewGuid(), "腳本物料管理員", IsItemManager: true);
     var workflow = new ItemWorkflowService(db, TimeProvider.System);
@@ -121,12 +121,43 @@ async Task<string> CreateDocumentAsync(IPage page, string type, string? purposeN
     return page.Url;
 }
 
+// M8-03 明細輸入區：等掃碼佇列與送出都處理完
+async Task IdleAsync(IPage page)
+{
+    await page.WaitForFunctionAsync("() => window.WhScanBusy && !window.WhScanBusy()", null, new() { Timeout = 15000 });
+    await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+}
+
 async Task SearchItemAsync(IPage page)
 {
-    await page.FillAsync("input[name='ItemQuery']", itemCode.ToLowerInvariant());
-    await page.PressAsync("input[name='ItemQuery']", "Enter");
-    await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-    Check(await page.IsVisibleAsync("#resolved-item"), "料號按 Enter 精確命中並帶入");
+    await page.FillAsync("#scan-item", itemCode.ToLowerInvariant());
+    await page.PressAsync("#scan-item", "Enter");
+    await IdleAsync(page);
+    Check((await page.InnerTextAsync("#scan-item-info")).Length > 0 && await page.InputValueAsync("#scan-item") == itemCode,
+        "料號按 Enter 精確命中並帶入");
+}
+
+// 在選擇清單輸入文字縮小範圍，點選文字含 pick 的那一列；回傳清單第一列的文字
+async Task<string> PickAsync(IPage page, string selector, string typed, string pick)
+{
+    await page.ClickAsync(selector);
+    await page.FillAsync(selector, typed);
+    // 同一頁有好幾個選擇清單：只看這個輸入框所在的清單
+    var list = page.Locator(selector).Locator("xpath=..").Locator(".picker-list");
+    var rows = list.Locator("li");
+    await rows.First.WaitForAsync(new() { Timeout = 5000 });
+    await page.WaitForTimeoutAsync(400); // 等 300 ms 篩選的結果
+    var first = await rows.First.InnerTextAsync();
+    await list.Locator("li", new() { HasTextString = pick }).First.ClickAsync();
+    await IdleAsync(page);
+    return first;
+}
+
+async Task AddQuantityAsync(IPage page, string quantity)
+{
+    await page.FillAsync("#scan-quantity", quantity);
+    await page.PressAsync("#scan-quantity", "Enter");
+    await IdleAsync(page);
 }
 
 async Task ConfirmAsync(IPage page, string label)
@@ -137,14 +168,24 @@ async Task ConfirmAsync(IPage page, string label)
 }
 
 var op = await LoginAsync("uiop" + suffix);
+op.Dialog += async (_, dialog) => await dialog.AcceptAsync(); // 勾選刪除的確認框
 
-// 2. 進倉 10 → A-01
+// 2. 進倉 10 → A-01（M8-03：合併的明細輸入區；物料用品名搜尋點選、儲位用選擇清單）
 var inUrl = await CreateDocumentAsync(op, "Inbound", "採購入庫");
-await SearchItemAsync(op);
-await op.FillAsync("input[name='Line.LocationCode']", "a-01");
-await op.FillAsync("input[name='Line.Quantity']", "10");
-await SubmitAsync(op, "#document-add-line");
+Check(!await op.IsVisibleAsync("#document-add-line-panel") && await op.IsVisibleAsync("#scan-panel"), "有 JS 時只顯示一套明細輸入區");
+await op.FillAsync("#scan-item", "畫面實測螺絲 " + suffix);
+await op.PressAsync("#scan-item", "Enter");
+await IdleAsync(op);
+Check(await op.IsVisibleAsync("#scan-item-results button"), "品名按 Enter 在原地列出搜尋結果（頁面不重新載入）");
+await op.Locator("#scan-item-results button", new() { HasTextString = itemCode }).ClickAsync();
+await IdleAsync(op);
+Check(await op.InputValueAsync("#scan-item") == itemCode, "點選搜尋結果後帶入料號");
+await PickAsync(op, "#scan-location", "a-0", "A-01");
+Check(await op.InputValueAsync("#scan-location") == "A-01" && (await op.InnerTextAsync("#scan-location-info")).Contains("一號料架"),
+    "儲位選擇清單可輸入縮小範圍，選定後顯示儲位名稱");
+await AddQuantityAsync(op, "10");
 Check((await op.InnerTextAsync("#document-lines")).Contains(itemCode), "進倉明細出現料號");
+await op.ScreenshotAsync(new() { Path = Path.Combine(shots, "1-entry-panel.png"), FullPage = true });
 await ConfirmAsync(op, "進倉單");
 await op.ScreenshotAsync(new() { Path = Path.Combine(shots, "1-inbound.png"), FullPage = true });
 var print = await op.Context.NewPageAsync();
@@ -155,24 +196,50 @@ await print.EmulateMediaAsync(new() { Media = Media.Print });
 await print.ScreenshotAsync(new() { Path = Path.Combine(shots, "2-print.png"), FullPage = true });
 await print.PdfAsync(new() { Path = Path.Combine(shots, "2-print.pdf"), Format = "A4" });
 
-// 3. 出倉 3：從結存表帶入儲位
+// 3. 出倉 3：儲位清單先列有庫存的儲位（含數量）
 await CreateDocumentAsync(op, "Outbound", "生產領料");
 await SearchItemAsync(op);
-Check(await op.IsVisibleAsync("#item-balances .fill-line"), "出倉顯示本倉結存可帶入");
-await op.ClickAsync("#item-balances .fill-line");
-Check(await op.InputValueAsync("input[name='Line.LocationCode']") == "A-01", "帶入儲位 A-01");
-await op.FillAsync("input[name='Line.Quantity']", "3");
-await SubmitAsync(op, "#document-add-line");
+var firstStock = await PickAsync(op, "#scan-location", "", "A-01");
+Check(firstStock.Contains("A-01") && firstStock.Contains("庫存 10"), "出倉儲位清單先列有庫存的儲位與數量");
+await AddQuantityAsync(op, "3");
 await ConfirmAsync(op, "出倉單");
 
-// 4. 移庫 2：A-01 → A-02
+// 4. 移庫 2：A-01 → A-02（目的儲位也用選擇清單）
 await CreateDocumentAsync(op, "Transfer", null);
 await SearchItemAsync(op);
-await op.ClickAsync("#item-balances .fill-line");
-await op.FillAsync("input[name='Line.TargetLocationCode']", "A-02");
-await op.FillAsync("input[name='Line.Quantity']", "2");
-await SubmitAsync(op, "#document-add-line");
+await PickAsync(op, "#scan-location", "", "A-01");
+await PickAsync(op, "#scan-target", "a-02", "A-02");
+Check(await op.InputValueAsync("#scan-target") == "A-02", "目的儲位用選擇清單帶入");
+await AddQuantityAsync(op, "2");
 await ConfirmAsync(op, "移庫單");
+
+// 4b. 明細勾選刪除、欄位選單（M8-03）
+await CreateDocumentAsync(op, "Inbound", "採購入庫");
+await SearchItemAsync(op);
+await PickAsync(op, "#scan-location", "a-01", "A-01");
+await AddQuantityAsync(op, "1");
+// 同一料號第二次改用 Tab 離開物料欄：仍要重新解析；解析晚到時不搶走使用者正在輸入的儲位欄焦點
+await op.FillAsync("#scan-item", itemCode);
+await op.PressAsync("#scan-item", "Tab");
+await op.FillAsync("#scan-location", "A-0");
+await IdleAsync(op);
+Check((await op.InnerTextAsync("#scan-item-info")).Length > 0, "同一料號第二次用 Tab 離開也會重新解析");
+Check(await op.EvaluateAsync<string>("() => document.activeElement.id") == "scan-location", "物料解析完成時不搶走儲位欄的焦點");
+await PickAsync(op, "#scan-location", "a-02", "A-02");
+await AddQuantityAsync(op, "1");
+Check(await op.Locator("input.line-select").CountAsync() == 2, "明細每行有勾選框");
+await op.CheckAsync("#lines-select-all");
+Check(await op.IsEnabledAsync("#lines-remove-selected"), "勾選後才能按「刪除勾選的明細」");
+// 先跳確認框（Dialog 事件接受），確認後才送出表單：明確等換頁完成
+await op.ClickAsync("#lines-remove-selected");
+await op.WaitForFunctionAsync("() => document.querySelectorAll('input.line-select').length === 0 || !!document.getElementById('page-error')", null, new() { Timeout = 10000 });
+if (await op.IsVisibleAsync("#page-error")) { Console.WriteLine("  頁面錯誤：" + await op.InnerTextAsync("#page-error")); }
+await op.WaitForLoadStateAsync(LoadState.NetworkIdle);
+Check((await op.InnerTextAsync("#document-lines")).Contains("尚無明細"), "勾選的明細一次刪除");
+await op.ClickAsync("#scan-field-menu summary");
+await op.UncheckAsync("[data-field-toggle='lot']");
+Check(!await op.IsVisibleAsync("#scan-lot"), "欄位選單可隱藏批號欄（料號不需要時）");
+await op.CheckAsync("[data-field-toggle='lot']");
 await op.ScreenshotAsync(new() { Path = Path.Combine(shots, "3-transfer.png"), FullPage = true });
 
 // 5. 預留（含到期）
