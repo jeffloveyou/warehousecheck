@@ -43,10 +43,12 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $report = Join-Path $Root "logs\nonowner-$stamp.log"
 $results = [Collections.Generic.List[object]]::new()
+$originalOutputEncoding = [Console]::OutputEncoding
 $web = $null
 $probeFile = $null
 
 function Write-Report([string]$Text) {
+    Set-ConsoleEncoding   # 子程序（dotnet）可能改了主控台字碼頁
     Write-Host $Text
     Add-Content $report $Text -Encoding utf8
 }
@@ -262,10 +264,12 @@ ROLLBACK;
     Write-Report $(if ($failed) { "未通過 $failed 項，詳見 $report" } else { "全部通過（紀錄 $report）" })
     exit $(if ($failed) { 1 } else { 0 })
 } catch {
+    Set-ConsoleEncoding
     Write-Host "錯誤：$($_.Exception.Message)" -ForegroundColor Red
     if (Test-Path (Split-Path $report)) { Add-Content $report "錯誤：$($_.Exception.Message)" -Encoding utf8 }
     exit 1
 } finally {
+    Set-ConsoleEncoding $originalOutputEncoding
     if ($web -and -not $web.HasExited) { Stop-Process -Id $web.Id -ErrorAction SilentlyContinue }
     if ($probeFile) { Remove-Item $probeFile -ErrorAction SilentlyContinue }
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name]) }
