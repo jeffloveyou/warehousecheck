@@ -27,6 +27,11 @@ public sealed class DataRetentionJob(IServiceScopeFactory scopes, TimeProvider c
                 {
                     await using var scope = scopes.CreateAsyncScope();
                     var result = await scope.ServiceProvider.GetRequiredService<DataRetentionService>().RunAsync(stoppingToken);
+                    foreach (var error in result.Errors)
+                    {
+                        logger.LogWarning("資料保留清理失敗（下一輪再試）：{Error}", error);
+                    }
+
                     if (result.Total > 0)
                     {
                         logger.LogInformation(

@@ -10,6 +10,9 @@ public sealed record RetentionResult(
     bool Skipped, int AuditLogs, int LoginLogs, int ProcessedCommands, int PostingFailures, int ImportBatches)
 {
     public int Total => AuditLogs + LoginLogs + ProcessedCommands + PostingFailures + ImportBatches;
+
+    /// <summary>失敗的表與原因（其他表照常清理）。</summary>
+    public IReadOnlyList<string> Errors { get; init; } = [];
 }
 
 /// <summary>
@@ -17,7 +20,7 @@ public sealed record RetentionResult(
 /// - 操作日誌與登入紀錄只能經資料庫函式 purge_audit_logs 刪除（下限寫在資料庫，網站帳號不能直接 DELETE）。
 /// - 每批最多 <see cref="BatchSize"/> 筆、各自一個短交易；一次執行最多 <see cref="MaxBatchesPerTable"/> 批，剩下的明天繼續。
 /// - A/B 兩個實例同時執行時以 session advisory lock 只讓一個做（另一個回傳 Skipped）。
-/// - 有刪除時寫一筆 system.retention 稽核（各表筆數與期限）。
+/// - 每一批刪除與它的 system.retention 稽核在同一交易（操作日誌在資料庫函式內）；各表獨立，一張失敗不影響其他。
 /// </summary>
 public sealed class DataRetentionService(WarehouseDbContext db, ISettingsService settings, TimeProvider clock)
 {
@@ -48,7 +51,14 @@ public sealed class DataRetentionService(WarehouseDbContext db, ISettingsService
             }
             finally
             {
-                await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_unlock({LockKey})", CancellationToken.None);
+                try
+                {
+                    await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_unlock({LockKey})", CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // 連線已斷時解鎖也會失敗，但 session 結束鎖就會釋放；不要蓋掉原本的例外（審查 L2）
+                }
             }
         }
         finally
@@ -62,45 +72,70 @@ public sealed class DataRetentionService(WarehouseDbContext db, ISettingsService
         var s = await settings.GetAsync(cancellationToken);
         var now = clock.GetUtcNow();
         // 設定值即使被改到下限以下（直接改資料庫）也以下限為準；資料庫函式另有同樣的下限
-        var auditBefore = now.AddYears(-Math.Max(s.RetentionAuditYears, RetentionLimits.AuditYearsMin));
-        var loginBefore = now.AddDays(-Math.Max(s.RetentionLoginDays, RetentionLimits.LoginDaysMin));
+        var auditYears = Math.Max(s.RetentionAuditYears, RetentionLimits.AuditYearsMin);
+        var loginDays = Math.Max(s.RetentionLoginDays, RetentionLimits.LoginDaysMin);
         var commandsBefore = now.AddDays(-Math.Max(s.RetentionProcessedCommandsDays, RetentionLimits.ProcessedCommandsDaysMin));
         var failuresBefore = now.AddDays(-Math.Max(s.RetentionPostingFailuresDays, RetentionLimits.PostingFailuresDaysMin));
         var importsBefore = now.AddDays(-Math.Max(s.RetentionImportBatchesDays, RetentionLimits.ImportBatchesDaysMin));
+        var errors = new List<string>();
 
-        var audit = await RepeatAsync(() => db.Database
-            .SqlQuery<int>($"SELECT purge_audit_logs({auditBefore}, false, {BatchSize}) AS \"Value\"").SingleAsync(cancellationToken));
-        var logins = await RepeatAsync(() => db.Database
-            .SqlQuery<int>($"SELECT purge_audit_logs({loginBefore}, true, {BatchSize}) AS \"Value\"").SingleAsync(cancellationToken));
-        var commands = await RepeatAsync(() => db.Database.ExecuteSqlAsync($"""
-            DELETE FROM processed_commands WHERE key IN (
-                SELECT key FROM processed_commands WHERE created_at < {commandsBefore} ORDER BY created_at LIMIT {BatchSize})
-            """, cancellationToken));
-        var failures = await RepeatAsync(() => db.Database.ExecuteSqlAsync($"""
-            DELETE FROM stock_posting_failures WHERE id IN (
-                SELECT id FROM stock_posting_failures WHERE occurred_at < {failuresBefore} ORDER BY occurred_at LIMIT {BatchSize})
-            """, cancellationToken));
-        var imports = await RepeatAsync(() => db.Database.ExecuteSqlAsync($"""
-            DELETE FROM import_batches WHERE id IN (
-                SELECT id FROM import_batches WHERE created_at < {importsBefore} ORDER BY created_at LIMIT {BatchSize})
-            """, cancellationToken));
+        // 每張表各自處理，一張失敗不影響其他（審查 H2）。操作日誌：截止時間由資料庫依保留期間計算，刪除與稽核在函式內同一交易
+        var audit = await GuardAsync("操作日誌", errors, () => RepeatAsync(() => db.Database
+            .SqlQuery<int>($"SELECT purge_audit_logs(false, make_interval(years => {auditYears}), {BatchSize}) AS \"Value\"")
+            .SingleAsync(cancellationToken)));
+        var logins = await GuardAsync("登入紀錄", errors, () => RepeatAsync(() => db.Database
+            .SqlQuery<int>($"SELECT purge_audit_logs(true, make_interval(days => {loginDays}), {BatchSize}) AS \"Value\"")
+            .SingleAsync(cancellationToken)));
+        var commands = await GuardAsync("冪等紀錄", errors, () => RepeatAsync(() => AuditedBatchAsync("processed_commands", commandsBefore,
+            () => db.Database.ExecuteSqlAsync($"""
+                DELETE FROM processed_commands WHERE key IN (
+                    SELECT key FROM processed_commands WHERE created_at < {commandsBefore} ORDER BY created_at LIMIT {BatchSize})
+                """, cancellationToken), cancellationToken)));
+        var failures = await GuardAsync("過帳失敗紀錄", errors, () => RepeatAsync(() => AuditedBatchAsync("stock_posting_failures", failuresBefore,
+            () => db.Database.ExecuteSqlAsync($"""
+                DELETE FROM stock_posting_failures WHERE id IN (
+                    SELECT id FROM stock_posting_failures WHERE occurred_at < {failuresBefore} ORDER BY occurred_at LIMIT {BatchSize})
+                """, cancellationToken), cancellationToken)));
+        var imports = await GuardAsync("匯入批次", errors, () => RepeatAsync(() => AuditedBatchAsync("import_batches", importsBefore,
+            () => db.Database.ExecuteSqlAsync($"""
+                DELETE FROM import_batches WHERE id IN (
+                    SELECT id FROM import_batches WHERE created_at < {importsBefore} ORDER BY created_at LIMIT {BatchSize})
+                """, cancellationToken), cancellationToken)));
 
-        var result = new RetentionResult(false, audit, logins, commands, failures, imports);
-        if (result.Total > 0)
+        return new RetentionResult(false, audit, logins, commands, failures, imports) { Errors = errors };
+    }
+
+    private async Task<int> GuardAsync(string name, List<string> errors, Func<Task<int>> purge)
+    {
+        try
         {
-            AuditLog.Add(db, SystemActor, now, "system.retention", "system", "retention", null, new
-            {
-                auditLogs = audit, loginLogs = logins, processedCommands = commands, postingFailures = failures, importBatches = imports,
-                auditBefore, loginBefore, commandsBefore, failuresBefore, importsBefore,
-            });
+            return await purge();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors.Add($"{name}：{ex.Message}");
+            db.ChangeTracker.Clear(); // 失敗那一批的稽核實體不能留到下一張表的 SaveChanges
+            return 0;
+        }
+    }
+
+    /// <summary>刪一批並在同一交易寫 system.retention 稽核（審查 H1：刪了就一定有紀錄）。</summary>
+    private async Task<int> AuditedBatchAsync(string table, DateTimeOffset before, Func<Task<int>> delete, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var deleted = await delete();
+        if (deleted > 0)
+        {
+            AuditLog.Add(db, SystemActor, clock.GetUtcNow(), "system.retention", "system", table, null, new { deleted, before });
             await db.SaveChangesAsync(cancellationToken);
             db.ChangeTracker.Clear();
         }
 
-        return result;
+        await transaction.CommitAsync(cancellationToken);
+        return deleted;
     }
 
-    /// <summary>重複刪除一批，直到不足一批或達到上限；每批是獨立的自動提交語句（不包外層交易）。</summary>
+    /// <summary>重複刪除一批，直到不足一批或達到上限；每批各自一個短交易。</summary>
     private static async Task<int> RepeatAsync(Func<Task<int>> batch)
     {
         var total = 0;

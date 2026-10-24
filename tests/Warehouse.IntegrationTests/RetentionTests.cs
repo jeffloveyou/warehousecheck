@@ -65,7 +65,10 @@ public class RetentionTests
             .SqlQuery<Guid>($"SELECT id AS \"Value\" FROM stock_posting_failures WHERE id IN ({oldFailure}, {newFailure})").ToListAsync(Ct));
         Assert.Equal([newBatch], await db.Database
             .SqlQuery<Guid>($"SELECT id AS \"Value\" FROM import_batches WHERE id IN ({oldBatch}, {newBatch})").ToListAsync(Ct));
-        Assert.True(await db.AuditLogs.AnyAsync(a => a.Action == "system.retention" && a.OccurredAt > now.AddMinutes(-1), Ct));
+        // 每張表的刪除都有 system.retention 稽核（操作日誌、登入紀錄由資料庫函式在同一交易寫入）
+        var recorded = await db.AuditLogs.Where(a => a.Action == "system.retention" && a.OccurredAt > now.AddMinutes(-1)).Select(a => a.EntityId).ToListAsync(Ct);
+        Assert.Superset(new HashSet<string> { "audit_logs", "login_logs", "processed_commands", "stock_posting_failures", "import_batches" }, recorded.ToHashSet());
+        Assert.Empty(result.Errors);
     }
 
     // T-M7-02-11：資料庫函式的下限（應用程式設定改不低）；稽核表仍不能直接刪除
@@ -78,10 +81,10 @@ public class RetentionTests
         var now = DateTimeOffset.UtcNow;
 
         var login = await Assert.ThrowsAsync<PostgresException>(() => db.Database
-            .SqlQuery<int>($"SELECT purge_audit_logs({now.AddDays(-100)}, true, 10) AS \"Value\"").SingleAsync(Ct));
+            .SqlQuery<int>($"SELECT purge_audit_logs(true, make_interval(days => 100), 10) AS \"Value\"").SingleAsync(Ct));
         Assert.Equal(PostgresErrorCodes.CheckViolation, login.SqlState);
         var audit = await Assert.ThrowsAsync<PostgresException>(() => db.Database
-            .SqlQuery<int>($"SELECT purge_audit_logs({now.AddYears(-6)}, false, 10) AS \"Value\"").SingleAsync(Ct));
+            .SqlQuery<int>($"SELECT purge_audit_logs(false, make_interval(years => 6), 10) AS \"Value\"").SingleAsync(Ct));
         Assert.Equal(PostgresErrorCodes.CheckViolation, audit.SqlState);
 
         var tag = "direct-" + Guid.NewGuid().ToString("N")[..12];
