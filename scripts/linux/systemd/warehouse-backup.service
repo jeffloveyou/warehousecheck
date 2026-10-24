@@ -1,0 +1,9 @@
+# M7-02 每日備份（docs/13）：sudo cp scripts/linux/systemd/warehouse-backup.* /etc/systemd/system/
+#   並把 backup.sh 放到 /opt/warehouse/scripts/；sudo systemctl enable --now warehouse-backup.timer
+[Unit]
+Description=Warehouse 每日備份
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/warehouse/scripts/backup.sh

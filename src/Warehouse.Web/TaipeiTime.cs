@@ -38,4 +38,7 @@ public static class TaipeiTime
 
     /// <summary>當地日期的 00:00 對應的 UTC 時間點。</summary>
     public static DateTimeOffset StartOfDay(DateOnly date) => FromLocalInput(date.ToDateTime(TimeOnly.MinValue))!.Value;
+
+    /// <summary>時間點轉成台灣當地時間（含 +08:00 位移），用於日誌與狀態頁顯示。</summary>
+    public static DateTimeOffset ToLocal(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, Zone);
 }
