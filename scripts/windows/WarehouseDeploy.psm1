@@ -239,6 +239,76 @@ function Set-ProcessVariable {
     else { Set-Item "Env:$Name" $Value }
 }
 
+<#
+.SYNOPSIS
+    以目前槽位的發布版本執行網站的命令列（users …、maintenance …），設定與正在執行的服務完全相同。
+.DESCRIPTION
+    - 先清掉這個視窗可能殘留、會蓋過設定檔的變數（例如開發時設的 ConnectionStrings__Warehouse），再套用服務登錄檔的環境變數；結束時還原。
+    - 日誌檔名改成 -LogName，不和執行中的服務寫同一個檔。
+    - 工作目錄設為發布目錄（才會載入發布版的 appsettings.json）。
+    - -ExpectDatabase：服務設定檔連的資料庫必須是這個（避免在錯的資料庫上操作）。
+    - -CaptureOutput：輸出經 Write-Host 顯示（Start-Transcript 才記得到，給以 UAC 執行的腳本用）；
+      含秘密的輸出（初始密碼）不要用，讓它直接寫到主控台。
+    回傳命令列的結束碼；環境有問題時丟出例外。
+    -Arguments 會顯示在畫面上，不可包含秘密（密碼請由命令列程式自己產生或讀取）。
+#>
+function Invoke-WarehouseCli {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$LogName,
+        [string]$ExpectDatabase,
+        [switch]$CaptureOutput
+    )
+    $restore = @{}
+    $pushed = $false
+    $setEnv = {
+        param($Name, $Value)
+        if (-not $restore.ContainsKey($Name)) { $restore[$Name] = [Environment]::GetEnvironmentVariable($Name) }
+        Set-ProcessVariable $Name $Value
+    }
+    try {
+        $slot = Get-Slot ((Get-Content (Join-Path $Root 'proxy-config\upstream.json') -Raw | ConvertFrom-Json).ActiveSlot)
+        $exe = (Get-CimInstance Win32_Service -Filter "Name='$($slot.Service)'").PathName.Trim('"')
+        if (-not (Test-Path $exe)) { throw "找不到目前槽位 $($slot.Name) 的執行檔（$exe）。" }
+        $serviceKey = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$($slot.Service)"
+        if (-not $serviceKey.Environment) { throw "服務 $($slot.Service) 沒有環境變數設定（不是 install-service.ps1 安裝的？）。" }
+
+        @(Get-ChildItem Env:) | Where-Object { $_.Name -match '^(ConnectionStrings__|DataProtection__|Storage__|Logging__|Backup__|ASPNETCORE_|DOTNET_ENVIRONMENT$|WAREHOUSE_)' } |
+            ForEach-Object { & $setEnv $_.Name $null }
+        foreach ($line in $serviceKey.Environment) {
+            $name, $value = $line -split '=', 2
+            if ($name -eq 'ASPNETCORE_URLS') { continue }
+            & $setEnv $name $value
+        }
+        & $setEnv 'Logging__File__Name' $LogName
+
+        if ($ExpectDatabase) {
+            $configDir = if ($env:WAREHOUSE_CONFIG_DIR) { $env:WAREHOUSE_CONFIG_DIR } else { Join-Path $Root 'config' }
+            $config = Get-Content (Join-Path $configDir 'appsettings.Production.json') -Raw | ConvertFrom-Json
+            $current = ([regex]::Match([string]$config.ConnectionStrings.Warehouse, '(?i)(?:^|;)\s*Database\s*=\s*([^;]+)')).Groups[1].Value.Trim()
+            if ($current -ne $ExpectDatabase) { throw "網站目前連的是 $current，不是 $ExpectDatabase。請先執行 set-connection.ps1 -Database $ExpectDatabase。" }
+        }
+
+        Push-Location (Split-Path $exe); $pushed = $true
+        Write-Host "（槽位 $($slot.Name)：$exe $($Arguments -join ' ')）"
+        if ($CaptureOutput) {
+            & $exe @Arguments 2>&1 | ForEach-Object { Write-Host "$_" }
+            return $LASTEXITCODE
+        }
+        # 子程序直接寫主控台：在函式裡用 & 執行，輸出會變成函式的回傳值（初始密碼就會跑進變數）
+        # 引號規則同 CommandLineToArgvW："前面的 \ 加倍並跳脫 "，結尾的 \ 也加倍（否則和收尾引號組成 \"）
+        $quoted = $Arguments | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }
+        $process = Start-Process $exe -ArgumentList $quoted -WorkingDirectory (Split-Path $exe) -NoNewWindow -PassThru
+        $process.WaitForExit()
+        if ($null -eq $process.ExitCode) { throw '無法取得命令列的結束碼。' }
+        return $process.ExitCode
+    } finally {
+        if ($pushed) { Pop-Location }
+        foreach ($name in $restore.Keys) { Set-ProcessVariable $name $restore[$name] }
+    }
+}
+
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
     Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput,
-    Set-ConsoleEncoding, Set-ProcessVariable
+    Set-ConsoleEncoding, Set-ProcessVariable, Invoke-WarehouseCli

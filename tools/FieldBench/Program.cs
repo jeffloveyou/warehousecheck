@@ -3,6 +3,8 @@
 //   init-user  第一次登入並把初始密碼改成 FIELD_BENCH_PASS（帳號由 users create 建立）
 //   browser    用 CDP 連到舊電腦上的 Chrome，在那台電腦的 CPU 上跑系統頁面並量測
 //   load       N 名虛擬使用者（帳號 <user>01…<user>N，由 create-bench-users.ps1 建立）對代理持續操作，統計延遲與失敗（搭配 sample-server.ps1 取樣 CPU／RAM）
+//   soak       M7-11 長時間使用：用 CDP 連到被測電腦的 Chrome，在掃碼查料頁（不換頁）連續掃碼、每 5 分鐘穿插換頁，
+//              每輪 GC 後記錄 JS 記憶體、DOM 節點、事件監聽數，判斷有沒有持續累積
 // 密碼一律從環境變數 FIELD_BENCH_PASS／FIELD_BENCH_INITIAL_PASS 讀，不放在命令列。
 using System.Diagnostics;
 using System.Net;
@@ -28,6 +30,7 @@ return mode switch
     "init-user" => await InitUserAsync(),
     "browser" => await BrowserAsync(),
     "load" => await LoadAsync(),
+    "soak" => await SoakAsync(),
     "seed" => await Seed.RunAsync(
         Environment.GetEnvironmentVariable("FIELD_BENCH_DB") ?? throw new InvalidOperationException("請先設定環境變數 FIELD_BENCH_DB（warehouse_bench 連線字串）"),
         options.Get("attachments", @"C:\Warehouse\data\attachments"),
@@ -209,6 +212,155 @@ async Task<int> BrowserAsync()
     Console.WriteLine($"結果：{file}；瀏覽器錯誤 {errors.Count} 筆");
     await context.CloseAsync();
     return errors.Count == 0 ? 0 : 1;
+}
+
+// ── soak ────────────────────────────────────────────────────────────────────────────────
+async Task<int> SoakAsync()
+{
+    var cdp = options.Get("cdp", "http://localhost:9222");
+    var label = options.Get("label", "soak");
+    var total = TimeSpan.FromMinutes(double.Parse(options.Get("minutes", "60"), System.Globalization.CultureInfo.InvariantCulture));
+    // 掃碼查料與搜尋限流（每帳號每分鐘 60 次）：間隔不低於 1000 ms
+    var scanMs = Math.Max(1000, int.Parse(options.Get("scan-ms", "2000"), System.Globalization.CultureInfo.InvariantCulture));
+    using var pw = await Playwright.CreateAsync();
+    await using var browser = await pw.Chromium.ConnectOverCDPAsync(cdp);
+    var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = true, ViewportSize = new() { Width = 1366, Height = 768 } });
+    var page = await context.NewPageAsync();
+    // 錯誤只保留前 200 筆（長時間執行時不讓量測工具自己累積記憶體），其餘只計數
+    var errors = new List<string>();
+    var errorCount = 0;
+    void AddError(string text)
+    {
+        errorCount++;
+        if (errors.Count < 200)
+        {
+            errors.Add(text);
+        }
+    }
+    page.PageError += (_, e) => AddError(e);
+    page.Console += (_, m) => { if (m.Type == "error") { AddError(m.Text); } };
+    page.Response += (_, r) => { if (r.Status >= 400) { AddError($"HTTP {r.Status} {r.Url}"); } };
+
+    var relogins = 0;
+    async Task LoginAsync()
+    {
+        await page.GotoAsync(baseUrl + "/Account/Login");
+        await page.FillAsync("#Input_UserName", user);
+        await page.FillAsync("#Input_Password", password);
+        await page.ClickAsync("#login-submit");
+        await page.WaitForLoadStateAsync(LoadState.Load);
+    }
+    await LoginAsync();
+
+    // 掃碼用的料號：從物料清單取（量測資料的料號格式由分類前綴＋流水號組成）
+    await page.GotoAsync(baseUrl + "/Items");
+    var codes = Regex.Matches(await page.ContentAsync(), @"\b[A-Z]{2,4}-\d{6}\b").Select(m => m.Value).Distinct().Take(50).ToList();
+    if (codes.Count == 0)
+    {
+        throw new InvalidOperationException("物料清單上找不到料號，無法模擬掃碼。");
+    }
+
+    var cdpSession = await context.NewCDPSessionAsync(page);
+    await cdpSession.SendAsync("Performance.enable");
+    var samples = new List<Dictionary<string, object>>();
+    var clock = Stopwatch.StartNew();
+    async Task SampleAsync(string phase)
+    {
+        await cdpSession.SendAsync("HeapProfiler.collectGarbage");
+        var m = await Metrics.ReadAsync(cdpSession);
+        var sample = new Dictionary<string, object>
+        {
+            ["minute"] = Math.Round(clock.Elapsed.TotalMinutes, 1),
+            ["phase"] = phase,
+            ["heapMb"] = Math.Round(m["JSHeapUsedSize"] / 1048576, 2),
+            ["nodes"] = m["Nodes"],
+            ["listeners"] = m["JSEventListeners"],
+            ["documents"] = m["Documents"],
+        };
+        samples.Add(sample);
+        Console.WriteLine(JsonSerializer.Serialize(sample, Json.Options));
+    }
+
+    var paths = new[] { "/Search?Q=" + Uri.EscapeDataString("閥"), "/Stock", "/Opening", "/Items", "/Warehouses", "/Documents" };
+    var scans = 0;
+    var scanFailures = 0;
+    var round = 0;
+    await page.GotoAsync(baseUrl + "/Scan");
+    await SampleAsync("start");
+    while (clock.Elapsed < total)
+    {
+        // 4 分鐘：停在掃碼查料頁連續掃碼（背景請求換掉結果區，頁面不重新載入；最容易看出前端累積）
+        if (!page.Url.Contains("/Scan", StringComparison.Ordinal))
+        {
+            await page.GotoAsync(baseUrl + "/Scan");
+        }
+        // 登入逾時被導回登入頁時重新登入（記次數），免得之後每次掃碼都逾時、看起來像前端問題
+        if (page.Url.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase))
+        {
+            relogins++;
+            await LoginAsync();
+            await page.GotoAsync(baseUrl + "/Scan");
+        }
+        var blockEnd = clock.Elapsed + TimeSpan.FromMinutes(4);
+        while (clock.Elapsed < blockEnd && clock.Elapsed < total)
+        {
+            var code = codes[scans % codes.Count];
+            await page.FocusAsync("#scan-input");
+            await page.Keyboard.TypeAsync(code, new() { Delay = 10 });
+            await page.Keyboard.PressAsync("Enter");
+            try
+            {
+                await page.WaitForFunctionAsync(
+                    "c => location.search === '?code=' + encodeURIComponent(c) && document.querySelector('[data-scan-result]')?.getAttribute('data-kind') === 'Item'",
+                    code, new() { Timeout = 10000 });
+            }
+            catch (TimeoutException)
+            {
+                scanFailures++;
+            }
+            scans++;
+            await Task.Delay(scanMs);
+        }
+        await SampleAsync($"scan-{round}");
+        // 約 1 分鐘：一般換頁（每頁停 3 秒）
+        for (var i = 0; i < 12 && clock.Elapsed < total; i++)
+        {
+            await page.GotoAsync(baseUrl + paths[i % paths.Length]);
+            await Task.Delay(3000);
+        }
+        round++;
+    }
+    await page.GotoAsync(baseUrl + "/Scan");
+    await SampleAsync("end");
+
+    // 判斷累積：只比較掃碼頁的取樣（同一份文件、沒有換頁），第一輪與最後一輪的差
+    var scanSamples = samples.Where(s => ((string)s["phase"]).StartsWith("scan-", StringComparison.Ordinal)).ToList();
+    var first = scanSamples.FirstOrDefault();
+    var last = scanSamples.LastOrDefault();
+    var heapGrowth = first is null ? 0 : Math.Round((double)last!["heapMb"] - (double)first["heapMb"], 2);
+    var nodeGrowth = first is null ? 0 : (double)last!["nodes"] - (double)first["nodes"];
+    var listenerGrowth = first is null ? 0 : (double)last!["listeners"] - (double)first["listeners"];
+    var summary = new
+    {
+        label,
+        baseUrl,
+        browserVersion = browser.Version,
+        minutes = Math.Round(clock.Elapsed.TotalMinutes, 1),
+        scans,
+        scanFailures,
+        rounds = round,
+        heapGrowthMb = heapGrowth,
+        nodeGrowth,
+        listenerGrowth,
+        errors = errorCount,
+        relogins,
+    };
+    var file = Path.Combine(outDir, $"soak-{label}-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+    await File.WriteAllTextAsync(file, JsonSerializer.Serialize(new { summary, samples, errors }, Json.Options));
+    Console.WriteLine(JsonSerializer.Serialize(summary, Json.Options));
+    Console.WriteLine($"結果：{file}");
+    await context.CloseAsync();
+    return errorCount == 0 && scanFailures == 0 ? 0 : 1;
 }
 
 // ── load ────────────────────────────────────────────────────────────────────────────────
