@@ -36,7 +36,8 @@ public sealed class LineEntryQueryService(WarehouseDbContext db) : ILineEntryQue
         var priority = new List<(Guid Id, string? Reason)>();
         if (itemId is not null && mode == LocationListMode.Source)
         {
-            priority.AddRange(stock.Keys.Select(k => (k, (string?)"Stock")));
+            // 超過上限時保留數量多的儲位
+            priority.AddRange(stock.OrderByDescending(kv => kv.Value).Select(kv => (kv.Key, (string?)"Stock")));
         }
         else if (itemId is { } inboundItem && mode == LocationListMode.Inbound)
         {
@@ -47,7 +48,7 @@ public sealed class LineEntryQueryService(WarehouseDbContext db) : ILineEntryQue
                 .ToListAsync(cancellationToken);
             priority.AddRange(favorites.Select(f => (f.LocationId, (string?)(f.IsDefault ? "Default" : "Frequent"))));
             // 進倉時也把已有庫存的儲位排在常用之後（同一料號放在一起）
-            priority.AddRange(stock.Keys.Where(k => favorites.All(f => f.LocationId != k)).Select(k => (k, (string?)"Stock")));
+            priority.AddRange(stock.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Where(k => favorites.All(f => f.LocationId != k)).Select(k => (k, (string?)"Stock")));
         }
 
         var priorityIds = priority.Select(p => p.Id).Take(ILineEntryQueryService.LocationLimit).ToList();
@@ -60,8 +61,10 @@ public sealed class LineEntryQueryService(WarehouseDbContext db) : ILineEntryQue
             .ToListAsync(cancellationToken);
 
         var reasons = priority.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First().Reason);
+        // 依原因排序（預設 → 常用 → 有庫存），同一原因依儲位碼（字典的順序不固定，不能用加入順序）
+        static int Rank(string? reason) => reason switch { "Default" => 0, "Frequent" => 1, _ => 2 };
         var ordered = first
-            .OrderBy(l => priorityIds.IndexOf(l.Id))
+            .OrderBy(l => Rank(reasons.GetValueOrDefault(l.Id)))
             .ThenBy(l => l.Code, StringComparer.Ordinal)
             .Concat(rest);
         return ordered
