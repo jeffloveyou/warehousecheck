@@ -108,6 +108,8 @@ public partial class AuthorizationSweepTests
         ["Stocktakes.IndexModel.OnPostStartAsync"] = Policies.StocktakeManage,
         ["Warehouses.IndexModel.OnPostSaveAsync"] = Policies.WarehousesManage,
         ["Warehouses.IndexModel.OnPostToggleAsync"] = Policies.WarehousesManage,
+        ["Warehouses.IndexModel.OnPostDeleteAsync"] = Policies.WarehousesManage,
+        ["Warehouses.IndexModel.OnPostRestoreAsync"] = Policies.WarehousesManage,
         ["Warehouses.LocationModel.OnPostDeactivateImageAsync"] = Policies.WarehousesManage,
         ["Warehouses.LocationModel.OnPostStatusAsync"] = Policies.WarehousesManage,
         ["Warehouses.LocationModel.OnPostUpdateAsync"] = Policies.WarehousesManage,

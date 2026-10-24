@@ -80,7 +80,7 @@ public class IndexModel(IStocktakeService stocktakes, IWarehouseService warehous
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken); // 歷史查詢可選已刪除的倉庫（新增用的選單另外篩掉停用）
         Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
         CanStart = (await authorization.AuthorizeAsync(User, Policies.StocktakeManage)).Succeeded;
         Result = await stocktakes.ListAsync(WarehouseId, Status, PageNumber, cancellationToken);

@@ -11,7 +11,7 @@
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
         {
-            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+            <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name@(w.IsDeleted ? "（已刪除）" : "")</option>
         }
     </select>
     <input type="text" name="LocationCode" value="@Model.LocationCode" maxlength="40" placeholder="儲位碼" aria-label="儲位碼" />

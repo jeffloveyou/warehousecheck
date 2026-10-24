@@ -3,7 +3,14 @@ using Warehouse.Domain.Warehousing;
 
 namespace Warehouse.Application.Warehousing;
 
-public sealed record WarehouseRow(Guid Id, string Code, string Name, bool IsActive, int LocationCount, uint Version);
+public sealed record WarehouseRow(Guid Id, string Code, string Name, bool IsActive, int LocationCount, uint Version, bool IsDeleted = false);
+
+/// <summary>刪除倉庫的結果：Removed＝從未用過，資料列真的刪除；Hidden＝用過但已清空，標記為已刪除（歷史照常顯示）。</summary>
+public enum WarehouseDeleteResult
+{
+    Removed,
+    Hidden,
+}
 
 public sealed record WarehouseInput(string Code, string Name);
 
@@ -44,7 +51,11 @@ public sealed record LocationSearch(
 /// </summary>
 public interface IWarehouseService
 {
+    /// <summary>不含已刪除的倉庫（選單、篩選、帳號範圍都用這個）。</summary>
     Task<IReadOnlyList<WarehouseRow>> ListWarehousesAsync(CancellationToken cancellationToken);
+
+    /// <summary>includeDeleted：倉庫管理頁「顯示已刪除」、歷史查詢的篩選用。</summary>
+    Task<IReadOnlyList<WarehouseRow>> ListWarehousesAsync(bool includeDeleted, CancellationToken cancellationToken);
 
     Task<Guid> CreateWarehouseAsync(WarehouseInput input, Actor actor, CancellationToken cancellationToken);
 
@@ -52,6 +63,16 @@ public interface IWarehouseService
     Task RenameWarehouseAsync(Guid id, uint expectedVersion, string name, Actor actor, CancellationToken cancellationToken);
 
     Task SetWarehouseActiveAsync(Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 刪除倉庫（M8-01）：結存必須全為 0，且沒有未結束的預留、草稿／送審中的單據、進行中的盤點。
+    /// 從未用過（沒有任何單據、異動、結存列、盤點、預留）→ 連同儲位、儲位圖片列、常用儲位、帳號倉庫範圍一起刪除；
+    /// 用過 → 標記為已刪除並停用（歷史單據、異動照常顯示）。
+    /// </summary>
+    Task<WarehouseDeleteResult> DeleteWarehouseAsync(Guid id, uint expectedVersion, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>還原已刪除的倉庫（還原後仍是停用）。</summary>
+    Task RestoreWarehouseAsync(Guid id, uint expectedVersion, Actor actor, CancellationToken cancellationToken);
 
     Task<PagedResult<LocationRow>> SearchLocationsAsync(LocationSearch search, CancellationToken cancellationToken);
 

@@ -10,12 +10,19 @@ public class WarehouseSiteConfiguration : IEntityTypeConfiguration<WarehouseSite
 {
     public void Configure(EntityTypeBuilder<WarehouseSite> builder)
     {
-        builder.ToTable("warehouses", t => t.HasCheckConstraint("ck_warehouses_code_format", "code ~ '^[A-Z0-9]{1,8}$'"));
+        builder.ToTable("warehouses", t =>
+        {
+            t.HasCheckConstraint("ck_warehouses_code_format", "code ~ '^[A-Z0-9]{1,8}$'");
+            // 已刪除的倉庫不能是啟用狀態：A/B 相容窗口內舊版不知道刪除，按「啟用」會被資料庫擋下（M8-01 審查 #2）
+            t.HasCheckConstraint("ck_warehouses_deleted_inactive", "deleted_at IS NULL OR NOT is_active");
+        });
         builder.HasKey(w => w.Id);
         builder.Property(w => w.Id).ValueGeneratedNever();
         builder.Property(w => w.Code).HasMaxLength(WarehouseSite.CodeMaxLength);
         builder.Property(w => w.Name).HasMaxLength(WarehouseSite.NameMaxLength);
         builder.Property(w => w.IsActive).HasDefaultValue(true).ValueGeneratedNever();
+        builder.Property(w => w.DeletedBy).HasMaxLength(100);
+        builder.Ignore(w => w.IsDeleted);
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(w => w.Code).IsUnique();
     }

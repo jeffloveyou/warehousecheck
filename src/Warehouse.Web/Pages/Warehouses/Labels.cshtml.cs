@@ -81,6 +81,11 @@ public class LabelsModel(IWarehouseService warehouses, IQrCodeRenderer qr, ISett
         {
             return Forbid();
         }
+        // 已刪除（清單裡沒有）的倉庫不再印標籤：倉庫碼保留不重用，新標籤沒有意義（M8-01 審查 #6）
+        if (Warehouses.All(w => w.Id != warehouseId))
+        {
+            return NotFound();
+        }
 
         Result = await warehouses.SearchLocationsAsync(
             new LocationSearch(WarehouseId, Keyword, Status, PageNumber, PerSheet * SheetsPerPage), cancellationToken);

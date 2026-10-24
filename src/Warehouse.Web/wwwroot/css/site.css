@@ -20,6 +20,7 @@ form.inline { display: inline; margin: 0; }
 button.link { background: none; border: none; color: inherit; padding: 0; text-decoration: underline; font: inherit; }
 button.secondary { background: #fff; color: #243447; }
 button.danger { background: #b3261e; border-color: #b3261e; }
+a.danger-link { color: #b3261e; }
 h2 { font-size: 17px; margin: 20px 0 8px; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }

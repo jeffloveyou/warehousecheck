@@ -10,6 +10,7 @@ using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
+using Warehouse.Infrastructure.Warehousing;
 using Warehouse.Infrastructure.Persistence.Configurations;
 using Warehouse.Infrastructure.Scanning;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
@@ -155,12 +156,8 @@ public sealed class StocktakeService(
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
-            var warehouse = await db.Warehouses.AsNoTracking().SingleOrDefaultAsync(w => w.Id == warehouseId, cancellationToken)
-                ?? throw new NotFoundException("warehouse.not_found", "找不到倉庫。");
-            if (!warehouse.IsActive)
-            {
-                throw new DomainRuleException("倉庫已停用，不能盤點。");
-            }
+            // 先鎖倉庫、後鎖儲位（和刪除倉庫同一順序，避免死結；M8-01 審查 #1）
+            var warehouseCode = await WarehouseLock.LockUsableAsync(db, warehouseId, "倉庫已停用，不能盤點。", cancellationToken);
             await WarehouseAccess.EnsureAsync(db, actor, warehouseId, cancellationToken);
 
             var all = locationCodes.Count == 0;
@@ -171,7 +168,7 @@ public sealed class StocktakeService(
             var missing = codes.Except(scope.Select(l => l.Code)).ToList();
             if (missing.Count > 0)
             {
-                throw new DomainRuleException($"倉庫 {warehouse.Code} 沒有這些有效儲位：{string.Join("、", missing.Take(10))}。");
+                throw new DomainRuleException($"倉庫 {warehouseCode} 沒有這些有效儲位：{string.Join("、", missing.Take(10))}。");
             }
             if (scope.Count == 0)
             {
@@ -210,7 +207,7 @@ public sealed class StocktakeService(
                 WHERE b.location_id = ANY(@ids) AND b.quantity <> 0
                 """, cancellationToken, Param("st", stocktake.Id), Param("ids", locationIds));
             AuditLog.Add(db, actor, now, "stocktake.start", "stocktake", stocktake.Id.ToString(), null,
-                new { stocktake.StocktakeNo, WarehouseCode = warehouse.Code, Locations = locationIds.Length, Lines = created, AllLocations = all });
+                new { stocktake.StocktakeNo, WarehouseCode = warehouseCode, Locations = locationIds.Length, Lines = created, AllLocations = all });
             await SaveAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return stocktake.Id;

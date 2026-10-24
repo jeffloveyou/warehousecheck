@@ -141,7 +141,7 @@ public class IndexModel(IStockReservationService reservations, IWarehouseService
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
         CurrentActor = User.ToActor();
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken); // 歷史查詢可選已刪除的倉庫（新增用的選單另外篩掉停用）
         Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
         Result = await reservations.ListAsync(ItemCode, WarehouseId, StatusFilter, PageNumber, cancellationToken);
         CanManage = (await authorization.AuthorizeAsync(User, Policies.ReservationManage)).Succeeded;

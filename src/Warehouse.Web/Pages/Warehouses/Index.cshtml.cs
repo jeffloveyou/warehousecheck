@@ -24,6 +24,16 @@ public class IndexModel(IWarehouseService warehouses, IAuthorizationService auth
     [BindProperty(SupportsGet = true, Name = "edit")]
     public Guid? EditId { get; set; }
 
+    /// <summary>?delete=：顯示刪除確認區（伺服器端兩步確認，不用瀏覽器對話框）。</summary>
+    [BindProperty(SupportsGet = true, Name = "delete")]
+    public Guid? DeleteId { get; set; }
+
+    /// <summary>?deleted=true：連已刪除的倉庫一起列出（可還原）。</summary>
+    [BindProperty(SupportsGet = true, Name = "deleted")]
+    public bool ShowDeleted { get; set; }
+
+    public WarehouseRow? DeleteTarget => DeleteId is { } id ? Warehouses.FirstOrDefault(w => w.Id == id && !w.IsDeleted) : null;
+
     [BindProperty]
     [Required(ErrorMessage = "請輸入倉庫代碼。")]
     public string Code { get; set; } = string.Empty;
@@ -63,6 +73,22 @@ public class IndexModel(IWarehouseService warehouses, IAuthorizationService auth
             return isActive ? "已啟用倉庫。" : "已停用倉庫。";
         }, cancellationToken);
 
+    public Task<IActionResult> OnPostDeleteAsync(Guid id, uint version, CancellationToken cancellationToken) =>
+        RunAsync(async () =>
+        {
+            var result = await warehouses.DeleteWarehouseAsync(id, version, User.ToActor(), cancellationToken);
+            return result == WarehouseDeleteResult.Removed
+                ? "已刪除倉庫（從未使用過，連同儲位一起刪除）。"
+                : "已刪除倉庫：歷史單據與異動仍保留，可在「顯示已刪除」還原。";
+        }, cancellationToken);
+
+    public Task<IActionResult> OnPostRestoreAsync(Guid id, uint version, CancellationToken cancellationToken) =>
+        RunAsync(async () =>
+        {
+            await warehouses.RestoreWarehouseAsync(id, version, User.ToActor(), cancellationToken);
+            return "已還原倉庫（目前是停用，確認無誤再啟用）。";
+        }, cancellationToken);
+
     private async Task<IActionResult> RunAsync(Func<Task<string>> action, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded)
@@ -84,7 +110,7 @@ public class IndexModel(IWarehouseService warehouses, IAuthorizationService auth
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);
+        Warehouses = await warehouses.ListWarehousesAsync(ShowDeleted, cancellationToken);
         CanManage = (await authorization.AuthorizeAsync(User, Policies.WarehousesManage)).Succeeded;
     }
 }

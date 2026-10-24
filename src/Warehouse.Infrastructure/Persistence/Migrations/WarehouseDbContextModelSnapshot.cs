@@ -2288,6 +2288,15 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("deleted_by");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
@@ -2315,6 +2324,8 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("warehouses", null, t =>
                         {
                             t.HasCheckConstraint("ck_warehouses_code_format", "code ~ '^[A-Z0-9]{1,8}$'");
+
+                            t.HasCheckConstraint("ck_warehouses_deleted_inactive", "deleted_at IS NULL OR NOT is_active");
                         });
                 });
 
