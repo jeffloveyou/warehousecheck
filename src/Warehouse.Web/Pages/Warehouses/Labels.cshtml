@@ -1,0 +1,95 @@
+@page
+@model Warehouse.Web.Pages.Warehouses.LabelsModel
+@{
+    Layout = null;
+    var (columns, rows, _) = Model.CurrentLayout;
+    var sheets = Model.Labels.Chunk(Model.PerSheet).ToList();
+}
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>儲位標籤</title>
+    <link rel="stylesheet" href="~/css/print.css" asp-append-version="true" />
+</head>
+<body>
+    <div class="print-toolbar">
+        <form method="get" class="label-filters" id="label-filter">
+            <select name="WarehouseId" aria-label="倉庫" required>
+                <option value="">選擇倉庫</option>
+                @foreach (var w in Model.Warehouses)
+                {
+                    <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+                }
+            </select>
+            <input type="search" name="q" value="@Model.Keyword" placeholder="儲位碼、名稱、區架層格" aria-label="關鍵字" />
+            <select name="Status" aria-label="狀態">
+                <option value="">全部狀態</option>
+                @foreach (var s in Enum.GetValues<Warehouse.Domain.Warehousing.LocationStatus>())
+                {
+                    <option value="@s" selected="@(Model.Status == s)">@Display.Of(s)</option>
+                }
+            </select>
+            <select name="Layout" aria-label="版型">
+                @foreach (var (key, layout) in Warehouse.Web.Pages.Warehouses.LabelsModel.Layouts)
+                {
+                    <option value="@key" selected="@(Model.Layout == key)">@layout.Label</option>
+                }
+            </select>
+            <button type="submit">產生</button>
+        </form>
+        @if (Model.Labels.Count > 0)
+        {
+            <button type="button" id="print-button" onclick="window.print()">列印（@Model.Labels.Count 個，@sheets.Count 張）</button>
+        }
+        <a href="/Warehouses/Locations@(Model.WarehouseId is { } id ? "?WarehouseId=" + id : "")">回儲位</a>
+        @if (Model.Result is { TotalPages: > 1 } r)
+        {
+            <span class="label-pages">共 @r.TotalCount 個，第 @r.Page／@r.TotalPages 頁（每頁最多 @(Model.PerSheet * Warehouse.Web.Pages.Warehouses.LabelsModel.SheetsPerPage) 個）
+                @if (r.Page > 1)
+                {
+                    <a href="@Model.PageUrl(r.Page - 1)">上一頁</a>
+                }
+                @if (r.Page < r.TotalPages)
+                {
+                    <a href="@Model.PageUrl(r.Page + 1)" id="label-next">下一頁</a>
+                }
+            </span>
+        }
+        <p class="muted">列印設定：紙張 A4、縮放 100%（「實際大小」）、邊界「預設」、不要勾選頁首頁尾。先用一般紙印一張對齊再用標籤紙。</p>
+    </div>
+    @if (Model.WarehouseId is null)
+    {
+        <p class="print-page" id="label-choose">請先選擇倉庫。</p>
+    }
+    else if (Model.Labels.Count == 0)
+    {
+        <p class="print-page" id="label-empty">沒有符合條件的儲位。</p>
+    }
+    @foreach (var sheet in sheets)
+    {
+        <div class="label-sheet label-@Model.Layout" style="grid-template-columns: repeat(@columns, 1fr); grid-template-rows: repeat(@rows, 1fr);">
+            @foreach (var (location, svg) in sheet)
+            {
+                <div class="label">
+                    <div class="label-qr">@Html.Raw(svg)</div>
+                    <div class="label-text">
+                        <div class="label-code">@location.Code</div>
+                        <div class="label-warehouse">@location.WarehouseCode</div>
+                        @if (!string.IsNullOrEmpty(location.Name))
+                        {
+                            <div class="label-name">@location.Name</div>
+                        }
+                        @if (Model.CompanyName.Length > 0)
+                        {
+                            <div class="label-company">@Model.CompanyName</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</body>
+</html>

@@ -9,6 +9,10 @@
 {
     <p><a href="/Import?Kind=Locations&Target=@importTarget.Id" id="location-import-link">從 Excel 匯入儲位</a></p>
 }
+@if (Model.CanManage && Model.CurrentWarehouse is { } labelTarget)
+{
+    <p><a href="/Warehouses/Labels?WarehouseId=@labelTarget.Id&q=@Uri.EscapeDataString(Model.Keyword ?? "")&Status=@Model.Status" id="location-labels-link">列印儲位標籤（依目前條件）</a></p>
+}
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>

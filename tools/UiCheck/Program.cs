@@ -204,6 +204,18 @@ var admin = await LoginAsync("uiad" + suffix);
 await admin.GotoAsync(baseUrl + "/Settings");
 Check((await admin.InnerTextAsync("main")).Contains("進出倉單"), "設定頁有進出倉單區塊");
 await admin.ScreenshotAsync(new() { Path = Path.Combine(shots, "6-settings.png"), FullPage = true });
+Check((await admin.InnerTextAsync("main")).Contains("資料保留"), "設定頁有資料保留區塊（M7）");
+
+// 7b. M7：系統狀態頁（系統管理員）、儲位標籤（主管；QR 為 SVG、A4 列印）
+await admin.GotoAsync(baseUrl + "/Admin/System");
+Check(await admin.IsVisibleAsync("#system-db"), "系統狀態頁顯示資料庫資訊");
+await admin.ScreenshotAsync(new() { Path = Path.Combine(shots, "8-system.png"), FullPage = true });
+var labels = await wm.GotoAsync($"{baseUrl}/Warehouses/Labels?WarehouseId={warehouseId}");
+Check(labels!.Ok && await wm.Locator(".label-sheet svg").CountAsync() > 0, "標籤頁產生 QR（SVG）");
+await wm.ScreenshotAsync(new() { Path = Path.Combine(shots, "9-labels.png"), FullPage = true });
+await wm.PdfAsync(new() { Path = Path.Combine(shots, "9-labels.pdf"), PreferCSSPageSize = true });
+await wm.GotoAsync($"{baseUrl}/Warehouses/Labels?WarehouseId={warehouseId}&Layout=large");
+await wm.PdfAsync(new() { Path = Path.Combine(shots, "9-labels-large.pdf"), PreferCSSPageSize = true });
 
 // 8. 手機寬 390：不可水平捲動
 var mobile = await LoginAsync("uiop" + suffix, 390);

@@ -106,9 +106,18 @@ public class RetentionTests
             await command.ExecuteScalarAsync(Ct);
         }
 
-        await using var scope = factory.Services.CreateAsyncScope();
-        var result = await scope.ServiceProvider.GetRequiredService<DataRetentionService>().RunAsync(Ct);
-        Assert.True(result.Skipped);
+        try
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var result = await scope.ServiceProvider.GetRequiredService<DataRetentionService>().RunAsync(Ct);
+            Assert.True(result.Skipped);
+        }
+        finally
+        {
+            // 明確解鎖：連線回到連線池時 session 還在，不解鎖會讓之後的清理測試被當成「另一個實例清理中」
+            await using var unlock = new NpgsqlCommand($"SELECT pg_advisory_unlock({DataRetentionService.LockKey})", holder);
+            await unlock.ExecuteScalarAsync(CancellationToken.None);
+        }
     }
 
     // T-M7-02-13：保留期限設定低於下限無法儲存；其他設定照常儲存
