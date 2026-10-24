@@ -12,6 +12,7 @@ using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Files;
 using Warehouse.Infrastructure.Inventory;
 using Warehouse.Infrastructure.Items;
+using Warehouse.Infrastructure.Maintenance;
 using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Settings;
 using Warehouse.Infrastructure.Warehousing;
@@ -35,10 +36,112 @@ public sealed class LocationExtrasTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_attachments))
+        foreach (var dir in new[] { _attachments, _attachments + "-orphans" })
         {
-            Directory.Delete(_attachments, recursive: true);
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
         }
+    }
+
+    // M7 孤兒檔清理：有引用的（含已停用的圖片）不動、寬限內的不動、非系統檔名（含人工放的 pdf、假暫存檔）不動；
+    // 超過寬限的孤兒與中斷的暫存檔搬到隔離目錄（含 manifest.tsv）並寫稽核
+    [Fact]
+    public async Task 孤兒檔清理_只搬超過寬限且沒有引用的系統檔()
+    {
+        var started = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var location = await LocationAsync();
+        var png = Image(400, 300, SKEncodedImageFormat.Png);
+        var imageId = await WithImages(s => s.UploadAsync(location, new MemoryStream(png), png.Length, Manager, Ct));
+        await WithImages(s => s.DeactivateAsync(location, imageId, Manager, Ct)); // 停用的圖片檔案依規定保留
+        var referenced = Directory.GetFiles(_attachments, "*.jpg", SearchOption.AllDirectories);
+        Assert.Equal(2, referenced.Length);
+        foreach (var file in referenced)
+        {
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-3)); // 有引用的舊檔也不能被當成孤兒
+        }
+
+        string Write(string key, int ageHours)
+        {
+            var path = Path.Combine(_attachments, key.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, [1, 2, 3]);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(-ageHours));
+            return path;
+        }
+        var oldOrphan = Write($"location-images/2020/01/{Guid.NewGuid():N}-large.jpg", 72);
+        var oldTemp = Write($"document-attachments/2020/01/{Guid.NewGuid():N}.pdf.{Guid.NewGuid():N}.tmp", 72);
+        var recentOrphan = Write($"location-images/2020/01/{Guid.NewGuid():N}-thumb.jpg", 1);
+        var otherFiles = new[]
+        {
+            Write("readme.txt", 72),
+            Write("manual.pdf", 72),                                                   // 符合檔名格式但不在功能資料夾
+            Write($"backup/2020/01/{Guid.NewGuid():N}-large.jpg", 72),                // 不認得的資料夾（例如較新版本的功能）
+            Write($"location-images/x.jpg.{new string('a', 26)}/foo.tmp", 72),   // 假暫存檔
+        };
+
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var dry = await new OrphanFileService(db, new LocalFileStore(_attachments), TimeProvider.System)
+                .RunAsync(OrphanFileService.DefaultGrace, apply: false, force: false, OrphanFileService.CommandLineActor, Ct);
+            Assert.Equal(2, dry.Orphans.Count);
+            Assert.Equal((1, 4, null, null), (dry.RecentSkipped, dry.OtherFiles, dry.MovedTo, dry.Refused));
+            Assert.True(File.Exists(oldOrphan) && File.Exists(oldTemp)); // 只檢查不搬
+        }
+
+        string movedTo;
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var applied = await new OrphanFileService(db, new LocalFileStore(_attachments), TimeProvider.System)
+                .RunAsync(OrphanFileService.DefaultGrace, apply: true, force: false, OrphanFileService.CommandLineActor, Ct);
+            Assert.Equal((2, 2, 0), (applied.Orphans.Count, applied.Moved, applied.Failed.Count));
+            movedTo = applied.MovedTo!;
+        }
+
+        Assert.False(File.Exists(oldOrphan));
+        Assert.False(File.Exists(oldTemp));
+        Assert.True(File.Exists(recentOrphan));
+        Assert.All(otherFiles, f => Assert.True(File.Exists(f)));
+        Assert.All(referenced, f => Assert.True(File.Exists(f)));
+        Assert.StartsWith(_attachments + "-orphans", movedTo, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(3, Directory.GetFiles(movedTo, "*", SearchOption.AllDirectories).Length); // 2 個孤兒＋manifest.tsv
+        Assert.Equal(3, File.ReadAllLines(Path.Combine(movedTo, "manifest.tsv")).Length);
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            Assert.True(await db.AuditLogs.AnyAsync(a => a.Action == "attachments.orphans_moved" && a.OccurredAt >= started, Ct));
+        }
+    }
+
+    // M7 孤兒檔清理防呆：孤兒超過系統檔一半（多半是連錯資料庫）時拒絕搬移，加 force 才搬
+    [Fact]
+    public async Task 孤兒檔清理_孤兒過半時拒絕_加force才搬()
+    {
+        var keys = Enumerable.Range(0, 3).Select(_ => $"location-images/2020/02/{Guid.NewGuid():N}-large.jpg").ToList();
+        foreach (var key in keys)
+        {
+            var path = Path.Combine(_attachments, key.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, [1]);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-3));
+        }
+
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var refused = await new OrphanFileService(db, new LocalFileStore(_attachments), TimeProvider.System)
+                .RunAsync(OrphanFileService.DefaultGrace, apply: true, force: false, OrphanFileService.CommandLineActor, Ct);
+            Assert.NotNull(refused.Refused);
+            Assert.Equal((3, 0, null), (refused.Orphans.Count, refused.Moved, refused.MovedTo));
+        }
+        Assert.Equal(3, Directory.GetFiles(_attachments, "*.jpg", SearchOption.AllDirectories).Length);
+
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var forced = await new OrphanFileService(db, new LocalFileStore(_attachments), TimeProvider.System)
+                .RunAsync(OrphanFileService.DefaultGrace, apply: true, force: true, OrphanFileService.CommandLineActor, Ct);
+            Assert.Equal((3, null), (forced.Moved, forced.Refused));
+        }
+        Assert.Empty(Directory.GetFiles(_attachments, "*.jpg", SearchOption.AllDirectories));
     }
 
     // T-M3-07-01

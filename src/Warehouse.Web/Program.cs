@@ -99,6 +99,11 @@ if (await UserCommands.TryRunAsync(app, args))
 {
     return;
 }
+// 維護命令列（maintenance orphan-files …，M7）
+if (await MaintenanceCommands.TryRunAsync(app, args))
+{
+    return;
+}
 
 app.UseForwardedHeaders();
 app.UseExceptionHandler();
