@@ -136,7 +136,8 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
             Write-Host "複製 $($needed.Count) 個 WAL 檔（自 $start）"
             $target = ([datetimeoffset]$TargetTime).ToString('yyyy-MM-dd HH:mm:sszzz')
             # 設定檔的單引號字串裡 \ 是跳脫字元，路徑的反斜線要寫兩個（審查 B1）
-            $archiveInConf = $archive.Replace('\', '\').Replace("'", "''")
+            # （2026-10-24 U4 實跑：原本寫成 Replace('\', '\') 沒有作用，copy 找不到檔案，重播停在基底備份）
+            $archiveInConf = $archive.Replace('\', '\\').Replace("'", "''")
             # 暫時執行個體：只聽 localhost、另一個埠、關閉封存（不能把重播產生的 WAL 寫進正式的 wal 目錄）
             Add-Content (Join-Path $DataDir 'postgresql.auto.conf') @"
 
@@ -144,7 +145,7 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;
 port = $PitrPort
 listen_addresses = 'localhost'
 archive_mode = 'off'
-restore_command = 'copy "$archiveInConf\%f" "%p"'
+restore_command = 'copy "$archiveInConf\\%f" "%p"'
 recovery_target_time = '$target'
 recovery_target_action = 'promote'
 "@ -Encoding utf8
@@ -152,8 +153,32 @@ recovery_target_action = 'promote'
             # 基底備份帶著 NetworkService 的權限設定：交給目前的管理員帳號（pg_ctl 會以受限權杖啟動）
             icacls $DataDir /grant "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(OI)(CI)F" /T /C /Q | Out-Null
             $pgCtl = Find-PgTool 'pg_ctl'
-            & $pgCtl -D $DataDir -l (Join-Path $DataDir 'restore.log') -w -t 600 start
-            if ($LASTEXITCODE -ne 0) { throw "暫時執行個體啟動失敗，請看 $DataDir\restore.log。" }
+            # 啟動記錄放在資料目錄外：放在裡面時 PostgreSQL 啟動的 fsync 會撞到 pg_ctl 開著的檔案，白等 30 秒
+            $startLog = "$DataDir-start.log"
+            $serverLog = Join-Path $DataDir 'log'
+            & $pgCtl -D $DataDir -l $startLog -w -t 600 start
+            if ($LASTEXITCODE -ne 0) { throw "暫時執行個體啟動失敗，請看 $startLog 與 $serverLog 最新的檔案。" }
+            # pg_ctl 在「可以唯讀連線」時就回報成功，重播之後才可能失敗（例如 WAL 不夠到目標時間），
+            # 所以等到伺服器記錄出現 archive recovery complete（已升級為可寫入）才算完成
+            $deadline = (Get-Date).AddMinutes(10)
+            $promoted = $false
+            while ((Get-Date) -lt $deadline) {
+                $latest = Get-ChildItem $serverLog -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+                # 有 logging_collector 時記錄在 log\，沒有時在啟動記錄
+                $text = "$(Get-Content $startLog -Raw -ErrorAction SilentlyContinue)`n$(if ($latest) { Get-Content $latest.FullName -Raw -ErrorAction SilentlyContinue })"
+                if ($text -match 'archive recovery complete') { $promoted = $true; break }
+                & $pgCtl -D $DataDir status | Out-Null
+                if ($LASTEXITCODE -ne 0) { break }
+                Start-Sleep -Seconds 2
+            }
+            if (-not $promoted) {
+                if ($latest) { Write-Host ((Get-Content $latest.FullName -Tail 15) -join "`n") }
+                & $pgCtl -D $DataDir status | Out-Null
+                if ($LASTEXITCODE -eq 0) { & $pgCtl -D $DataDir stop -m fast | Out-Null }
+                throw "時間點還原沒有完成（重播未到 $target 就結束，或超過 10 分鐘）。伺服器記錄：$($latest.FullName)"
+            }
+            $stopped = ([regex]::Match($text, 'recovery stopping (before|after)[^\r\n]*time ([^\r\n]+)')).Value
+            if ($stopped) { Write-Host "重播停在：$stopped" }
             Write-Host "完成：已還原到 $target，暫時執行個體在 localhost:$PitrPort（$([math]::Round($stopwatch.Elapsed.TotalSeconds, 1)) 秒）。" -ForegroundColor Green
             Write-Host "檢查：psql -h localhost -p $PitrPort -U postgres -d warehouse_prod"
             Write-Host "取出：pg_dump -h localhost -p $PitrPort -U postgres -d warehouse_prod -Fc -f <檔案>，再以 -Dump 還原成新資料庫"
