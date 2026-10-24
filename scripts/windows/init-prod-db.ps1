@@ -50,8 +50,8 @@ try {
     $pgpassFile = Join-Path $secretDir 'backup.pgpass'
 
     $pgPassword = Read-Host 'postgres 超級使用者密碼' -AsSecureString
-    $ownerPassword = ConvertTo-PlainText (Read-Host "$owner 密碼（新帳號才會設定；至少 12 字，請自行保管）" -AsSecureString)
-    if ($ownerPassword.Length -lt 12) { throw '擁有者密碼至少 12 字。' }
+    $ownerPassword = ConvertTo-PlainText (Read-Host "$owner 密碼（新帳號才會設定；至少 8 字，請自行保管）" -AsSecureString)
+    if ($ownerPassword.Length -lt 8) { throw '擁有者密碼至少 8 字。' }
     if ($ownerPassword -ne (ConvertTo-PlainText (Read-Host '再輸入一次' -AsSecureString))) { throw '兩次輸入的密碼不一致。' }
 
     # 沿用 secrets 已有的密碼（重跑時網站與備份不必改設定），沒有才產生

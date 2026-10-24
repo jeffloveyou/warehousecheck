@@ -29,10 +29,10 @@ APP_PW=$([[ -f "$CONN" ]] && sed -n 's/.*Password=\([^;]*\).*/\1/p' "$CONN" || r
 BACKUP_PW=$([[ -f "$PGPASS" ]] && head -n1 "$PGPASS" | awk -F: '{print $NF}' || random_secret)
 [[ -n "$APP_PW" && -n "$BACKUP_PW" ]] || { echo "$SECRETS 的檔案格式不對，請刪除後重跑。" >&2; exit 1; }
 
-read -r -s -p "$OWNER 密碼（新帳號才會設定；至少 12 字）：" OWNER_PW; echo
+read -r -s -p "$OWNER 密碼（新帳號才會設定；至少 8 字）：" OWNER_PW; echo
 read -r -s -p "再輸入一次：" OWNER_PW2; echo
 [[ "$OWNER_PW" == "$OWNER_PW2" ]] || { echo "兩次輸入的密碼不一致。" >&2; exit 1; }
-(( ${#OWNER_PW} >= 12 )) || { echo "擁有者密碼至少 12 字。" >&2; exit 1; }
+(( ${#OWNER_PW} >= 8 )) || { echo "擁有者密碼至少 8 字。" >&2; exit 1; }
 
 q() { printf "'%s'" "${1//\'/\'\'}"; }   # SQL 字串常值
 psql_as_postgres() { sudo -u postgres psql -X -q -p "$PORT" -v ON_ERROR_STOP=1 "$@"; }
