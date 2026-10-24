@@ -45,6 +45,8 @@ builder.Services.AddWarehouseInfrastructure(connectionString, attachmentsDirecto
 builder.Services.AddWarehouseApi();
 // 預留到期釋放（M4-07）：每 10 分鐘一次，A／B 兩個實例同時執行也安全（條件式更新）
 builder.Services.AddHostedService<Warehouse.Web.Jobs.ReservationExpiryJob>();
+// 資料保留清理（M7，ADR-0021）：每日一次，A／B 只有一個實例執行（advisory lock）
+builder.Services.AddHostedService<Warehouse.Web.Jobs.DataRetentionJob>();
 builder.Services.AddWarehouseIdentity();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<ExportGate>();

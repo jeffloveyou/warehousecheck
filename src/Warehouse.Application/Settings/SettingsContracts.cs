@@ -46,6 +46,48 @@ public sealed record SystemSettings(
 
     /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
     public string PrintCompanyName { get; init; } = string.Empty;
+
+    /// <summary>資料保留（M7-02，ADR-0021）：每日清理工作刪除超過期限的紀錄；不可低於 <see cref="RetentionLimits"/> 的下限。</summary>
+    public int RetentionAuditYears { get; init; } = RetentionLimits.AuditYearsDefault;
+
+    public int RetentionLoginDays { get; init; } = RetentionLimits.LoginDaysDefault;
+
+    public int RetentionProcessedCommandsDays { get; init; } = RetentionLimits.ProcessedCommandsDaysDefault;
+
+    public int RetentionPostingFailuresDays { get; init; } = RetentionLimits.PostingFailuresDaysDefault;
+
+    public int RetentionImportBatchesDays { get; init; } = RetentionLimits.ImportBatchesDaysDefault;
+}
+
+/// <summary>
+/// 資料保留期限的預設值與下限（ADR-0021）。庫存單據、異動、結存不在清理範圍，永久保留。
+/// 操作日誌與登入紀錄的下限同時寫在資料庫函式 purge_audit_logs（應用程式改不了）。
+/// </summary>
+public static class RetentionLimits
+{
+    /// <summary>操作日誌（登入以外）：D-13 保留 7 年。</summary>
+    public const int AuditYearsDefault = 7;
+    public const int AuditYearsMin = 7;
+
+    /// <summary>登入紀錄（auth.*）：1 年。</summary>
+    public const int LoginDaysDefault = 365;
+    public const int LoginDaysMin = 365;
+
+    /// <summary>冪等鍵：同一鍵在期限內重送不會重複過帳；客戶端重試都在幾分鐘內，30 天以上即安全。</summary>
+    public const int ProcessedCommandsDaysDefault = 90;
+    public const int ProcessedCommandsDaysMin = 30;
+
+    /// <summary>過帳失敗紀錄（庫存異常頁）。</summary>
+    public const int PostingFailuresDaysDefault = 365;
+    public const int PostingFailuresDaysMin = 90;
+
+    /// <summary>匯入批次（含解析後的整份資料）：試算 24 小時內有效，確認結果另有操作日誌。</summary>
+    public const int ImportBatchesDaysDefault = 30;
+    public const int ImportBatchesDaysMin = 2;
+
+    /// <summary>上限（避免打錯成天文數字）：100 年。</summary>
+    public const int YearsMax = 100;
+    public const int DaysMax = 36500;
 }
 
 /// <summary>設定鍵（資料庫 system_settings.key）。改名會讓既有設定失效，只能新增。</summary>
@@ -72,6 +114,11 @@ public static class SettingKeys
     public const string PrintCompanyName = "print.company_name";
     public const string AllowSelfApproveStocktake = "stock.stocktake.allow_self_approval";
     public const string StocktakeBlindCount = "stock.stocktake.blind_count";
+    public const string RetentionAuditYears = "retention.audit_years";
+    public const string RetentionLoginDays = "retention.login_days";
+    public const string RetentionProcessedCommandsDays = "retention.processed_commands_days";
+    public const string RetentionPostingFailuresDays = "retention.posting_failures_days";
+    public const string RetentionImportBatchesDays = "retention.import_batches_days";
 
     /// <summary>文字設定的長度上限。</summary>
     public const int TextMaxLength = 100;

@@ -33,6 +33,11 @@
     <input type="hidden" name="Original.PrintCompanyName" value="@Model.Original.PrintCompanyName" />
     <input type="hidden" name="Original.AllowSelfApproveStocktake" value="@Model.Original.AllowSelfApproveStocktake.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.StocktakeBlindCount" value="@Model.Original.StocktakeBlindCount.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.RetentionAuditYears" value="@Model.Original.RetentionAuditYears" />
+    <input type="hidden" name="Original.RetentionLoginDays" value="@Model.Original.RetentionLoginDays" />
+    <input type="hidden" name="Original.RetentionProcessedCommandsDays" value="@Model.Original.RetentionProcessedCommandsDays" />
+    <input type="hidden" name="Original.RetentionPostingFailuresDays" value="@Model.Original.RetentionPostingFailuresDays" />
+    <input type="hidden" name="Original.RetentionImportBatchesDays" value="@Model.Original.RetentionImportBatchesDays" />
     <h2>期初建帳</h2>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveOpening" value="true" checked="@Model.Form.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
@@ -83,6 +88,20 @@
     <div class="form-grid">
         <label for="Form_PrintCompanyName">列印公司名稱</label>
         <input type="text" id="Form_PrintCompanyName" name="Form.PrintCompanyName" value="@Model.Form.PrintCompanyName" maxlength="100" placeholder="空白＝列印時不印抬頭" />
+    </div>
+    <h2>資料保留</h2>
+    <p class="muted">每天清除超過期限的紀錄。<strong>庫存單據、異動、結存、物料不會被清除</strong>。下限是規定（操作日誌 7 年、登入紀錄 1 年），低於下限無法儲存。</p>
+    <div class="form-grid" id="retention-settings">
+        <label for="Form_RetentionAuditYears">操作日誌（年，至少 @Warehouse.Application.Settings.RetentionLimits.AuditYearsMin）</label>
+        <input type="number" id="Form_RetentionAuditYears" name="Form.RetentionAuditYears" value="@Model.Form.RetentionAuditYears" min="@Warehouse.Application.Settings.RetentionLimits.AuditYearsMin" max="@Warehouse.Application.Settings.RetentionLimits.YearsMax" required />
+        <label for="Form_RetentionLoginDays">登入紀錄（天，至少 @Warehouse.Application.Settings.RetentionLimits.LoginDaysMin）</label>
+        <input type="number" id="Form_RetentionLoginDays" name="Form.RetentionLoginDays" value="@Model.Form.RetentionLoginDays" min="@Warehouse.Application.Settings.RetentionLimits.LoginDaysMin" max="@Warehouse.Application.Settings.RetentionLimits.DaysMax" required />
+        <label for="Form_RetentionProcessedCommandsDays">防重複送出紀錄（天，至少 @Warehouse.Application.Settings.RetentionLimits.ProcessedCommandsDaysMin）</label>
+        <input type="number" id="Form_RetentionProcessedCommandsDays" name="Form.RetentionProcessedCommandsDays" value="@Model.Form.RetentionProcessedCommandsDays" min="@Warehouse.Application.Settings.RetentionLimits.ProcessedCommandsDaysMin" max="@Warehouse.Application.Settings.RetentionLimits.DaysMax" required />
+        <label for="Form_RetentionPostingFailuresDays">過帳失敗紀錄（天，至少 @Warehouse.Application.Settings.RetentionLimits.PostingFailuresDaysMin）</label>
+        <input type="number" id="Form_RetentionPostingFailuresDays" name="Form.RetentionPostingFailuresDays" value="@Model.Form.RetentionPostingFailuresDays" min="@Warehouse.Application.Settings.RetentionLimits.PostingFailuresDaysMin" max="@Warehouse.Application.Settings.RetentionLimits.DaysMax" required />
+        <label for="Form_RetentionImportBatchesDays">匯入批次（天，至少 @Warehouse.Application.Settings.RetentionLimits.ImportBatchesDaysMin）</label>
+        <input type="number" id="Form_RetentionImportBatchesDays" name="Form.RetentionImportBatchesDays" value="@Model.Form.RetentionImportBatchesDays" min="@Warehouse.Application.Settings.RetentionLimits.ImportBatchesDaysMin" max="@Warehouse.Application.Settings.RetentionLimits.DaysMax" required />
     </div>
     <div class="actions"><button type="submit" id="settings-save">儲存</button></div>
 </form>

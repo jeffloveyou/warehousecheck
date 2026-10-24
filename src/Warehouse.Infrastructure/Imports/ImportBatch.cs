@@ -63,5 +63,6 @@ public class ImportBatchConfiguration : IEntityTypeConfiguration<ImportBatch>
         builder.Property(b => b.IssuesJson).HasColumnType("jsonb");
         builder.Property(b => b.CreatedByName).HasMaxLength(100);
         builder.HasIndex(b => new { b.CreatedById, b.CreatedAt });
+        builder.HasIndex(b => b.CreatedAt); // 保留期限清理（M7）
     }
 }

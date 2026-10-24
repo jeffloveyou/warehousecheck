@@ -213,5 +213,7 @@ public class ProcessedCommandConfiguration : IEntityTypeConfiguration<ProcessedC
         builder.Property(c => c.CommandType).HasMaxLength(50);
         builder.Property(c => c.RequestHash).HasMaxLength(64);
         builder.Property(c => c.ResultRef).HasMaxLength(100);
+        // 保留期限清理（M7，DataRetentionJob）依建立時間刪除
+        builder.HasIndex(c => c.CreatedAt);
     }
 }
