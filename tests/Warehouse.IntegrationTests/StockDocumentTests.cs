@@ -191,6 +191,71 @@ public class StockDocumentTests
         Assert.Equal(PostgresErrorCodes.CheckViolation, ex.SqlState);
     }
 
+    // M8-02：明細輸入的儲位清單：出倉把有庫存的儲位排前（附數量）、進倉把常用儲位排前；不含停用儲位；關鍵字比對碼與名稱
+    [Fact]
+    public async Task 明細輸入_儲位清單_有庫存或常用的排前面_可輸入縮小範圍()
+    {
+        var code = "D" + Guid.NewGuid().ToString("N")[..7].ToUpperInvariant();
+        Guid w;
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var service = new WarehouseService(db, TimeProvider.System);
+            w = await service.CreateWarehouseAsync(new WarehouseInput(code, "清單測試倉"), Manager, Ct);
+            await service.CreateLocationAsync(w, new LocationInput("A-01", Empty with { Name = "一號料架" }), Manager, Ct);
+            await service.CreateLocationAsync(w, new LocationInput("A-02", Empty), Manager, Ct);
+            await service.CreateLocationAsync(w, new LocationInput("B-01", Empty), Manager, Ct);
+            var c01 = await service.CreateLocationAsync(w, new LocationInput("C-01", Empty), Manager, Ct);
+            var row = (await service.GetLocationAsync(c01, Ct))!;
+            await service.ChangeLocationStatusAsync(c01, row.Version, LocationStatus.Inactive, Manager, Ct);
+        }
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await ConfirmAsync(await DocAsync(StockDocumentType.Inbound, w, PurchaseIn, ("B-01", item, 3m), ("A-02", item, 5m)), Operator);
+        Guid itemId;
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            itemId = await db.Items.Where(i => i.ItemCode == item).Select(i => i.Id).SingleAsync(Ct);
+            await new ItemLocationService(db, TimeProvider.System).AddAsync(itemId, w, "A-01", true, Manager, Ct);
+        }
+
+        await using var query = MigratedDatabaseFixture.CreateContext();
+        var queries = new LineEntryQueryService(query);
+        var source = await queries.LocationsAsync(w, null, itemId, LocationListMode.Source, Ct);
+        Assert.Equal(["A-02", "B-01", "A-01"], source.Select(o => o.Code)); // 有庫存的依碼排序在前，C-01 停用不列
+        Assert.Equal((5m, "Stock"), (source[0].Quantity!.Value, source[0].Reason));
+        Assert.Equal(("一號料架", null), (source[2].Name, source[2].Quantity));
+
+        var inbound = await queries.LocationsAsync(w, null, itemId, LocationListMode.Inbound, Ct);
+        Assert.Equal(("A-01", "Default"), (inbound[0].Code, inbound[0].Reason));
+        Assert.Equal(["A-02", "B-01"], inbound.Skip(1).Select(o => o.Code));
+
+        Assert.Equal("A-01", Assert.Single(await queries.LocationsAsync(w, "一號", itemId, LocationListMode.Source, Ct)).Code);
+        Assert.Equal("B-01", Assert.Single(await queries.LocationsAsync(w, "ｂ-0", null, LocationListMode.Plain, Ct)).Code); // 全形小寫也找得到
+    }
+
+    // M8-02：批號清單依有效期限先到期先出（沒有期限排後），可指定儲位、可輸入縮小範圍
+    [Fact]
+    public async Task 明細輸入_批號清單_先到期先出_可指定儲位()
+    {
+        var (w, _) = await WarehouseAsync("A-01", "A-02");
+        var item = await ItemCodeAsync(TrackingMode.Lot);
+        var inbound = await CreateAsync(StockDocumentType.Inbound, w, PurchaseIn);
+        await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("A-01", item, 2m, "L1", null, new DateOnly(2027, 1, 1)), Operator, Ct));
+        await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("A-02", item, 1m, "L2", null, new DateOnly(2026, 12, 1)), Operator, Ct));
+        await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("A-02", item, 4m, "L3"), Operator, Ct));
+        await ConfirmAsync(inbound, Operator);
+
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        var itemId = await db.Items.Where(i => i.ItemCode == item).Select(i => i.Id).SingleAsync(Ct);
+        var a01 = await db.Locations.Where(l => l.WarehouseId == w && l.Code == "A-01").Select(l => l.Id).SingleAsync(Ct);
+        var queries = new LineEntryQueryService(db);
+
+        var all = await queries.LotsAsync(w, itemId, null, null, Ct);
+        Assert.Equal(["L2", "L1", "L3"], all.Select(o => o.LotNo));
+        Assert.Equal((new DateOnly(2026, 12, 1), 1m, "A-02"), (all[0].ExpiryDate!.Value, all[0].Quantity, all[0].LocationCode));
+        Assert.Equal("L1", Assert.Single(await queries.LotsAsync(w, itemId, a01, null, Ct)).LotNo);
+        Assert.Equal("L3", Assert.Single(await queries.LotsAsync(w, itemId, null, "l3", Ct)).LotNo);
+    }
+
     // T-M4-02-02：草稿不影響結存；審核關閉時不能送審；出庫不足整張回滾、單據仍是草稿
     [Fact]
     public async Task 草稿不影響結存_不能送審_出庫不足整張回滾()

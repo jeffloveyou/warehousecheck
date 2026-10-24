@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<IStockReservationService>(sp => sp.GetRequiredService<StockReservationService>());
         services.AddScoped<IItemNegativePolicyService>(sp => sp.GetRequiredService<StockReservationService>());
         services.AddScoped<IStockQueryService, StockQueryService>();
+        services.AddScoped<ILineEntryQueryService, LineEntryQueryService>();
         services.AddScoped<IMasterDataService, MasterDataService>();
         services.AddScoped<IItemLocationService, ItemLocationService>();
         services.AddScoped<ILocationImageService, LocationImageService>();

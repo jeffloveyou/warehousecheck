@@ -15,6 +15,7 @@ using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Scanning;
 using Warehouse.Domain.Text;
 using Warehouse.Web.Pages.Shared;
+using Warehouse.Web.Security;
 
 namespace Warehouse.Web.Pages.Documents;
 
@@ -291,6 +292,52 @@ public class DetailsModel(
         }
         return new JsonResult(ScanJson.From(result, extra));
     }
+
+    /// <summary>明細輸入區：物料搜尋（按 Enter 才查，回傳候選 JSON，M8-02）。</summary>
+    public async Task<IActionResult> OnGetItemSearchAsync(Guid id, string? q, CancellationToken cancellationToken) =>
+        await documents.GetAsync(id, cancellationToken) is null
+            ? NotFound()
+            : await LineEntryJson.ItemsAsync(search, q, cancellationToken);
+
+    /// <summary>
+    /// 明細輸入區：儲位選擇清單（M8-02）。出倉、移庫來源把這個料號有庫存的儲位排在前面；進倉把常用儲位排在前面。
+    /// <paramref name="target"/>＋<paramref name="warehouseCode"/>：移庫目的，可選其他倉庫（必須是可作業、啟用中的倉庫）。
+    /// </summary>
+    public async Task<IActionResult> OnGetLocationsAsync(
+        Guid id, string? q, Guid? itemId, bool target, string? warehouseCode,
+        [FromServices] ILineEntryQueryService queries, [FromServices] IWarehouseService warehouses, CancellationToken cancellationToken)
+    {
+        if (await documents.GetAsync(id, cancellationToken) is not { } doc)
+        {
+            return NotFound();
+        }
+        var warehouseId = doc.WarehouseId;
+        var mode = doc.DocType == StockDocumentType.Inbound ? LocationListMode.Inbound : LocationListMode.Source;
+        if (target && doc.DocType == StockDocumentType.Transfer)
+        {
+            mode = LocationListMode.Plain;
+            if (!string.IsNullOrWhiteSpace(warehouseCode))
+            {
+                var code = TextNormalizer.Normalize(warehouseCode);
+                var operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
+                var found = (await warehouses.ListWarehousesAsync(cancellationToken))
+                    .FirstOrDefault(w => w.Code == code && w.IsActive && operable.Allows(w.Id));
+                if (found is null)
+                {
+                    return new JsonResult(new { items = Array.Empty<object>(), message = $"沒有可作業的倉庫 {code}。" });
+                }
+                warehouseId = found.Id;
+            }
+        }
+        return await LineEntryJson.LocationsAsync(queries, warehouseId, q, itemId, mode, cancellationToken);
+    }
+
+    /// <summary>明細輸入區：料號在本倉（或指定儲位）可選的批號、序號（出倉、移庫；先到期先出，M8-02）。</summary>
+    public async Task<IActionResult> OnGetLotsAsync(
+        Guid id, Guid itemId, Guid? locationId, string? q, [FromServices] ILineEntryQueryService queries, CancellationToken cancellationToken) =>
+        await documents.GetAsync(id, cancellationToken) is not { } doc
+            ? NotFound()
+            : await LineEntryJson.LotsAsync(queries, doc.WarehouseId, itemId, locationId, q, cancellationToken);
 
     /// <summary>
     /// 掃碼面板加入明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
