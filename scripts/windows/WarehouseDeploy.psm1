@@ -217,5 +217,16 @@ function Read-ChildOutput {
     }
 }
 
+<#
+.SYNOPSIS
+    把主控台輸出編碼設成 UTF-8（或 -Encoding 指定的編碼）。dotnet 子程序會改掉共用主控台的字碼頁，
+    之後 Write-Host 的中文就變亂碼；每次輸出報告前呼叫一次，結束時傳入原本的編碼還原。沒有主控台（輸出被轉向）時略過。
+#>
+function Set-ConsoleEncoding {
+    param([Text.Encoding]$Encoding = [Text.UTF8Encoding]::new($false))
+    try { [Console]::OutputEncoding = $Encoding } catch { }
+}
+
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
-    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput
+    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput,
+    Set-ConsoleEncoding

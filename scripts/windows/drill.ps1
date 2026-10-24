@@ -35,8 +35,10 @@ $upstreamFile = Join-Path $Root 'proxy-config\upstream.json'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $report = Join-Path $Root "logs\drill-$stamp.log"
 $results = [Collections.Generic.List[object]]::new()
+$originalOutputEncoding = [Console]::OutputEncoding
 
 function Write-Report([string]$Text) {
+    Set-ConsoleEncoding   # 子程序（dotnet）可能改了主控台字碼頁
     Write-Host $Text
     Add-Content $report $Text -Encoding utf8
 }
@@ -133,10 +135,12 @@ try {
     Write-Report $(if ($failed) { "未通過 $failed 段，詳見 $report" } else { "全部通過（紀錄 $report）" })
     exit $(if ($failed) { 1 } else { 0 })
 } catch {
+    Set-ConsoleEncoding
     Write-Host "錯誤：$($_.Exception.Message)" -ForegroundColor Red
     if (Test-Path (Split-Path $report)) { Add-Content $report "錯誤：$($_.Exception.Message)" -Encoding utf8 }
     exit 1
 } finally {
+    Set-ConsoleEncoding $originalOutputEncoding
     Remove-Item Env:WAREHOUSE_DEV_DB -ErrorAction SilentlyContinue
     if ($LogFile) { Stop-Transcript | Out-Null }
 }
