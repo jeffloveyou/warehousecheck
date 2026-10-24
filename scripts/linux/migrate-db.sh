@@ -28,7 +28,7 @@ trap 'unset PGPASSWORD' EXIT
 run_psql() { psql -X -q -h localhost -p "$PORT" -U "$OWNER" -d "$DATABASE" -v ON_ERROR_STOP=1 "$@"; }
 applied() {
   if [[ "$(run_psql -A -t -c "SELECT to_regclass('public.\"__EFMigrationsHistory\"') IS NOT NULL")" == "t" ]]; then
-    run_psql -A -t -c 'SELECT "MigrationId" FROM "__EFMigrationsHistory"'
+    run_psql -A -t -c 'SELECT migration_id FROM "__EFMigrationsHistory"'   # snake_case 命名慣例
   fi
 }
 pending() { local done; done=$(applied); for m in "${ALL[@]}"; do grep -qxF "$m" <<<"$done" || echo "$m"; done; }
@@ -53,7 +53,8 @@ if [[ "$SKIP_BACKUP" != "true" ]]; then
   echo "備份完成：$file"
 fi
 read -r -p "確認套用到 $DATABASE？輸入 YES 繼續：" answer
-[[ "$answer" == "YES" ]] || { echo "已取消，資料庫未變更。"; exit 1; }
+answer="${answer//[[:space:]]/}"
+[[ "${answer,,}" == "yes" ]] || { echo "已取消，資料庫未變更。"; exit 1; }
 
 PGOPTIONS='-c lock_timeout=5s' run_psql -f "$SCRIPT" || { echo "套用失敗；若是等鎖逾時，等長時間作業結束後重跑即可。" >&2; exit 1; }
 run_psql -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $APP; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $APP;"

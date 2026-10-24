@@ -52,8 +52,10 @@ try {
         $exists = & $psql -X -A -t -h localhost -p $Port -U $owner -d $Database -c "SELECT to_regclass('public.""__EFMigrationsHistory""') IS NOT NULL"
         if ($LASTEXITCODE -ne 0) { throw "無法連線 $Database（帳號 $owner）。" }
         if ($exists.Trim() -ne 't') { return @() }
-        @(& $psql -X -A -t -h localhost -p $Port -U $owner -d $Database -c 'SELECT "MigrationId" FROM "__EFMigrationsHistory"') |
-            Where-Object { $_ }
+        # 專案用 snake_case 命名慣例，歷史表欄位是 migration_id（不是 EF 預設的 MigrationId）
+        $rows = @(& $psql -X -A -t -h localhost -p $Port -U $owner -d $Database -c 'SELECT migration_id FROM "__EFMigrationsHistory"')
+        if ($LASTEXITCODE -ne 0) { throw "讀取 $Database 的 Migration 歷史失敗（psql 結束碼 $LASTEXITCODE）。" }
+        $rows | Where-Object { $_ }
     }
 
     $applied = Get-Applied
@@ -81,7 +83,8 @@ try {
         Write-Host "備份完成（$([math]::Round((Get-Item $file).Length / 1MB, 1)) MB）"
     }
 
-    if ((Read-Host "確認套用到 $Database？輸入 YES 繼續") -cne 'YES') {
+    # 大小寫不拘（yes、Yes、YES 都可以）
+    if ((Read-Host "確認套用到 $Database？輸入 YES 繼續").Trim() -ne 'YES') {
         Write-Host '已取消，資料庫未變更。'
         exit 1
     }
@@ -96,7 +99,8 @@ try {
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $app; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $app;"
     if ($LASTEXITCODE -ne 0) { throw "補授權給 $app 失敗（psql 結束碼 $LASTEXITCODE）。" }
 
-    $left = @($all | Where-Object { $_ -notin (Get-Applied) })
+    $appliedNow = Get-Applied
+    $left = @($all | Where-Object { $_ -notin $appliedNow })
     if ($left) { throw "套用後仍有待套用的 Migration：$($left -join ', ')" }
     Write-Host "完成：$Database 已套用到 $($all[-1])。" -ForegroundColor Green
     exit 0
