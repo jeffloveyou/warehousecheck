@@ -155,6 +155,10 @@ recovery_target_action = 'promote'
             $pgCtl = Find-PgTool 'pg_ctl'
             # 啟動記錄放在資料目錄外：放在裡面時 PostgreSQL 啟動的 fsync 會撞到 pg_ctl 開著的檔案，白等 30 秒
             $startLog = "$DataDir-start.log"
+            # 上層目錄只給 Administrators／SYSTEM，而 pg_ctl 以受限權杖（停用管理員群組）啟動、無法在那裡建檔：
+            # 先建好檔案並授權給目前帳號（2026-10-24 U4 實跑「存取被拒」）
+            New-Item -ItemType File -Path $startLog -Force | Out-Null
+            icacls $startLog /grant "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):F" /Q | Out-Null
             $serverLog = Join-Path $DataDir 'log'
             & $pgCtl -D $DataDir -l $startLog -w -t 600 start
             if ($LASTEXITCODE -ne 0) { throw "暫時執行個體啟動失敗，請看 $startLog 與 $serverLog 最新的檔案。" }
