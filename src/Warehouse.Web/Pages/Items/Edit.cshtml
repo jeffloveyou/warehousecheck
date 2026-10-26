@@ -8,6 +8,45 @@
     <div asp-validation-summary="ModelOnly" class="message error"></div>
     <input type="hidden" asp-for="Version" />
     <partial name="_ItemFields" model="(Model.Input, Model.Options)" />
+
+    @if (Model.UnitTrackingNeedsConfirm)
+    {
+        @* 已有異動紀錄、系統設定開放：只有實際改了單位或追蹤模式時服務才要求這兩欄 *@
+        <div class="panel" id="unit-tracking-confirm">
+            <div class="message warn">此物料已有庫存異動紀錄。改基本單位或追蹤模式時，<strong>舊紀錄的數量不會換算</strong>（例如原本 10 個，改成「箱」後會顯示 10 箱）。</div>
+            <p><label><input type="checkbox" name="ConfirmUnitTrackingChange" value="true" checked="@Model.ConfirmUnitTrackingChange" id="confirm-unit-change" /> 我了解舊紀錄的數量不會換算</label></p>
+            <div class="form-grid">
+                <label for="unit-change-reason">變更原因</label>
+                <input type="text" id="unit-change-reason" name="UnitTrackingChangeReason" value="@Model.UnitTrackingChangeReason"
+                       maxlength="@ItemUpdateOptions.ReasonMaxLength" placeholder="只有改單位或追蹤模式時需要填寫" />
+            </div>
+        </div>
+    }
+
+    @if (Model.ActiveBarcodes.Count > 0)
+    {
+        <div class="panel">
+            <h2>已登錄的原廠條碼</h2>
+            <div class="table-wrap">
+                <table id="item-barcode-list">
+                    <thead><tr><th>停用</th><th>條碼</th><th>包裝數量</th><th>登錄者</th></tr></thead>
+                    <tbody>
+                        @foreach (var b in Model.ActiveBarcodes)
+                        {
+                            <tr>
+                                <td><input type="checkbox" name="DeactivateBarcodeIds" value="@b.Id" checked="@Model.DeactivateBarcodeIds.Contains(b.Id)" aria-label="停用條碼 @b.Text" /></td>
+                                <td><code>@b.Text</code></td>
+                                <td>@Display.Qty(b.PackQuantity ?? 1m) @Model.Item.UnitCode</td>
+                                <td>@b.CreatedByName</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="muted">勾選後儲存即停用；停用的條碼不會再被掃到，紀錄保留，可再登錄給其他物料。</p>
+        </div>
+    }
+
     @if (Model.Candidates.Count > 0)
     {
         <div class="panel"><partial name="_DuplicateCandidates" model="(Model.Candidates, true)" /></div>
@@ -25,3 +64,6 @@
         <a href="/Items/Details/@Model.Item.Id">取消</a>
     </div>
 </form>
+@section Scripts {
+    <script src="~/js/item-barcodes.js" asp-append-version="true"></script>
+}

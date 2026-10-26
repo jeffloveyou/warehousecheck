@@ -32,6 +32,9 @@ input[type=text], input[type=password], input[type=number], select, textarea { w
 textarea { min-height: 60px; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .filters input[type=text], .filters select { width: auto; }
+/* 物料表單的原廠條碼列（M8-05）：條碼與包裝數量同一行，窄螢幕自動換行 */
+.barcode-row .barcode-text { width: 16em; max-width: 100%; }
+.barcode-row .barcode-pack { width: 12em; max-width: 100%; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .panel { border: 1px solid #ccd; border-radius: 4px; padding: 10px 12px; margin: 12px 0; }
 .message { padding: 8px 12px; border-radius: 3px; margin: 8px 0; }

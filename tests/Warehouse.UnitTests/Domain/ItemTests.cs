@@ -122,4 +122,97 @@ public class ItemTests
     {
         Assert.Throws<DomainRuleException>(() => new Unit(Guid.NewGuid(), code, "個", decimalPlaces));
     }
+
+    // ---- M8-05：核准後改分類／單位／追蹤模式（ADR-0023） ----
+
+    private static Item Approved(TrackingMode trackingMode = TrackingMode.None)
+    {
+        var item = Submit(trackingMode: trackingMode);
+        item.Approve("EL-000001", Now);
+        return item;
+    }
+
+    private static void Update(Item item, Guid? categoryId = null, Guid? unitId = null, TrackingMode? trackingMode = null,
+        string name = "伺服放大器", bool checkedFlag = false) =>
+        item.UpdateDetails(name, categoryId ?? item.CategoryId, unitId ?? item.BaseUnitId, trackingMode ?? item.TrackingMode,
+            null, null, null, Now, checkedFlag);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void 核准後改分類_不論旗標為何都被擋(bool unitTrackingChangeChecked)
+    {
+        var item = Approved();
+        var original = item.CategoryId;
+
+        var error = Assert.Throws<DomainRuleException>(() => Update(item, categoryId: Guid.NewGuid(), checkedFlag: unitTrackingChangeChecked));
+
+        Assert.Contains("分類", error.Message);
+        Assert.Equal(original, item.CategoryId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void 停用後改分類_同樣被擋(bool unitTrackingChangeChecked)
+    {
+        var item = Approved();
+        item.Deactivate(Now);
+
+        Assert.Throws<DomainRuleException>(() => Update(item, categoryId: Guid.NewGuid(), checkedFlag: unitTrackingChangeChecked));
+    }
+
+    [Fact]
+    public void 核准後改基本單位_旗標false被擋_旗標true成功()
+    {
+        var item = Approved();
+        var original = item.BaseUnitId;
+        var newUnit = Guid.NewGuid();
+
+        Assert.Throws<DomainRuleException>(() => Update(item, unitId: newUnit, checkedFlag: false));
+        Assert.Equal(original, item.BaseUnitId);
+
+        Update(item, unitId: newUnit, checkedFlag: true);
+        Assert.Equal(newUnit, item.BaseUnitId);
+    }
+
+    [Fact]
+    public void 核准後改追蹤模式_旗標false被擋_旗標true成功()
+    {
+        var item = Approved();
+
+        Assert.Throws<DomainRuleException>(() => Update(item, trackingMode: TrackingMode.Lot, checkedFlag: false));
+        Assert.Equal(TrackingMode.None, item.TrackingMode);
+
+        Update(item, trackingMode: TrackingMode.Lot, checkedFlag: true);
+        Assert.Equal(TrackingMode.Lot, item.TrackingMode);
+    }
+
+    [Fact]
+    public void 核准後只改品名_單位與追蹤模式沒變_不需要旗標()
+    {
+        var item = Approved();
+
+        Update(item, name: "新品名", checkedFlag: false);
+
+        Assert.Equal("新品名", item.Name);
+    }
+
+    [Fact]
+    public void 核准前可自由修改分類_單位_追蹤模式_不需要旗標()
+    {
+        var pending = Submit();
+        var category = Guid.NewGuid();
+        var unit = Guid.NewGuid();
+        Update(pending, categoryId: category, unitId: unit, trackingMode: TrackingMode.Serial, checkedFlag: false);
+        Assert.Equal((category, unit, TrackingMode.Serial), (pending.CategoryId, pending.BaseUnitId, pending.TrackingMode));
+
+        // 退回狀態同樣屬於核准前
+        var returned = Submit();
+        returned.Return(Now);
+        var category2 = Guid.NewGuid();
+        Update(returned, categoryId: category2, unitId: Guid.NewGuid(), trackingMode: TrackingMode.Lot, checkedFlag: false);
+        Assert.Equal(category2, returned.CategoryId);
+        Assert.Equal(TrackingMode.Lot, returned.TrackingMode);
+    }
 }

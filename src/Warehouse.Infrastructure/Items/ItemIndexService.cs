@@ -77,11 +77,21 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         // 「本物料別名與關鍵字不重複」「數量上限」因此不會被同時送出的請求繞過（M2 審查 S2、S3）。
         // 不同物料搶同一個別名（或條碼）由資料庫唯一索引把關；別名與條碼互搶由識別碼鎖把關（M5-01）。
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
-        var status = await LockItemStatusAsync(itemId, cancellationToken)
+        var (status, createdById) = await LockItemStatusAsync(itemId, cancellationToken)
             ?? throw new NotFoundException("item.not_found", "找不到物料。");
-        if (status != nameof(ItemStatus.Active))
+        // 原廠條碼可在提出時就登錄（M8-05）：先占住條碼，核准前掃碼解析會拒絕（尚未核准），拒絕或撤回時釋放
+        var barcodeOnPending = kind == ItemIndexKind.Barcode
+            && status is nameof(ItemStatus.PendingApproval) or nameof(ItemStatus.Returned);
+        if (status != nameof(ItemStatus.Active) && !barcodeOnPending)
         {
-            throw new ConflictException("index.item_not_active", "只有已核准且有效的物料可以新增搜尋索引。");
+            throw new ConflictException("index.item_not_active", kind == ItemIndexKind.Barcode
+                ? "只有有效、待核准或退回的物料可以登錄原廠條碼。"
+                : "只有已核准且有效的物料可以新增搜尋索引。");
+        }
+        // 未核准的物料只有提出人或物料管理員能登錄條碼：其他人不能替別人的申請占住真實商品的條碼（審查 🟠-3）
+        if (barcodeOnPending && !actor.IsItemManager && createdById != actor.Id)
+        {
+            throw new PermissionDeniedException("index.permission_denied", "尚未核准的物料，只有提出人或物料管理員可以登錄條碼。");
         }
         ItemIndexEntry entry = kind switch
         {
@@ -103,6 +113,10 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
+            if (!transaction.IsOwned)
+            {
+                throw new ConflictException("index.duplicate", "這個索引剛被別人新增，請重新整理後再試。");
+            }
             // 其他物料搶先新增了同一個別名：重新查一次，回報被誰占用
             await transaction.RollbackAsync(cancellationToken);
             db.ChangeTracker.Clear();
@@ -113,16 +127,21 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         return entry.Id;
     }
 
-    /// <summary>在目前交易內鎖住物料列並回傳狀態文字（items.status）；物料不存在時回傳 null。</summary>
-    private async Task<string?> LockItemStatusAsync(Guid itemId, CancellationToken cancellationToken)
+    /// <summary>在目前交易內鎖住物料列，回傳狀態文字（items.status）與提出人；物料不存在時回傳 null。</summary>
+    private async Task<(string Status, Guid? CreatedById)?> LockItemStatusAsync(Guid itemId, CancellationToken cancellationToken)
     {
         await using var command = db.Database.GetDbConnection().CreateCommand();
         command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
         // NO KEY UPDATE：仍與同一物料的其他修改（UPDATE items、FOR UPDATE）互斥，但不擋過帳插入異動時外鍵檢查的 KEY SHARE
         // （匯入大量別名時這個鎖會持有到整批結束，M6-03b 審查 🟠-4）
-        command.CommandText = "SELECT status FROM items WHERE id = @id FOR NO KEY UPDATE";
+        command.CommandText = "SELECT status, created_by_id FROM items WHERE id = @id FOR NO KEY UPDATE";
         command.Parameters.Add(new NpgsqlParameter("id", itemId));
-        return (string?)await command.ExecuteScalarAsync(cancellationToken);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+        return (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetGuid(1));
     }
 
     /// <summary>原廠條碼的包裝數量要符合物料的追蹤模式與單位小數位數（物料列已在交易內鎖住）。</summary>

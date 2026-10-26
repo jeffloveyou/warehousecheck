@@ -15,11 +15,22 @@
         <div class="panel" id="duplicate-warning">
             <div class="message warn">找到 @Model.Candidates.Count 筆可能重複的物料，請先確認不是同一個東西。</div>
             <partial name="_DuplicateCandidates" model="(Model.Candidates, false)" />
+            @foreach (var c in Model.Candidates)
+            {
+                <input type="hidden" name="AcknowledgedIds" value="@c.ItemId" />
+            }
             <p><label><input type="checkbox" name="ConfirmSubmit" value="true" id="confirm-submit" /> 我已確認，仍要提出</label></p>
         </div>
+    }
+    @if (Model.CanAutoApprove)
+    {
+        <p><label><input type="checkbox" name="AutoApprove" value="true" checked="@Model.AutoApprove" id="auto-approve" /> 送出後自動核准（立即發出正式料號）</label></p>
     }
     <div class="actions">
         <button type="submit" id="item-create-submit">提出</button>
         <a href="/Items">取消</a>
     </div>
 </form>
+@section Scripts {
+    <script src="~/js/item-barcodes.js" asp-append-version="true"></script>
+}

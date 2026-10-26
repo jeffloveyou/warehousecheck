@@ -43,6 +43,7 @@ var users = new Dictionary<string, string>
     ["uiop" + suffix] = CreateUser("uiop" + suffix, "Operator"),
     ["uiwm" + suffix] = CreateUser("uiwm" + suffix, "WarehouseManager"),
     ["uiad" + suffix] = CreateUser("uiad" + suffix, "SystemAdmin"),
+    ["uiim" + suffix] = CreateUser("uiim" + suffix, "ItemManager"),
 };
 var warehouseCode = "UI" + suffix.ToUpperInvariant();
 Guid warehouseId;
@@ -284,9 +285,48 @@ await wm.PdfAsync(new() { Path = Path.Combine(shots, "9-labels.pdf"), PreferCSSP
 await wm.GotoAsync($"{baseUrl}/Warehouses/Labels?WarehouseId={warehouseId}&Layout=large");
 await wm.PdfAsync(new() { Path = Path.Combine(shots, "9-labels-large.pdf"), PreferCSSPageSize = true });
 
+// 7c. M8-05：提出單登錄條碼（條碼槍 Enter 不送出）、物料管理員自動核准（cookie 記住）、修改單鎖分類
+await op.GotoAsync(baseUrl + "/Items/Create");
+Check(!await op.IsVisibleAsync("#auto-approve"), "作業員的提出單沒有自動核准勾選");
+var im = await LoginAsync("uiim" + suffix);
+await im.GotoAsync(baseUrl + "/Items/Create");
+Check(await im.IsVisibleAsync("#auto-approve") && !await im.IsCheckedAsync("#auto-approve"), "物料管理員有自動核准勾選，沒有 cookie 時預設不勾");
+await im.FillAsync("#Input_Name", "畫面實測條碼物料 " + suffix);
+await im.SelectOptionAsync("#Input_CategoryId", SeedData.Categories.Single(c => c.Code == "EL").Id.ToString());
+await im.SelectOptionAsync("#Input_BaseUnitId", SeedData.Units.Single(u => u.Code == "PCS").Id.ToString());
+var single = "UI" + suffix.ToUpperInvariant() + "01";
+var outer = "UI" + suffix.ToUpperInvariant() + "10";
+await im.FillAsync("input[name='Input.Barcodes[0].Text']", single);
+await im.PressAsync("input[name='Input.Barcodes[0].Text']", "Enter");
+Check(im.Url.Contains("/Items/Create") && await im.EvaluateAsync<bool>("() => document.activeElement.classList.contains('barcode-pack')"),
+    "條碼欄按 Enter 不送出表單，焦點跳到包裝數量");
+await im.PressAsync("input[name='Input.Barcodes[0].PackQuantity']", "Enter");
+Check(await im.Locator(".barcode-row").CountAsync() == 2, "包裝數量按 Enter 新增下一列");
+await im.FillAsync("input[name='Input.Barcodes[1].Text']", outer);
+await im.FillAsync("input[name='Input.Barcodes[1].PackQuantity']", "10");
+await im.CheckAsync("#auto-approve");
+await SubmitAsync(im, "#item-create-submit");
+if (await im.IsVisibleAsync("#confirm-submit"))
+{
+    await im.CheckAsync("#confirm-submit");
+    await SubmitAsync(im, "#item-create-submit");
+}
+var createdText = await im.InnerTextAsync("main");
+Check(im.Url.Contains("/Items/Details/") && createdText.Contains("已提出並核准") && createdText.Contains(single) && createdText.Contains(outer),
+    "自動核准後轉到物料頁，顯示正式料號與兩個條碼");
+await im.ScreenshotAsync(new() { Path = Path.Combine(shots, "10-item-auto-approved.png"), FullPage = true });
+var editUrl = im.Url.Replace("/Items/Details/", "/Items/Edit/");
+await im.GotoAsync(baseUrl + "/Items/Create");
+Check(await im.IsCheckedAsync("#auto-approve"), "再開提出單時記住上次勾選的自動核准（cookie）");
+await im.GotoAsync(editUrl);
+Check(await im.IsDisabledAsync("#Input_CategoryId") && !await im.IsDisabledAsync("#Input_BaseUnitId"),
+    "修改單：已核准物料的分類鎖住；沒有異動紀錄時基本單位可改");
+Check(await im.Locator("#item-barcode-list tbody tr").CountAsync() == 2, "修改單列出已登錄的兩個條碼");
+await im.ScreenshotAsync(new() { Path = Path.Combine(shots, "11-item-edit.png"), FullPage = true });
+
 // 8. 手機寬 390：不可水平捲動
 var mobile = await LoginAsync("uiop" + suffix, 390);
-foreach (var url in new[] { "/Documents", inUrl.Replace(baseUrl, ""), "/Reservations", $"/Stock/Movements?ItemCode={itemCode}", "/Stock/Anomalies", "/Stock/Negative" })
+foreach (var url in new[] { "/Items/Create", "/Documents",inUrl.Replace(baseUrl, ""), "/Reservations", $"/Stock/Movements?ItemCode={itemCode}", "/Stock/Anomalies", "/Stock/Negative" })
 {
     await mobile.GotoAsync(baseUrl + url);
     var overflow = await mobile.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1");

@@ -56,9 +56,12 @@ public sealed partial class Item
     }
 
     /// <summary>
-    /// 修改基本資料。核准前（待核准、退回）可改全部欄位；
-    /// 核准後（有效、停用）只能改品名、品牌、型號、規格——分類、基本單位、追蹤模式不可再改（AGENTS.md 第六節，V1 保守處理）。
+    /// 修改基本資料。核准前（待核准、退回）可改全部欄位。
+    /// 核准後（有效、停用）分類一律不可改（料號前綴來自分類）；基本單位、追蹤模式只有在服務已檢查過
+    /// 異動紀錄、系統設定與安全底線後（<paramref name="unitTrackingChangeChecked"/>）才可改（ADR-0023）。
     /// 已拒絕的物料不可修改。
+    /// <paramref name="unitTrackingChangeChecked"/> 只能由 <c>ItemWorkflowService</c> 在鎖住物料列（FOR UPDATE）並檢查完之後傳 true；
+    /// 這裡只防「忘記檢查」，不防刻意繞過。
     /// </summary>
     public void UpdateDetails(
         string name,
@@ -68,15 +71,20 @@ public sealed partial class Item
         string? brand,
         string? manufacturerPartNo,
         string? specification,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool unitTrackingChangeChecked = false)
     {
         if (Status == ItemStatus.Rejected)
         {
             throw new DomainRuleException("已拒絕的物料不可修改。");
         }
-        if (HasItemCode && (categoryId != CategoryId || baseUnitId != BaseUnitId || trackingMode != TrackingMode))
+        if (HasItemCode && categoryId != CategoryId)
         {
-            throw new DomainRuleException("物料核准後不可變更分類、基本單位或追蹤模式。");
+            throw new DomainRuleException("物料核准後不可變更分類（正式料號的前綴來自分類）。");
+        }
+        if (HasItemCode && !unitTrackingChangeChecked && (baseUnitId != BaseUnitId || trackingMode != TrackingMode))
+        {
+            throw new DomainRuleException("物料核准後變更基本單位或追蹤模式，必須先通過異動紀錄與系統設定的檢查。");
         }
         ApplyDetails(name, categoryId, baseUnitId, trackingMode, brand, manufacturerPartNo, specification, now);
     }
