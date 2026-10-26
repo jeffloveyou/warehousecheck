@@ -67,6 +67,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<UserWarehouse> UserWarehouses => Set<UserWarehouse>();
 
+    public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
+
     public DbSet<Stocktake> Stocktakes => Set<Stocktake>();
 
     public DbSet<StocktakeLocation> StocktakeLocations => Set<StocktakeLocation>();
@@ -119,6 +121,14 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
             b.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             b.HasOne<WarehouseSite>().WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             b.HasIndex(x => x.WarehouseId);
+        });
+        modelBuilder.Entity<UserPreference>(b =>
+        {
+            b.ToTable("user_preferences");
+            b.HasKey(x => new { x.UserId, x.Key });
+            b.Property(x => x.Key).HasMaxLength(Application.Accounts.UserPreferenceKeys.KeyMaxLength);
+            b.Property(x => x.Value).HasMaxLength(Application.Accounts.UserPreferenceKeys.ValueMaxLength);
+            b.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
         modelBuilder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");

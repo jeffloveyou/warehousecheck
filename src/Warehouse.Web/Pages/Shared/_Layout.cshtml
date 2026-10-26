@@ -1,6 +1,8 @@
 @using Warehouse.Application.Abstractions
 @using Warehouse.Api.Authorization
 @inject Microsoft.Extensions.Configuration.IConfiguration Configuration
+@inject Warehouse.Application.Accounts.IUserPreferenceService Preferences
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -78,6 +80,14 @@
     <main>
         @RenderBody()
     </main>
+    @if (ViewData["UsesPrefs"] is true && User.Identity?.IsAuthenticated == true && !User.HasClaim(ActorClaims.MustChangePassword, "true"))
+    {
+        @* 常用設定（M8-06）：只有用到的頁面（明細輸入、掃碼、預留）才輸出，一個帳號最多 5 列，prefs.js 不必另外打 API 讀取。
+           產生 antiforgery token 會讓回應變成 no-store（上一頁快取失效），所以不在每一頁都做（審查 R3） *@
+        var userPrefs = await Preferences.GetAllAsync(User.ToActor().Id, Context.RequestAborted);
+        <script id="wh-prefs" type="application/json" data-token="@Antiforgery.GetAndStoreTokens(Context).RequestToken">@Json.Serialize(userPrefs)</script>
+        <script src="~/js/prefs.js" asp-append-version="true"></script>
+    }
     <script src="~/js/pwa.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

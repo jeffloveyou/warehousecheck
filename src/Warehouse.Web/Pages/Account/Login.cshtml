@@ -17,6 +17,14 @@
             <input asp-for="Input.Password" autocomplete="current-password" />
             <span asp-validation-for="Input.Password" class="field-error"></span>
         </div>
+        @if (Model.RememberMeDays > 0)
+        {
+            <span></span>
+            <div>
+                <label><input type="checkbox" name="Input.RememberMe" value="true" checked="@Model.Input.RememberMe" id="remember-me" /> 記住我（@Model.RememberMeDays 天內不必重新登入）</label>
+                <div class="muted">公用電腦請勿勾選，用完請按「登出」。</div>
+            </div>
+        }
         <span></span>
         <div><button type="submit" id="login-submit">登入</button></div>
     </div>

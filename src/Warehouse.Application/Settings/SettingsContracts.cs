@@ -62,6 +62,12 @@ public sealed record SystemSettings(
     /// </summary>
     public bool AllowItemUnitTrackingChangeWithActivity { get; init; }
 
+    /// <summary>
+    /// 登入頁「記住我」保持登入的天數（M8-06，ADR-0024；0＝關閉此功能）。使用期間自動延長，
+    /// 連續這麼多天沒使用才要重新登入；帳號停用、改角色、重設密碼後最慢 5 分鐘失效。
+    /// </summary>
+    public int RememberMeDays { get; init; } = AuthLimits.RememberMeDaysDefault;
+
     /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
     public string PrintCompanyName { get; init; } = string.Empty;
 
@@ -108,6 +114,14 @@ public static class RetentionLimits
     public const int DaysMax = 36500;
 }
 
+/// <summary>登入相關設定的預設值與範圍（M8-06）。</summary>
+public static class AuthLimits
+{
+    public const int RememberMeDaysDefault = 14;
+    public const int RememberMeDaysMin = 0;
+    public const int RememberMeDaysMax = 90;
+}
+
 /// <summary>設定鍵（資料庫 system_settings.key）。改名會讓既有設定失效，只能新增。</summary>
 public static class SettingKeys
 {
@@ -137,6 +151,7 @@ public static class SettingKeys
     public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
     public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
     public const string AllowItemUnitTrackingChangeWithActivity = "items.allow_unit_tracking_change_with_activity";
+    public const string RememberMeDays = "auth.remember_me_days";
     public const string RetentionAuditYears = "retention.audit_years";
     public const string RetentionLoginDays = "retention.login_days";
     public const string RetentionProcessedCommandsDays = "retention.processed_commands_days";

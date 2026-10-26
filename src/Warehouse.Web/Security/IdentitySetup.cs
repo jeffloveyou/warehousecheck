@@ -51,6 +51,29 @@ public static class IdentitySetup
             // API 用狀態碼回應，不轉址到登入頁（手機／PDA 程式才能判斷）
             options.Events.OnRedirectToLogin = context => RedirectOrStatus(context, StatusCodes.Status401Unauthorized);
             options.Events.OnRedirectToAccessDenied = context => RedirectOrStatus(context, StatusCodes.Status403Forbidden);
+            // 「記住我」（M8-06，ADR-0024）：持久登入的有效期改成系統設定的天數。自動延長沿用同樣的長度，
+            // 所以連續這麼多天沒使用才要重新登入；設定為 0 時一律當成一般登入（關閉瀏覽器即失效）。
+            options.Events.OnSigningIn = async context =>
+            {
+                if (!context.Properties.IsPersistent)
+                {
+                    return;
+                }
+                var settings = context.HttpContext.RequestServices.GetRequiredService<Warehouse.Application.Settings.ISettingsService>();
+                var days = (await settings.GetAsync(context.HttpContext.RequestAborted)).RememberMeDays;
+                if (days > 0)
+                {
+                    // 與 Cookie handler 用同一個時間來源（審查 Y2）
+                    var now = context.HttpContext.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
+                    context.Properties.IssuedUtc = now;
+                    context.Properties.ExpiresUtc = now.AddDays(days);
+                }
+                else
+                {
+                    context.Properties.IsPersistent = false;
+                    context.Properties.ExpiresUtc = null;
+                }
+            };
         });
 
         // 每 5 分鐘重新檢查一次帳號（停用、改密碼、角色變更會讓舊 Cookie 失效）

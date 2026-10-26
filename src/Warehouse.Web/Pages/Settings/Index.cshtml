@@ -38,11 +38,19 @@
     <input type="hidden" name="Original.LineCrossTransferEnabled" value="@Model.Original.LineCrossTransferEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LineLotSerialEnabled" value="@Model.Original.LineLotSerialEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.AllowItemUnitTrackingChangeWithActivity" value="@Model.Original.AllowItemUnitTrackingChangeWithActivity.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.RememberMeDays" value="@Model.Original.RememberMeDays" />
     <input type="hidden" name="Original.RetentionAuditYears" value="@Model.Original.RetentionAuditYears" />
     <input type="hidden" name="Original.RetentionLoginDays" value="@Model.Original.RetentionLoginDays" />
     <input type="hidden" name="Original.RetentionProcessedCommandsDays" value="@Model.Original.RetentionProcessedCommandsDays" />
     <input type="hidden" name="Original.RetentionPostingFailuresDays" value="@Model.Original.RetentionPostingFailuresDays" />
     <input type="hidden" name="Original.RetentionImportBatchesDays" value="@Model.Original.RetentionImportBatchesDays" />
+    <h2>登入</h2>
+    <div class="form-grid">
+        <label for="Form_RememberMeDays">「記住我」保持登入（天，0＝不提供）</label>
+        <input type="number" id="Form_RememberMeDays" name="Form.RememberMeDays" value="@Model.Form.RememberMeDays"
+               min="@Warehouse.Application.Settings.AuthLimits.RememberMeDaysMin" max="@Warehouse.Application.Settings.AuthLimits.RememberMeDaysMax" required />
+    </div>
+    <p class="muted">預設 14 天。登入時勾選「記住我」，關掉瀏覽器也不必重新登入；每次使用會自動延長，連續這麼多天沒用才要重新登入。帳號停用、改角色、重設密碼後最慢 5 分鐘失效。<strong>公用電腦不要勾選</strong>，用完請按「登出」。改天數只影響之後的登入。</p>
     <h2>物料</h2>
     <p><label><input type="checkbox" name="Form.AllowItemUnitTrackingChangeWithActivity" value="true" checked="@Model.Form.AllowItemUnitTrackingChangeWithActivity" id="setting-item-unit-change" /> 已有異動紀錄的物料，也可以修改基本單位、追蹤模式</label></p>
     <p class="muted">預設關閉：物料一旦進出過庫存，基本單位與追蹤模式就鎖住（ADR-0023）。開啟後由物料管理員在修改畫面勾選確認並填寫原因才能改，<strong>舊紀錄的數量不會換算</strong>（例如原本 10 個，改成「箱」後會顯示 10 箱）。即使開啟，有未完成單據、有效預留、進行中盤點時仍不能改；改追蹤模式時結存必須全部為 0。</p>

@@ -46,15 +46,18 @@
   var busy = false;
   var confirmLarge = false; // 數量偏大時要再按一次 Enter
 
-  // ---- 每台裝置記住的偏好（localStorage 不可用時照預設） ----
+  // ---- 偏好跟著帳號（prefs.js，M8-06）；沒有 prefs.js 時退回這台裝置的 localStorage ----
+  var LOCAL_KEYS = { 'scan.addMode': 'wh.scan.addMode', 'scan.hiddenFields': 'wh.scan.hiddenFields' };
   function load(key, fallbackValue) {
-    try { var v = window.localStorage.getItem(key); return v === null ? fallbackValue : v; } catch (e) { return fallbackValue; }
+    if (window.WhPrefs) return window.WhPrefs.get(key, fallbackValue);
+    try { var v = window.localStorage.getItem(LOCAL_KEYS[key]); return v === null ? fallbackValue : v; } catch (e) { return fallbackValue; }
   }
   function save(key, value) {
-    try { window.localStorage.setItem(key, value); } catch (e) { /* 私密模式等：只在這次頁面有效 */ }
+    if (window.WhPrefs) { window.WhPrefs.set(key, value); return; }
+    try { window.localStorage.setItem(LOCAL_KEYS[key], value); } catch (e) { /* 私密模式等：只在這次頁面有效 */ }
   }
-  var ADD_MODE_KEY = 'wh.scan.addMode';
-  var HIDDEN_KEY = 'wh.scan.hiddenFields';
+  var ADD_MODE_KEY = 'scan.addMode';
+  var HIDDEN_KEY = 'scan.hiddenFields';
   el.addMode.value = load(ADD_MODE_KEY, 'manual');
   if (!el.addMode.value) el.addMode.value = 'manual';
   function addMode() { return el.addMode.value; }
