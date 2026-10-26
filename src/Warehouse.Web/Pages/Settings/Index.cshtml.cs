@@ -74,6 +74,8 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         /// <summary>列印抬頭的公司名稱（空白＝不印）；表單空白時綁定為 null。</summary>
         public string? PrintCompanyName { get; set; }
 
+        public int RememberMeDays { get; set; }
+
         public int RetentionAuditYears { get; set; }
 
         public int RetentionLoginDays { get; set; }
@@ -106,6 +108,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 LineLotSerialEnabled = LineLotSerialEnabled,
                 AllowItemUnitTrackingChangeWithActivity = AllowItemUnitTrackingChangeWithActivity,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
+                RememberMeDays = RememberMeDays,
                 RetentionAuditYears = RetentionAuditYears,
                 RetentionLoginDays = RetentionLoginDays,
                 RetentionProcessedCommandsDays = RetentionProcessedCommandsDays,
@@ -138,6 +141,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             LineLotSerialEnabled = s.LineLotSerialEnabled,
             AllowItemUnitTrackingChangeWithActivity = s.AllowItemUnitTrackingChangeWithActivity,
             PrintCompanyName = s.PrintCompanyName,
+            RememberMeDays = s.RememberMeDays,
             RetentionAuditYears = s.RetentionAuditYears,
             RetentionLoginDays = s.RetentionLoginDays,
             RetentionProcessedCommandsDays = s.RetentionProcessedCommandsDays,
@@ -186,6 +190,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.LineCrossTransferEnabled => "明細：跨倉移庫",
         SettingKeys.LineLotSerialEnabled => "明細：批號序號欄",
         SettingKeys.AllowItemUnitTrackingChangeWithActivity => "有異動的物料可改單位／追蹤模式",
+        SettingKeys.RememberMeDays => "記住登入天數",
         SettingKeys.RetentionAuditYears => "操作日誌保留年數",
         SettingKeys.RetentionLoginDays => "登入紀錄保留天數",
         SettingKeys.RetentionProcessedCommandsDays => "冪等紀錄保留天數",

@@ -10,6 +10,7 @@
     var isInbound = d.DocType == StockDocumentType.Inbound;
     var isOutbound = d.DocType == StockDocumentType.Outbound;
     ViewData["Title"] = d.DocNo;
+    ViewData["UsesPrefs"] = true; // 明細輸入區的常用設定（M8-06）
 }
 <h1>@d.DocNo <span class="muted">@Display.Of(d.DocType) @d.WarehouseCode</span> @Display.Of(d.Status)</h1>
 @if (TempData["Message"] is string message)

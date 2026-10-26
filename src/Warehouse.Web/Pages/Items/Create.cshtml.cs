@@ -13,12 +13,12 @@ namespace Warehouse.Web.Pages.Items;
 /// 提出新物料（作業員、物料管理員）。流程：
 /// 1. 開表單時產生 RequestId（隱藏欄位），送出時當作物料 ID，連點或重送都只會建立一筆（冪等）。
 /// 2. 第一次送出先查重複候選；有候選就列出來，勾選「仍要提出」再送一次才建立。
-/// 3. 可一起登錄原廠條碼；物料管理員可勾「送出後自動核准」，與提出在同一個交易（M8-05，ADR-0023）。
+/// 3. 可一起登錄原廠條碼；物料管理員可勾「送出後自動核准」，與提出在同一個交易（M8-05，ADR-0023），
+///    勾選狀態記在帳號的常用設定（M8-06）。
 /// </summary>
-public class CreateModel(IItemWorkflowService workflow, IMasterDataService masterData) : PageModel
+public class CreateModel(
+    IItemWorkflowService workflow, IMasterDataService masterData, Warehouse.Application.Accounts.IUserPreferenceService preferences) : PageModel
 {
-    /// <summary>記住物料管理員上次「自動核准」的選擇（只是畫面偏好，權限由服務檢查）。</summary>
-    public const string AutoApproveCookie = "wh_item_autoapprove";
 
     [BindProperty]
     public ItemFormInput Input { get; set; } = new();
@@ -45,7 +45,9 @@ public class CreateModel(IItemWorkflowService workflow, IMasterDataService maste
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         RequestId = Guid.NewGuid();
-        AutoApprove = CanAutoApprove && Request.Cookies[AutoApproveCookie] == "1";
+        // 記住物料管理員上次「自動核准」的選擇（跟著帳號，M8-06；只是畫面預設，權限由服務檢查）
+        AutoApprove = CanAutoApprove && (await preferences.GetAllAsync(User.ToActor().Id, cancellationToken))
+            .GetValueOrDefault(Warehouse.Application.Accounts.UserPreferenceKeys.ItemAutoApprove) == "1";
         Options = await ItemFormOptions.LoadAsync(masterData, null, false, cancellationToken);
     }
 
@@ -55,11 +57,8 @@ public class CreateModel(IItemWorkflowService workflow, IMasterDataService maste
         AutoApprove &= CanAutoApprove;
         if (CanAutoApprove)
         {
-            Response.Cookies.Append(AutoApproveCookie, AutoApprove ? "1" : "0", new CookieOptions
-            {
-                HttpOnly = true, Secure = Request.IsHttps, SameSite = SameSiteMode.Lax, IsEssential = true,
-                MaxAge = TimeSpan.FromDays(365),
-            });
+            await preferences.TrySetAsync(User.ToActor().Id, Warehouse.Application.Accounts.UserPreferenceKeys.ItemAutoApprove,
+                AutoApprove ? "1" : "0", cancellationToken);
         }
         if (!ModelState.IsValid)
         {

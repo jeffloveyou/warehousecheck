@@ -70,7 +70,7 @@ using var pw = await Playwright.CreateAsync();
 await using var browser = await pw.Chromium.LaunchAsync(new() { ExecutablePath = Chrome, Headless = true });
 var consoleErrors = new List<string>();
 
-async Task<IPage> LoginAsync(string user, int width = 1280)
+async Task<IPage> LoginAsync(string user, int width = 1280, bool rememberMe = false)
 {
     var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = 900 }, IgnoreHTTPSErrors = true });
     var page = await context.NewPageAsync();
@@ -79,6 +79,10 @@ async Task<IPage> LoginAsync(string user, int width = 1280)
     await page.GotoAsync(baseUrl + "/Account/Login");
     await page.FillAsync("input[name='Input.UserName']", user);
     await page.FillAsync("input[name='Input.Password']", users[user]);
+    if (rememberMe)
+    {
+        await page.CheckAsync("#remember-me");
+    }
     await page.ClickAsync("form button[type=submit]");
     await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     if (page.Url.Contains("ChangePassword", StringComparison.OrdinalIgnoreCase))
@@ -317,12 +321,27 @@ Check(im.Url.Contains("/Items/Details/") && createdText.Contains("已提出並�
 await im.ScreenshotAsync(new() { Path = Path.Combine(shots, "10-item-auto-approved.png"), FullPage = true });
 var editUrl = im.Url.Replace("/Items/Details/", "/Items/Edit/");
 await im.GotoAsync(baseUrl + "/Items/Create");
-Check(await im.IsCheckedAsync("#auto-approve"), "再開提出單時記住上次勾選的自動核准（cookie）");
+Check(await im.IsCheckedAsync("#auto-approve"), "再開提出單時記住上次勾選的自動核准（帳號的常用設定）");
 await im.GotoAsync(editUrl);
 Check(await im.IsDisabledAsync("#Input_CategoryId") && !await im.IsDisabledAsync("#Input_BaseUnitId"),
     "修改單：已核准物料的分類鎖住；沒有異動紀錄時基本單位可改");
 Check(await im.Locator("#item-barcode-list tbody tr").CountAsync() == 2, "修改單列出已登錄的兩個條碼");
 await im.ScreenshotAsync(new() { Path = Path.Combine(shots, "11-item-edit.png"), FullPage = true });
+
+// 7d. M8-06：記住我（持久 Cookie，約 14 天）；常用設定跟著帳號（另一個瀏覽器內容＝另一台裝置）
+var remembered = await LoginAsync("uiwm" + suffix, rememberMe: true);
+var authCookie = (await remembered.Context.CookiesAsync()).Single(c => c.Name == "Warehouse.Auth");
+Check(authCookie.Expires > DateTimeOffset.UtcNow.AddDays(13).ToUnixTimeSeconds(), "勾選記住我：登入 Cookie 有約 14 天的期限");
+var sessionCookie = (await op.Context.CookiesAsync()).Single(c => c.Name == "Warehouse.Auth");
+Check(sessionCookie.Expires < 0, "不勾記住我：登入 Cookie 是工作階段 Cookie（關閉瀏覽器即失效）");
+var draftUrl = await CreateDocumentAsync(op, "Inbound", "採購入庫"); // 草稿才有明細輸入區
+await op.SelectOptionAsync("#scan-add-mode", "each");
+await op.WaitForLoadStateAsync(LoadState.NetworkIdle);
+var otherDevice = await LoginAsync("uiop" + suffix);
+await otherDevice.GotoAsync(draftUrl);
+Check(await otherDevice.InputValueAsync("#scan-add-mode") == "each", "常用設定跟著帳號：另一台裝置登入後加入方式相同");
+await otherDevice.SelectOptionAsync("#scan-add-mode", "manual"); // 還原，不影響之後的步驟
+await otherDevice.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
 // 8. 手機寬 390：不可水平捲動
 var mobile = await LoginAsync("uiop" + suffix, 390);

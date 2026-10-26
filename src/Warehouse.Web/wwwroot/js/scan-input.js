@@ -11,7 +11,12 @@
 
   var MIN_LENGTH = 3;
   var muted = false;
-  try { muted = window.localStorage.getItem('wh-scan-mute') === '1'; } catch (e) { /* 私密模式等：維持預設 */ }
+  // 靜音跟著帳號（prefs.js，M8-06）；沒有 prefs.js 時退回這台裝置的 localStorage
+  if (window.WhPrefs) {
+    muted = window.WhPrefs.get('scan.mute', '0') === '1';
+  } else {
+    try { muted = window.localStorage.getItem('wh-scan-mute') === '1'; } catch (e) { /* 私密模式等：維持預設 */ }
+  }
   var audio = null;
 
   // 回饋：成功短嗶一聲、警告中音一聲、錯誤低音兩聲（瀏覽器內建合成音，不載入音檔）；Android 另外震動
@@ -44,7 +49,11 @@
 
   function setMuted(value) {
     muted = !!value;
-    try { window.localStorage.setItem('wh-scan-mute', muted ? '1' : '0'); } catch (e) { /* 略過 */ }
+    if (window.WhPrefs) {
+      window.WhPrefs.set('scan.mute', muted ? '1' : '0');
+    } else {
+      try { window.localStorage.setItem('wh-scan-mute', muted ? '1' : '0'); } catch (e) { /* 略過 */ }
+    }
   }
 
   // 去掉控制字元（尾碼 CR／LF／Tab、GS）與頭尾空白；伺服器端 ScanInput 也會再做一次

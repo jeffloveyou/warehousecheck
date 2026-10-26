@@ -14,7 +14,8 @@ namespace Warehouse.Web.Pages.Account;
 /// 回應時間與「密碼錯誤」相近（M1-03 審查 S3）。每次結果寫稽核（M6-01），同一 IP 每分鐘嘗試次數有上限（<see cref="LoginThrottle"/>）。
 /// </summary>
 public class LoginModel(
-    SignInManager<AppUser> signInManager, UserManager<AppUser> userManager, ILoginAuditLog audit, LoginThrottle throttle) : PageModel
+    SignInManager<AppUser> signInManager, UserManager<AppUser> userManager, ILoginAuditLog audit, LoginThrottle throttle,
+    Warehouse.Application.Settings.ISettingsService settings) : PageModel
 {
     private const string InvalidMessage = "帳號或密碼錯誤。";
 
@@ -39,14 +40,19 @@ public class LoginModel(
         [DataType(DataType.Password)]
         [Display(Name = "密碼")]
         public string Password { get; set; } = string.Empty;
+
+        /// <summary>「記住我」：系統設定的天數內不必重新登入（M8-06）。</summary>
+        public bool RememberMe { get; set; }
     }
 
-    public void OnGet()
-    {
-    }
+    /// <summary>系統設定的「記住我」天數；0 時不顯示勾選框。</summary>
+    public int RememberMeDays { get; private set; }
+
+    public async Task OnGetAsync() => RememberMeDays = (await settings.GetAsync(HttpContext.RequestAborted)).RememberMeDays;
 
     public async Task<IActionResult> OnPostAsync()
     {
+        RememberMeDays = (await settings.GetAsync(HttpContext.RequestAborted)).RememberMeDays;
         if (!ModelState.IsValid)
         {
             return Page();
@@ -70,7 +76,9 @@ public class LoginModel(
             return Page();
         }
 
-        var result = await signInManager.PasswordSignInAsync(user, Input.Password, isPersistent: false, lockoutOnFailure: true);
+        // 天數為 0 時即使送了 RememberMe 也不持久（OnSigningIn 也會再擋一次）
+        var persistent = Input.RememberMe && RememberMeDays > 0;
+        var result = await signInManager.PasswordSignInAsync(user, Input.Password, isPersistent: persistent, lockoutOnFailure: true);
         if (result.IsLockedOut)
         {
             await audit.RecordAsync(user.UserName!, user.Id, LoginOutcome.LockedOut, null, cancellationToken);
@@ -83,7 +91,7 @@ public class LoginModel(
             ModelState.AddModelError(string.Empty, InvalidMessage);
             return Page();
         }
-        await audit.RecordAsync(user.UserName!, user.Id, LoginOutcome.Success, null, cancellationToken);
+        await audit.RecordAsync(user.UserName!, user.Id, LoginOutcome.Success, persistent ? "remember_me" : null, cancellationToken);
 
         if (user.MustChangePassword)
         {

@@ -103,6 +103,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             AllowItemUnitTrackingChangeWithActivity = Flag(
                 SettingKeys.AllowItemUnitTrackingChangeWithActivity, Defaults.AllowItemUnitTrackingChangeWithActivity),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
+            RememberMeDays = Number(SettingKeys.RememberMeDays, Defaults.RememberMeDays),
             RetentionAuditYears = Number(SettingKeys.RetentionAuditYears, Defaults.RetentionAuditYears),
             RetentionLoginDays = Number(SettingKeys.RetentionLoginDays, Defaults.RetentionLoginDays),
             RetentionProcessedCommandsDays = Number(SettingKeys.RetentionProcessedCommandsDays, Defaults.RetentionProcessedCommandsDays),
@@ -130,6 +131,8 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
     private static IEnumerable<(string Key, int Before, int After, int Current, int Min, int Max, string Label)> Numbers(
         SystemSettings original, SystemSettings updated, SystemSettings current) =>
     [
+        (SettingKeys.RememberMeDays, original.RememberMeDays, updated.RememberMeDays, current.RememberMeDays,
+            AuthLimits.RememberMeDaysMin, AuthLimits.RememberMeDaysMax, "記住登入天數"),
         (SettingKeys.RetentionAuditYears, original.RetentionAuditYears, updated.RetentionAuditYears, current.RetentionAuditYears,
             RetentionLimits.AuditYearsMin, RetentionLimits.YearsMax, "操作日誌保留年數"),
         (SettingKeys.RetentionLoginDays, original.RetentionLoginDays, updated.RetentionLoginDays, current.RetentionLoginDays,

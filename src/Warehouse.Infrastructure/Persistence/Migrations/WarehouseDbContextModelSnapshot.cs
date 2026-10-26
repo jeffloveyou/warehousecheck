@@ -2430,6 +2430,33 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserPreference", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("key");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("value");
+
+                    b.HasKey("UserId", "Key")
+                        .HasName("pk_user_preferences");
+
+                    b.ToTable("user_preferences", (string)null);
+                });
+
             modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserWarehouse", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -3237,6 +3264,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_location_images_locations_location_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserPreference", b =>
+                {
+                    b.HasOne("Warehouse.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_preferences_users_user_id");
                 });
 
             modelBuilder.Entity("Warehouse.Infrastructure.Identity.UserWarehouse", b =>

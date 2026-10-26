@@ -4,6 +4,7 @@
 @using Warehouse.Application.Inventory
 @{
     ViewData["Title"] = "預留";
+    ViewData["UsesPrefs"] = true; // 掃碼靜音（M8-06）
     var now = DateTimeOffset.UtcNow;
 }
 <h1>預留</h1>

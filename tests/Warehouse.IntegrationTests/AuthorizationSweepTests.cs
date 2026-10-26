@@ -42,6 +42,7 @@ public partial class AuthorizationSweepTests
         ["Account.ChangePasswordModel.OnPostAsync"] = Self,
         ["Account.LoginModel.OnPostAsync"] = Open,
         ["Account.LogoutModel.OnPostAsync"] = Self,
+        ["Account.PreferencesModel.OnPostAsync"] = Self, // 常用設定：只寫登入者自己的（M8-06）
         ["Admin.Users.EditModel.OnPostActiveAsync"] = Policies.UsersManage,
         ["Admin.Users.EditModel.OnPostResetPasswordAsync"] = Policies.UsersManage,
         ["Admin.Users.EditModel.OnPostSaveAsync"] = Policies.UsersManage,
