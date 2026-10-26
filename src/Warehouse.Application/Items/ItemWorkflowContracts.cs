@@ -38,8 +38,52 @@ public sealed record DuplicateCandidate(
     ItemStatus Status,
     DuplicateMatchReason Reason);
 
-/// <summary>提出物料的結果：內部 ID 與申請單號。</summary>
-public sealed record SubmitItemResult(Guid ItemId, string RequestNo);
+/// <summary>提出物料的結果：內部 ID 與申請單號；自動核准（或重送時已核准）才有正式料號。</summary>
+public sealed record SubmitItemResult(Guid ItemId, string RequestNo, string? ItemCode = null);
+
+/// <summary>表單上一起登錄的原廠條碼（M8-05）：包裝數量預設 1，外箱條碼填一箱的基本單位數量。</summary>
+public sealed record ItemBarcodeDraft(string Text, decimal PackQuantity = 1m);
+
+/// <summary>
+/// 提出物料的附加選項（M8-05，ADR-0023）：與物料在同一個交易內登錄原廠條碼，
+/// 物料管理員可選擇送出後自動核准（<paramref name="AcknowledgedCandidateIds"/> 是畫面上已確認不是重複的候選）。
+/// </summary>
+public sealed record ItemSubmitOptions(
+    IReadOnlyList<ItemBarcodeDraft> Barcodes,
+    bool AutoApprove,
+    IReadOnlyCollection<Guid> AcknowledgedCandidateIds)
+{
+    public static readonly ItemSubmitOptions None = new([], false, []);
+
+    /// <summary>一張提出／修改單最多一起登錄幾個原廠條碼（更多請到物料頁「搜尋索引」）。</summary>
+    public const int MaxBarcodes = 10;
+}
+
+/// <summary>
+/// 修改物料的附加選項（M8-05，ADR-0023）：
+/// - 新增與停用原廠條碼（與修改同一個交易）。
+/// - 核准後改基本單位或追蹤模式、且物料已有異動紀錄時：要勾選確認並填寫原因（寫入審核紀錄）。
+/// </summary>
+public sealed record ItemUpdateOptions(
+    IReadOnlyList<ItemBarcodeDraft> AddBarcodes,
+    IReadOnlyCollection<Guid> DeactivateBarcodeIds,
+    bool ConfirmUnitTrackingChange,
+    string? UnitTrackingChangeReason)
+{
+    public static readonly ItemUpdateOptions None = new([], [], false, null);
+
+    /// <summary>單位／追蹤模式變更原因的長度上限（寫在審核意見裡）。</summary>
+    public const int ReasonMaxLength = 200;
+}
+
+/// <summary>
+/// 核准後的物料能否改基本單位、追蹤模式（修改畫面用來決定鎖住或開放，送出時服務會在交易內再檢查一次）。
+/// <see cref="Blockers"/> 非空時不能改；<see cref="HasActivity"/> 為 true 時要勾選確認並填寫原因。
+/// </summary>
+public sealed record UnitTrackingChangeCheck(bool HasActivity, bool SettingAllows, IReadOnlyList<string> Blockers)
+{
+    public bool CanChange => Blockers.Count == 0;
+}
 
 /// <summary>
 /// 核准時有核准者尚未確認過的重複候選（可能是剛被別人提出或核准的）。
@@ -70,12 +114,33 @@ public interface IItemWorkflowService
     Task<SubmitItemResult> SubmitAsync(Guid requestId, ItemDraft draft, Actor actor, CancellationToken cancellationToken);
 
     /// <summary>
-    /// 修改內容（不改狀態）。核准前：提出人或管理員；核准後：僅管理員，且只能改描述欄位。
+    /// 提出物料並在同一個交易內登錄原廠條碼；<see cref="ItemSubmitOptions.AutoApprove"/> 時（僅物料管理員）接著核准、發出正式料號。
+    /// 任何一個條碼衝突或核准檢查失敗，整筆都不建立。冪等規則同 <see cref="SubmitAsync(Guid, ItemDraft, Actor, CancellationToken)"/>。
+    /// </summary>
+    Task<SubmitItemResult> SubmitAsync(
+        Guid requestId, ItemDraft draft, ItemSubmitOptions options, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 修改內容（不改狀態）。核准前：提出人或管理員；核准後：僅管理員。
+    /// 核准後分類不可改；基本單位、追蹤模式依 <see cref="CheckUnitTrackingChangeAsync"/> 的規則（ADR-0023）。
     /// 核准後的物料改了品名或型號時會檢查重複，規則同 <see cref="ApproveAsync"/>（核准前的物料在核准時才檢查）。
     /// </summary>
     Task UpdateAsync(
         Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
         Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>修改內容，並同時新增／停用原廠條碼、確認單位或追蹤模式的變更（M8-05）。</summary>
+    Task UpdateAsync(
+        Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
+        ItemUpdateOptions options, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 核准後的物料改成 <paramref name="newBaseUnitId"/>／<paramref name="newTrackingMode"/> 時會被哪些規則擋下（ADR-0023）。
+    /// 沒有異動紀錄：只檢查條碼與負庫存設定是否符合新單位、新追蹤模式。
+    /// 有異動紀錄：另外要系統設定開放，且沒有未完成單據、有效預留、進行中盤點；改追蹤模式時結存要全部為 0。
+    /// </summary>
+    Task<UnitTrackingChangeCheck> CheckUnitTrackingChangeAsync(
+        Guid itemId, Guid newBaseUnitId, TrackingMode newTrackingMode, CancellationToken cancellationToken);
 
     /// <summary>退回的物料修改後重新送審（提出人或管理員）。</summary>
     Task ResubmitAsync(Guid itemId, uint expectedVersion, ItemDraft draft, Actor actor, CancellationToken cancellationToken);

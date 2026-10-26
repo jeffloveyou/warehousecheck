@@ -6,6 +6,7 @@ using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
+using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Persistence;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
@@ -128,7 +129,7 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
             await AdvisoryLocks.LockStockAsync(db,
                 requests.SelectMany(r => new[] { AdvisoryLocks.StockKey(r.ItemId, r.WarehouseId), AdvisoryLocks.StockItemKey(r.ItemId) }),
                 cancellationToken);
-            var items = await LoadItemsAsync(requests.Select(r => r.ItemId).Distinct().ToArray(), cancellationToken);
+            var items = await LoadItemsAsync(requests.Select(r => r.ItemId).Distinct().ToArray(), cancellationToken, lockRows: true);
             var pairs = requests.Select(r => (r.ItemId, r.WarehouseId)).Distinct().ToList();
 
             // 負庫存物料（送審時）：可預留量 = min(倉庫可用量, 全倉可用量 + 下限)，不小於 0
@@ -266,7 +267,7 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         var keys = decreasing.Select(c => AdvisoryLocks.StockKey(c.ItemId, WarehouseOf(c)))
             .Concat(decreasing.Where(c => before[c.ItemId].AllowNegative).Select(c => AdvisoryLocks.StockItemKey(c.ItemId)));
         await AdvisoryLocks.LockStockAsync(db, keys, cancellationToken);
-        var after = await LoadItemsAsync(itemIds, cancellationToken);
+        var after = await LoadItemsAsync(itemIds, cancellationToken, lockRows: true);
         if (decreasing.Any(c => !before[c.ItemId].AllowNegative && after[c.ItemId].AllowNegative))
         {
             // 取鎖期間剛開啟負庫存：這筆沒拿到料號鎖，全倉檢查可能看不到別人的扣減（M4-01 審查 #2）；請使用者重試
@@ -275,7 +276,24 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         var items = itemIds.ToDictionary(id => id, id => after[id] with { AllowNegative = before[id].AllowNegative && after[id].AllowNegative });
         foreach (var change in changes)
         {
-            RequireScale(Math.Abs(change.Delta), items[change.ItemId]);
+            var info = items[change.ItemId];
+            // 最後一道防線（M8-05 審查 🔴-1、🟠-2）：明細是在物料設定被修改前寫入的、或從其他入口（盤點）進來的
+            if (!info.Approved)
+            {
+                throw new DomainRuleException($"物料 {info.Code} 尚未核准或已拒絕，不能過帳。");
+            }
+            var trackingOk = info.TrackingMode switch
+            {
+                TrackingMode.None => change.LotId is null && change.SerialId is null,
+                TrackingMode.Lot => change.LotId is not null && change.SerialId is null,
+                _ => change.SerialId is not null,
+            };
+            if (!trackingOk)
+            {
+                throw new DomainRuleException(
+                    $"物料 {info.Code} 的追蹤模式是「{info.TrackingMode}」，這筆的批號／序號不符（可能是物料設定剛被修改），請修正明細後再過帳。");
+            }
+            RequireScale(Math.Abs(change.Delta), info);
             if (change.SerialId is not null && Math.Abs(change.Delta) != 1)
             {
                 throw new DomainRuleException($"序號物料 {items[change.ItemId].Code} 每筆數量必須是 1。");
@@ -514,15 +532,25 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         return rows;
     }
 
-    private async Task<Dictionary<Guid, ItemInfo>> LoadItemsAsync(Guid[] ids, CancellationToken cancellationToken)
+    /// <summary>
+    /// 讀物料設定。<paramref name="lockRows"/>：取 FOR KEY SHARE 到交易結束（M8-05 審查 🟠-2）——
+    /// 與修改單位／追蹤模式的 FOR UPDATE 互斥，所以這裡讀到的設定在提交前不會被改；
+    /// 只在取得 advisory 鎖之後使用（負庫存設定是「advisory → FOR UPDATE」，順序一致不會死結）。
+    /// </summary>
+    private async Task<Dictionary<Guid, ItemInfo>> LoadItemsAsync(Guid[] ids, CancellationToken cancellationToken, bool lockRows = false)
     {
-        var rows = (await QueryAsync(db, """
+        var rows = (await QueryAsync(db, $"""
             SELECT i.id, COALESCE(i.item_code, i.request_no), i.status = 'Active', i.allow_negative_stock, i.negative_stock_limit,
-                   u.decimal_places
+                   u.decimal_places, i.status IN ('Active', 'Inactive'), i.tracking_mode
             FROM items i JOIN units u ON u.id = i.base_unit_id
             WHERE i.id = ANY(@ids)
+            {(lockRows ? "FOR KEY SHARE OF i" : "")}
             """,
-            r => new ItemInfo(r.GetGuid(0), r.GetString(1), r.GetBoolean(2), r.GetBoolean(3), r.GetDecimal(4), r.GetInt16(5)),
+            r => new ItemInfo(r.GetGuid(0), r.GetString(1), r.GetBoolean(2), r.GetBoolean(3), r.GetDecimal(4), r.GetInt16(5))
+            {
+                Approved = r.GetBoolean(6),
+                TrackingMode = Enum.Parse<TrackingMode>(r.GetString(7)),
+            },
             cancellationToken, Param("ids", ids)))
             .ToDictionary(i => i.Id);
         if (rows.Count != ids.Length)
@@ -575,5 +603,11 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
 
     private sealed record LocationInfo(Guid Id, Guid WarehouseId, LocationStatus Status, string Code);
 
-    private sealed record ItemInfo(Guid Id, string Code, bool Active, bool AllowNegative, decimal NegativeLimit, int DecimalPlaces);
+    private sealed record ItemInfo(Guid Id, string Code, bool Active, bool AllowNegative, decimal NegativeLimit, int DecimalPlaces)
+    {
+        /// <summary>已核准（有效或停用）；待核准、退回、已拒絕的物料不可過帳。</summary>
+        public bool Approved { get; init; }
+
+        public TrackingMode TrackingMode { get; init; }
+    }
 }

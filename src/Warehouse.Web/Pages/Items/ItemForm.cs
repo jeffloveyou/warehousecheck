@@ -40,8 +40,16 @@ public sealed class ItemFormInput
     [Display(Name = "規格")]
     public string? Specification { get; set; }
 
+    /// <summary>一起登錄的原廠條碼（M8-05）；空白列忽略。修改時只放「新增」的條碼，既有條碼另列。</summary>
+    public List<ItemBarcodeInput> Barcodes { get; set; } = [];
+
     public ItemDraft ToDraft() => new(
         Name, CategoryId ?? Guid.Empty, BaseUnitId ?? Guid.Empty, TrackingMode, Brand, ManufacturerPartNo, Specification);
+
+    public IReadOnlyList<ItemBarcodeDraft> ToBarcodeDrafts() => Barcodes
+        .Where(b => !string.IsNullOrWhiteSpace(b.Text))
+        .Select(b => new ItemBarcodeDraft(b.Text!, b.PackQuantity ?? 1m))
+        .ToList();
 
     public static ItemFormInput From(ItemDetails item) => new()
     {
@@ -55,6 +63,14 @@ public sealed class ItemFormInput
     };
 }
 
+/// <summary>表單上的一列原廠條碼（包裝數量空白＝1）。</summary>
+public sealed class ItemBarcodeInput
+{
+    public string? Text { get; set; }
+
+    public decimal? PackQuantity { get; set; }
+}
+
 /// <summary>表單下拉選單（只列啟用中的分類與單位；修改時保留目前選擇，即使它已停用）。</summary>
 public sealed class ItemFormOptions
 {
@@ -65,17 +81,24 @@ public sealed class ItemFormOptions
     public IReadOnlyList<SelectListItem> TrackingModes { get; } =
         Enum.GetValues<TrackingMode>().Select(m => new SelectListItem(Display.Of(m), m.ToString())).ToList();
 
-    /// <summary>核准後不可改分類、單位、追蹤模式（Domain 也會擋），畫面上直接鎖住。</summary>
-    public bool LockClassification { get; init; }
+    /// <summary>核准後不可改分類（料號前綴來自分類；Domain 也會擋），畫面上直接鎖住。</summary>
+    public bool LockCategory { get; init; }
+
+    /// <summary>
+    /// 核准後的單位、追蹤模式：<c>null</c> 表示可改；否則是鎖住的原因（ADR-0023，送出時服務會在交易內再檢查）。
+    /// </summary>
+    public string? UnitTrackingLockReason { get; init; }
 
     public static async Task<ItemFormOptions> LoadAsync(
-        IMasterDataService masterData, ItemFormInput? current, bool lockClassification, CancellationToken cancellationToken)
+        IMasterDataService masterData, ItemFormInput? current, bool lockCategory, CancellationToken cancellationToken,
+        string? unitTrackingLockReason = null)
     {
         var categories = await masterData.ListCategoriesAsync(cancellationToken);
         var units = await masterData.ListUnitsAsync(cancellationToken);
         return new ItemFormOptions
         {
-            LockClassification = lockClassification,
+            LockCategory = lockCategory,
+            UnitTrackingLockReason = unitTrackingLockReason,
             Categories = categories
                 .Where(c => c.IsActive || c.Id == current?.CategoryId)
                 .Select(c => new SelectListItem($"{c.Path}（{c.EffectivePrefix}）", c.Id.ToString()))

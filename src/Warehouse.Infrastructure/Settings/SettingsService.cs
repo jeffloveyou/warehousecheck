@@ -100,6 +100,8 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             LineReservationEnabled = Flag(SettingKeys.LineReservationEnabled, Defaults.LineReservationEnabled),
             LineCrossTransferEnabled = Flag(SettingKeys.LineCrossTransferEnabled, Defaults.LineCrossTransferEnabled),
             LineLotSerialEnabled = Flag(SettingKeys.LineLotSerialEnabled, Defaults.LineLotSerialEnabled),
+            AllowItemUnitTrackingChangeWithActivity = Flag(
+                SettingKeys.AllowItemUnitTrackingChangeWithActivity, Defaults.AllowItemUnitTrackingChangeWithActivity),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
             RetentionAuditYears = Number(SettingKeys.RetentionAuditYears, Defaults.RetentionAuditYears),
             RetentionLoginDays = Number(SettingKeys.RetentionLoginDays, Defaults.RetentionLoginDays),
@@ -175,5 +177,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.LineReservationEnabled, original.LineReservationEnabled, updated.LineReservationEnabled, current.LineReservationEnabled),
         (SettingKeys.LineCrossTransferEnabled, original.LineCrossTransferEnabled, updated.LineCrossTransferEnabled, current.LineCrossTransferEnabled),
         (SettingKeys.LineLotSerialEnabled, original.LineLotSerialEnabled, updated.LineLotSerialEnabled, current.LineLotSerialEnabled),
+        (SettingKeys.AllowItemUnitTrackingChangeWithActivity, original.AllowItemUnitTrackingChangeWithActivity,
+            updated.AllowItemUnitTrackingChangeWithActivity, current.AllowItemUnitTrackingChangeWithActivity),
     ];
 }

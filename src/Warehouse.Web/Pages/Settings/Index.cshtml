@@ -37,11 +37,15 @@
     <input type="hidden" name="Original.LineReservationEnabled" value="@Model.Original.LineReservationEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LineCrossTransferEnabled" value="@Model.Original.LineCrossTransferEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LineLotSerialEnabled" value="@Model.Original.LineLotSerialEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.AllowItemUnitTrackingChangeWithActivity" value="@Model.Original.AllowItemUnitTrackingChangeWithActivity.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.RetentionAuditYears" value="@Model.Original.RetentionAuditYears" />
     <input type="hidden" name="Original.RetentionLoginDays" value="@Model.Original.RetentionLoginDays" />
     <input type="hidden" name="Original.RetentionProcessedCommandsDays" value="@Model.Original.RetentionProcessedCommandsDays" />
     <input type="hidden" name="Original.RetentionPostingFailuresDays" value="@Model.Original.RetentionPostingFailuresDays" />
     <input type="hidden" name="Original.RetentionImportBatchesDays" value="@Model.Original.RetentionImportBatchesDays" />
+    <h2>物料</h2>
+    <p><label><input type="checkbox" name="Form.AllowItemUnitTrackingChangeWithActivity" value="true" checked="@Model.Form.AllowItemUnitTrackingChangeWithActivity" id="setting-item-unit-change" /> 已有異動紀錄的物料，也可以修改基本單位、追蹤模式</label></p>
+    <p class="muted">預設關閉：物料一旦進出過庫存，基本單位與追蹤模式就鎖住（ADR-0023）。開啟後由物料管理員在修改畫面勾選確認並填寫原因才能改，<strong>舊紀錄的數量不會換算</strong>（例如原本 10 個，改成「箱」後會顯示 10 箱）。即使開啟，有未完成單據、有效預留、進行中盤點時仍不能改；改追蹤模式時結存必須全部為 0。</p>
     <h2>期初建帳</h2>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveOpening" value="true" checked="@Model.Form.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>

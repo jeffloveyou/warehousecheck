@@ -56,6 +56,12 @@ public sealed record SystemSettings(
     /// <summary>顯示批號、序號欄（關閉時只在料號需要時顯示）。</summary>
     public bool LineLotSerialEnabled { get; init; } = true;
 
+    /// <summary>
+    /// 已有異動紀錄的物料可否改基本單位、追蹤模式（M8-05，ADR-0023；預設 false）。
+    /// 開啟後仍有安全底線：沒有未完成單據、有效預留、進行中盤點；改追蹤模式時結存須為 0。
+    /// </summary>
+    public bool AllowItemUnitTrackingChangeWithActivity { get; init; }
+
     /// <summary>列印抬頭的公司名稱（空白＝不印）；最多 <see cref="SettingKeys.TextMaxLength"/> 字。</summary>
     public string PrintCompanyName { get; init; } = string.Empty;
 
@@ -130,6 +136,7 @@ public static class SettingKeys
     public const string LineReservationEnabled = "stock.documents.line.reservation.enabled";
     public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
     public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
+    public const string AllowItemUnitTrackingChangeWithActivity = "items.allow_unit_tracking_change_with_activity";
     public const string RetentionAuditYears = "retention.audit_years";
     public const string RetentionLoginDays = "retention.login_days";
     public const string RetentionProcessedCommandsDays = "retention.processed_commands_days";

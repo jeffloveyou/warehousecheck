@@ -270,9 +270,10 @@ public sealed class StocktakeService(
             var now = clock.GetUtcNow();
             if (line is null)
             {
-                if (item.Status == ItemStatus.PendingApproval)
+                // 待核准、退回的物料可能已登錄原廠條碼（M8-05），掃到也不能盤點入帳（審查 🔴-1）
+                if (item.Status is not (ItemStatus.Active or ItemStatus.Inactive))
                 {
-                    throw new DomainRuleException($"料號 {item.Code} 還在待核准，不能盤點入帳。");
+                    throw new DomainRuleException($"料號 {item.Code} 尚未核准或已拒絕，不能盤點入帳。");
                 }
                 var count = await db.Set<StocktakeLine>().CountAsync(l => l.StocktakeId == id, cancellationToken);
                 if (count >= Stocktake.MaxLines)

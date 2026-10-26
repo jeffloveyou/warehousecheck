@@ -11,6 +11,12 @@ namespace Warehouse.Infrastructure.Persistence;
 /// </summary>
 internal sealed class JoinableTransaction(IDbContextTransaction? owned) : IAsyncDisposable
 {
+    /// <summary>
+    /// 自己開的交易（true）或加入外層交易（false）。加入外層時，SQL 錯誤後交易已中止、也不能自行回滾：
+    /// 不要在 catch 裡再查詢，直接丟出讓外層處理（M8-05 審查 🟡-6）。
+    /// </summary>
+    public bool IsOwned => owned is not null;
+
     public Task CommitAsync(CancellationToken cancellationToken) => owned?.CommitAsync(cancellationToken) ?? Task.CompletedTask;
 
     public Task RollbackAsync(CancellationToken cancellationToken) => owned?.RollbackAsync(cancellationToken) ?? Task.CompletedTask;
