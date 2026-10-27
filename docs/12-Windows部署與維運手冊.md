@@ -232,8 +232,45 @@ Select-String -Path C:\Warehouse\logs\WarehouseB-*.log -Pattern '<requestId>' | 
 ### 8.5 重新安裝 PostgreSQL 之前
 - 先把 `C:\WarehouseBackup\wal` 改名保存，否則新叢集的 WAL 檔名會和舊的衝突（ADR-0021）。
 
-## 9. 第一次建置正式環境（紀錄，日後重建用）
-2026-10-24 實際走過的順序，詳細結果見 `docs/07`：
+## 9. 第一次建置正式環境
+### 9.1 一鍵安裝（2026-10-27 起建議使用）
+1. **在開發機準備套件資料夾**（例如 `C:\Users\jeff\WarehouseSetup\`）：
+   - `scripts\`：整個 repo 的 `scripts` 資料夾。
+   - `一鍵安裝.cmd`、`一鍵移除.cmd`：從 `scripts\windows\` 複製到資料夾根目錄。
+   - `publish.ps1` 產生的網站與代理發布資料夾。
+   - `installers\`：PowerShell 7 MSI、`dotnet-runtime-10.*`、`aspnetcore-runtime-10.*`、`postgresql-17.*` 安裝檔。**ASP.NET Core Runtime 安裝檔不含 .NET Runtime，兩個都要放**。
+   - 伺服器憑證：在開發機執行 `new-dev-certs.ps1 -HostName <主機名> -IpAddress <IP>`，再放入 `warehouse-server.pfx` 與 `pfx-password.txt`。根 CA 私鑰不可匯出，所以一定要在開發機簽發。
+2. 用**系統管理員帳號**把整個資料夾複製到新主機的 `C:\WarehouseSetup\`，雙擊 `一鍵安裝.cmd`，在 UAC 視窗按「是」。
+   - 安裝一開始會把套件自己的項目（`scripts`、`installers`、兩個發布資料夾、憑證、`.cmd`）的權限改成只有 Administrators、SYSTEM 可以存取，避免一般帳號替換掉之後會以管理員身分執行的檔案。套件所在的上層資料夾不會動。
+   - postgres 密碼只能用英文、數字與一般符號，不能有空白、中文或 `" # \ =`，因為安裝程式的選項檔只認 ASCII。
+   - 網路是「未識別的網路」（離線、沒有預設閘道）時，可能改不成私人網路。腳本會顯示處理方式，並繼續安裝。
+3. 依畫面輸入：
+   - postgres 密碼：安裝 PostgreSQL 時設定，建庫與開 WAL 封存時再輸入。
+   - owner 密碼：建庫時設定，Migration 時再輸入。
+   - Migration 的 YES。
+   - 第一個系統管理員帳號。
+4. 最後的「總驗證」全部通過才算完成。日誌在 `C:\Warehouse\logs\install-<時間>.log`。
+- 中途失敗時，修正後重新雙擊即可，已完成的步驟會跳過。
+- 代理安裝成功後，套件內的 `warehouse-server.pfx` 與 `pfx-password.txt` 會被刪除，副本在 `C:\Warehouse\certs`。如果安裝失敗，這兩個檔案會保留，修正後可以重跑。
+- 服務存在但沒有就緒時，腳本會停下來，提示先執行 `uninstall-service.ps1` 再重跑。
+- 建立系統管理員之後，腳本會暫停，讓你抄下只顯示一次的初始密碼。
+- 只想看目前狀態：`pwsh .\scripts\windows\install-all.ps1 -DetectOnly`。
+
+### 9.2 一鍵移除
+雙擊 `一鍵移除.cmd`，選擇要移除的程度：
+
+| 選項 | 移除 | 保留 | 確認 |
+|---|---|---|---|
+| 1（預設） | 服務、排程、防火牆規則 | 資料庫、`C:\Warehouse`（含憑證）、`C:\WarehouseBackup`。重新一鍵安裝就恢復，不需要再放 pfx | Y |
+| 2 | 1 ＋ 資料庫與帳號、連線字串、網站設定檔。刪除前先做最後一份備份到 `C:\WarehouseBackup\final\`，並用 `pg_restore --list` 驗證可讀；附件也複製到這裡，比對過檔案數和大小才刪除原檔 | 兩個資料夾 | 輸入資料庫名稱 |
+| 3 | 2 ＋ 關閉 WAL 封存、刪除兩個資料夾。開始前先指定最後一份備份的另存位置（例如 `E:\`）。腳本會在裡面建立 `warehouse-final-<時間>` 資料夾，並當場測試能不能寫入；隨身碟如果是 FAT32／exFAT，無法設定權限，會再請你確認。不保留的話要輸入 `NOBACKUP`。叢集裡還有其他資料庫時不能選 3 | — | 資料庫名稱＋`DELETE` |
+
+- 另外可以選「連軟體一起移除」：解除安裝 PostgreSQL 17 和 .NET／ASP.NET Core Runtime 10；PowerShell 7 會在視窗結束後移除。
+- PostgreSQL 的資料目錄只有選 3 才會詢問是否刪除。要保留資料目錄又要重裝 PostgreSQL 時，先看 §8.5。
+- 移除日誌在 `%TEMP%\warehouse-uninstall-<時間>.log`。選 3 會刪掉 `C:\Warehouse`，所以日誌不放在那裡。
+
+### 9.3 手動逐步（一鍵安裝失敗時的備案；2026-10-24 演練順序）
+詳細結果見 `docs/07`：
 1. `init-prod-db.ps1 -Database warehouse_prod`：輸入 postgres 密碼與自訂的擁有者密碼。
 2. `migrate-db.ps1 -ReleasePath <版本> -Database warehouse_prod`：輸入擁有者密碼與 YES。
 3. `enable-wal-archive.ps1`：會重新啟動 PostgreSQL。
@@ -242,3 +279,4 @@ Select-String -Path C:\Warehouse\logs\WarehouseB-*.log -Pattern '<requestId>' | 
 6. `create-admin.ps1 -Database warehouse_prod -User <帳號>`。
 7. 演練用的 `warehouse_staging`：`check-nonowner.ps1`（10 項 SQL 探測與畫面冒煙）、`drill.ps1`（A/B 演練）。
 - 代理與服務的第一次安裝見 `docs/04` §12.3。
+- 全新主機（還沒有任何服務）時，第 5 步不適用。改為執行 `install-service.ps1 -ConnectionStringFile <副本>`，副本從 `secrets\<db>.connection.txt` 複製；腳本讀完會刪除傳入的檔案，所以不要直接傳原檔。另外要先裝好 PowerShell 7、.NET Runtime、ASP.NET Core Runtime。
