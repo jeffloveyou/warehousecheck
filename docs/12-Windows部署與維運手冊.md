@@ -29,6 +29,41 @@
 | 每季 | 還原演練（§5.4），依 D-13 | 筆數比對全部一致 |
 
 ## 3. 換版（更新程式）
+### 3.0 一鍵換版（正式主機在另一台電腦時，建議使用）
+1. **開發機**產生換版包：
+   ```powershell
+   cd C:\CodeProject\物料管理系統
+   git switch main; git pull
+   $env:WAREHOUSE_TEST_DB = [Environment]::GetEnvironmentVariable('WAREHOUSE_TEST_DB','User')
+   .\scripts\new-update-package.ps1
+   ```
+   - 會跑全部測試。
+   - 產生 `%USERPROFILE%\WarehouseUpdate-<版本>-<commit>\` 和同名 `.zip`。內容有：
+     - `scripts\`、網站發布檔
+     - 代理（只有程式有變動時才放）
+     - 兩個 `.cmd`
+     - `換版說明.txt`（新 Migration、變更清單）
+     - 本機的換版本手冊
+   - 代理是否放入，是和上一個換版包比較來判斷；可以用 `-IncludeProxy`／`-ExcludeProxy` 強制。
+2. 把**資料夾或 zip 其中一個**複製到隨身碟。
+3. **正式主機**：
+   - 雙擊隨身碟上的 `一鍵換版.cmd`，或 `C:\WarehouseSetup\一鍵換版.cmd`。
+   - 輸入編號選換版包。清單只列隨身碟最上層的資料夾或 zip；不掃 `C:\` 根目錄，也不列 `C:\WarehouseUpdate`，因為一般使用者可以事先在那裡放東西。其他位置按 `P` 輸入路徑或拖曳檔案。選定後顯示位置、版本與建置時間，要輸入 `Y` 確認。
+   - 代理只在程式有變動時才詢問是否更新（比對換版說明的 `proxySource` 與 `C:\Warehouse\proxy-source.txt`）。
+   - `C:\WarehouseSetup` 整個只給系統管理員；舊版本移到 `old-<時間>\`，只保留最近 3 份。
+   - 換版包每次都會重新複製或解壓到 `C:\WarehouseUpdate`（只有系統管理員可改），並依 `SHA256SUMS` 逐檔核對，有缺檔或被改過就停止。
+   - 腳本依序執行：
+     1. 複製到 `C:\WarehouseUpdate`。
+     2. 確認 26 小時內有成功的備份（沒有就先備份）。
+     3. 換上新腳本。
+     4. 有待套用的 Migration 時執行 `migrate-db`（輸入 owner 密碼與 YES）。
+     5. `switch-release`。
+     6. 換版包含新版代理時，詢問後更新；失敗會自動裝回舊代理。
+     7. 驗證版本。
+4. 要退回時，雙擊 `一鍵回滾.cmd`：先顯示目前與待命槽位的版本，確認後切回。
+- 日誌在 `C:\Warehouse\logs\update-<時間>.log`；切換紀錄在 `deploy.log`。
+- 以下 §3.1～3.3 是手動指令，作為備案；也適用於開發機上的演練環境。
+
 ### 3.1 沒有 Migration 的版本
 ```powershell
 cd C:\CodeProject\物料管理系統
