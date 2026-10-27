@@ -102,6 +102,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             LineLotSerialEnabled = Flag(SettingKeys.LineLotSerialEnabled, Defaults.LineLotSerialEnabled),
             AllowItemUnitTrackingChangeWithActivity = Flag(
                 SettingKeys.AllowItemUnitTrackingChangeWithActivity, Defaults.AllowItemUnitTrackingChangeWithActivity),
+            AllowItemCodeChange = Flag(SettingKeys.AllowItemCodeChange, Defaults.AllowItemCodeChange),
             PrintCompanyName = values.TryGetValue(SettingKeys.PrintCompanyName, out var company) ? company : Defaults.PrintCompanyName,
             RememberMeDays = Number(SettingKeys.RememberMeDays, Defaults.RememberMeDays),
             RetentionAuditYears = Number(SettingKeys.RetentionAuditYears, Defaults.RetentionAuditYears),
@@ -182,5 +183,6 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.LineLotSerialEnabled, original.LineLotSerialEnabled, updated.LineLotSerialEnabled, current.LineLotSerialEnabled),
         (SettingKeys.AllowItemUnitTrackingChangeWithActivity, original.AllowItemUnitTrackingChangeWithActivity,
             updated.AllowItemUnitTrackingChangeWithActivity, current.AllowItemUnitTrackingChangeWithActivity),
+        (SettingKeys.AllowItemCodeChange, original.AllowItemCodeChange, updated.AllowItemCodeChange, current.AllowItemCodeChange),
     ];
 }

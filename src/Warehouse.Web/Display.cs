@@ -35,6 +35,7 @@ public static class Display
         ItemReviewAction.Withdraw => "撤回",
         ItemReviewAction.Deactivate => "停用",
         ItemReviewAction.Reactivate => "重新啟用",
+        ItemReviewAction.CodeChange => "變更料號",
         _ => action.ToString(),
     };
 
@@ -50,6 +51,7 @@ public static class Display
     {
         Warehouse.Application.Search.HitReason.ItemCode => "料號",
         Warehouse.Application.Search.HitReason.RequestNo => "申請單號",
+        Warehouse.Application.Search.HitReason.OldItemCode => "舊料號",
         Warehouse.Application.Search.HitReason.Alias => "專屬別名",
         Warehouse.Application.Search.HitReason.Barcode => "原廠條碼",
         Warehouse.Application.Search.HitReason.PartNo => "型號",

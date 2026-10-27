@@ -31,6 +31,19 @@ internal static class AdvisoryLocks
         db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"item-auto-approve"}))", cancellationToken);
 
     /// <summary>
+    /// 料號前綴的鎖（D-32，ADR-0025）：自動發號、核准時指定料號、變更料號都先取這把鎖，再檢查號碼是否已被物料
+    /// 或保留中的歷史料號占用。同一前綴的發號與指定因此排隊，不會同時通過檢查。
+    /// 多個前綴時依字母排序取鎖（避免死結）。必須在交易內呼叫。鍵名前綴不可變更（A/B 兩版需鎖到同一把）。
+    /// </summary>
+    public static async Task LockItemCodePrefixesAsync(WarehouseDbContext db, IEnumerable<string> prefixes, CancellationToken cancellationToken)
+    {
+        foreach (var prefix in prefixes.Distinct().Order(StringComparer.Ordinal))
+        {
+            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"item-code-prefix:" + prefix}))", cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// 精確識別碼的鎖（M5-01，ADR-0016）：新增專屬別名與原廠條碼前，先以正規化文字取這把鎖，再檢查另一張表。
     /// 兩張表各自的部分唯一索引只能擋「同表重複」；跨表（別名＝條碼）靠這把鎖讓兩個新增排隊，不會同時通過檢查。
     /// 必須在交易內呼叫。鍵名前綴不可變更（A/B 兩版需鎖到同一把）。

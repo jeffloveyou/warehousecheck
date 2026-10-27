@@ -17,6 +17,7 @@ using Warehouse.Domain.Text;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Exports;
 using Warehouse.Infrastructure.Identity;
+using Warehouse.Infrastructure.Items;
 using Warehouse.Infrastructure.Persistence;
 
 namespace Warehouse.Infrastructure.Imports;
@@ -337,8 +338,19 @@ public sealed class ImportService(
             case ImportKind.Indexes:
             {
                 var code = TextNormalizer.Normalize(Required(row, "料號"));
-                var itemId = await db.Items.AsNoTracking().Where(i => i.ItemCode == code).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken)
-                    ?? throw new DomainRuleException($"找不到料號 {code}。");
+                string? warning = null;
+                var itemId = await db.Items.AsNoTracking().Where(i => i.ItemCode == code).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken);
+                if (itemId is null && await new ItemCodeRules(db).ReservedOwnerAsync(code, cancellationToken) is { } ownerId)
+                {
+                    // 舊 Excel 裡的歷史料號（D-32）：對應到改號後的同一個物料，並提醒使用新料號
+                    itemId = ownerId;
+                    var current = await db.Items.AsNoTracking().Where(i => i.Id == ownerId).Select(i => i.ItemCode).SingleAsync(cancellationToken);
+                    warning = $"{code} 是舊料號，已對應到目前的料號 {current}。";
+                }
+                if (itemId is null)
+                {
+                    throw new DomainRuleException($"找不到料號 {code}。");
+                }
                 var kindText = Required(row, "類型");
                 var indexKind = kindText switch
                 {
@@ -346,8 +358,8 @@ public sealed class ImportService(
                     "關鍵字" or "共用關鍵字" or "Keyword" => ItemIndexKind.Keyword,
                     _ => throw new DomainRuleException($"類型「{kindText}」不正確，請填 別名 或 關鍵字（條碼請在物料頁登錄）。"),
                 };
-                await indexes.AddAsync(itemId, indexKind, Required(row, "文字"), actor, cancellationToken);
-                return null;
+                await indexes.AddAsync(itemId.Value, indexKind, Required(row, "文字"), actor, cancellationToken);
+                return warning;
             }
             case ImportKind.Locations:
             {

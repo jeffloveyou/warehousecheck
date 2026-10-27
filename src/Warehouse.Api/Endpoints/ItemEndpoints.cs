@@ -20,7 +20,8 @@ public sealed record SubmitItemRequest(
     string? ManufacturerPartNo,
     string? Specification);
 
-public sealed record ApproveItemRequest(uint Version, IReadOnlyList<Guid>? AcknowledgedCandidateIds, string? Comment);
+/// <summary>核准。<see cref="ItemCode"/> 空白＝自動流水號；有填時為物料管理員指定的正式料號（D-32）。</summary>
+public sealed record ApproveItemRequest(uint Version, IReadOnlyList<Guid>? AcknowledgedCandidateIds, string? Comment, string? ItemCode = null);
 
 public sealed record ReturnItemRequest(uint Version, string Comment);
 
@@ -114,7 +115,7 @@ public static class ItemEndpoints
         CancellationToken cancellationToken)
     {
         var code = await workflow.ApproveAsync(
-            id, request.Version, request.AcknowledgedCandidateIds ?? [], request.Comment, context.User.ToActor(),
+            id, request.Version, request.AcknowledgedCandidateIds ?? [], request.Comment, request.ItemCode, context.User.ToActor(),
             cancellationToken);
         return TypedResults.Ok(new ApproveItemResponse(code));
     }

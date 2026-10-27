@@ -7,7 +7,8 @@ namespace Warehouse.Domain.Items;
 /// 物料主檔（ADR-0003、ADR-0004、ADR-0006、ADR-0011）。
 /// - <see cref="Id"/>：永久內部識別，所有關聯都用它。
 /// - <see cref="RequestNo"/>：提出時產生的申請單號（MR-000125），永久保留。
-/// - <see cref="ItemCode"/>：正式料號，核准時才產生；發放後不得重新分配給其他物料。
+/// - <see cref="ItemCode"/>：正式料號，核准時才產生（可由物料管理員指定）；核准後經系統設定開放才可變更，
+///   舊料號預設保留為歷史料號、不給其他物料使用（D-32，ADR-0025）。
 /// 申請單號與料號由 Infrastructure 的產生器給號（M1-02）；狀態轉換規則在本類別，見 <see cref="Approve"/> 等方法。
 /// </summary>
 public sealed partial class Item
@@ -93,12 +94,47 @@ public sealed partial class Item
     public void Resubmit(DateTimeOffset now) =>
         Transition(ItemStatus.Returned, ItemStatus.PendingApproval, "只有退回的物料可以重新送審。", now);
 
-    /// <summary>核准：待核准 → 有效，同時填入產生器發出的正式料號。</summary>
+    /// <summary>核准：待核准 → 有效，同時填入產生器發出（或物料管理員指定）的正式料號。</summary>
     public void Approve(string itemCode, DateTimeOffset now)
     {
-        var code = Rules.Matches(itemCode, ItemCodePattern(), "正式料號", "2～4 碼前綴、連字號、至少 6 位數字");
+        var code = ValidItemCode(itemCode);
         Transition(ItemStatus.PendingApproval, ItemStatus.Active, "只有待核准的物料可以核准。", now);
         ItemCode = code;
+    }
+
+    /// <summary>
+    /// 變更已核准物料的正式料號（D-32，ADR-0025）。系統設定、權限、前綴是否屬於分類、是否被占用、歷史料號
+    /// 由 <c>ItemWorkflowService</c> 檢查；資料庫 trigger 另外要求交易內設定 warehouse.item_code_change。
+    /// </summary>
+    public void ChangeItemCode(string newItemCode, DateTimeOffset now)
+    {
+        if (!HasItemCode)
+        {
+            throw new DomainRuleException("只有已核准的物料可以變更料號。");
+        }
+        var code = ValidItemCode(newItemCode);
+        if (code == ItemCode)
+        {
+            throw new DomainRuleException("新料號與目前的料號相同。");
+        }
+        ItemCode = code;
+        UpdatedAt = now.ToUniversalTime();
+    }
+
+    /// <summary>料號格式：2～4 碼大寫英數前綴、連字號、至少 6 位數字（例如 ME-000123）。</summary>
+    public static bool IsValidItemCode(string? code) => code is not null && code.Length <= ItemCodeMaxLength && ItemCodePattern().IsMatch(code);
+
+    /// <summary>料號的前綴（連字號前面的部分）。</summary>
+    public static string PrefixOf(string itemCode) => itemCode[..itemCode.IndexOf('-')];
+
+    private static string ValidItemCode(string itemCode)
+    {
+        var code = Rules.Matches(itemCode, ItemCodePattern(), "正式料號", "2～4 碼前綴、連字號、至少 6 位數字");
+        if (code.Length > ItemCodeMaxLength)
+        {
+            throw new DomainRuleException($"正式料號不可超過 {ItemCodeMaxLength} 字。");
+        }
+        return code;
     }
 
     /// <summary>退回給提出人修改：待核准 → 退回。不占用料號。</summary>

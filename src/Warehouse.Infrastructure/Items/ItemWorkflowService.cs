@@ -21,9 +21,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
     /// <summary>重複候選最多回傳筆數（避免無限制查詢）。</summary>
     public const int MaxDuplicateCandidates = 50;
 
-    /// <summary>往上找料號前綴時的分類層數上限（防止資料錯誤造成無窮迴圈）。</summary>
-    private const int MaxCategoryDepth = 8;
-
     private readonly ItemNumberGenerator _numbers = new(db);
 
     /// <summary>同一個 DbContext：條碼登錄加入本服務的交易（BeginOrJoin）。</summary>
@@ -235,23 +232,109 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             return ItemReview.Record(item.Id, ItemReviewAction.Resubmit, from, item.Status, actor.Id, actor.Name, now);
         });
 
+    public Task<string> ApproveAsync(
+        Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
+        Actor actor, CancellationToken cancellationToken) =>
+        ApproveAsync(itemId, expectedVersion, acknowledgedCandidateIds, comment, null, actor, cancellationToken);
+
     public async Task<string> ApproveAsync(
         Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
-        Actor actor, CancellationToken cancellationToken)
+        string? requestedItemCode, Actor actor, CancellationToken cancellationToken)
     {
         string? itemCode = null;
         await MutateAsync(itemId, expectedVersion, cancellationToken, async (item, now) =>
         {
-            (var review, itemCode) = await ApproveItemAsync(item, acknowledgedCandidateIds, comment, actor, now, cancellationToken);
+            (var review, itemCode) = await ApproveItemAsync(
+                item, acknowledgedCandidateIds, comment, actor, now, cancellationToken, requestedItemCode);
             return review;
         });
         return itemCode!;
     }
 
+    public async Task<string> ChangeItemCodeAsync(
+        Guid itemId, uint expectedVersion, ItemCodeChangeRequest request, Actor actor, CancellationToken cancellationToken)
+    {
+        string? newCode = null;
+        await MutateAsync(itemId, expectedVersion, cancellationToken, async (item, now) =>
+        {
+            RequireManager(actor);
+            if (item.Status is not (ItemStatus.Active or ItemStatus.Inactive) || item.ItemCode is not { } oldCode)
+            {
+                throw new DomainRuleException("只有已核准的物料可以變更料號；尚未核准的物料請在核准時指定料號。");
+            }
+            if (!await SettingAllowsItemCodeChangeAsync(cancellationToken))
+            {
+                throw new DomainRuleException("系統設定未開放變更已核准的料號，請洽系統管理員。");
+            }
+            var reason = request.Reason?.Trim();
+            if (string.IsNullOrEmpty(reason))
+            {
+                throw new DomainRuleException("變更料號必須填寫原因。");
+            }
+            if (reason.Length > ItemCodeHistory.ReasonMaxLength)
+            {
+                throw new DomainRuleException($"原因不可超過 {ItemCodeHistory.ReasonMaxLength} 字。");
+            }
+            if (request.ReleaseOldCode && ItemCodeRules.Normalize(request.ConfirmOldCode) != oldCode)
+            {
+                throw new DomainRuleException($"要釋出舊料號，請在確認欄再輸入一次舊料號 {oldCode}。");
+            }
+
+            // 鎖的順序與核准相同：分類樹（共享）→ 新料號的前綴，一次只鎖一個前綴。
+            // 不鎖舊號的前綴（審查 🟠-1：匯入自動核准逐列取前綴鎖，同時鎖兩個前綴可能和它死結）：
+            // 舊號在提交前仍是本物料的料號、提交後變成歷史料號，別人的占用檢查一直看得到它，不需要另外鎖
+            await AdvisoryLocks.LockCategoryTreeAsync(db, exclusive: false, cancellationToken);
+            var rules = new ItemCodeRules(db);
+            var prefixes = await rules.PrefixesAsync(item.CategoryId, cancellationToken);
+            var requested = ItemCodeRules.Normalize(request.NewItemCode);
+            var newPrefix = Item.IsValidItemCode(requested) ? Item.PrefixOf(requested) : prefixes[0];
+            await AdvisoryLocks.LockItemCodePrefixesAsync(db, [newPrefix], cancellationToken);
+            newCode = await rules.EnsureAssignableAsync(requested, item.Id, prefixes, cancellationToken);
+
+            // 資料庫 trigger 只在這個交易設定了 warehouse.item_code_change＝物料 ID 時允許改料號（擋住其他程式誤改）
+            await db.Database.ExecuteSqlAsync(
+                $"SELECT set_config('warehouse.item_code_change', {item.Id.ToString()}, true)", cancellationToken);
+            item.ChangeItemCode(newCode, now);
+            db.ItemCodeHistory.Add(ItemCodeHistory.Record(
+                item.Id, oldCode, newCode, request.ReleaseOldCode, reason, actor.Id, actor.Name, now));
+            // 原因上限 200、料號各 16，整句不會超過審核意見的 500 字
+            var comment = $"料號 {oldCode} → {newCode}；舊料號{(request.ReleaseOldCode ? "已釋出" : "保留為歷史料號")}；原因：{reason}";
+            return ItemReview.Record(
+                item.Id, ItemReviewAction.CodeChange, item.Status, item.Status, actor.Id, actor.Name, now, comment, newCode);
+        });
+        return newCode!;
+    }
+
+    public async Task<ItemCodeOptions?> GetItemCodeOptionsAsync(Guid itemId, CancellationToken cancellationToken)
+    {
+        var categoryId = await db.Items.AsNoTracking().Where(i => i.Id == itemId).Select(i => (Guid?)i.CategoryId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (categoryId is null)
+        {
+            return null;
+        }
+        var history = await db.ItemCodeHistory.AsNoTracking()
+            .Where(h => h.ItemId == itemId)
+            .OrderByDescending(h => h.OccurredAt)
+            .Select(h => new ItemCodeHistoryRow(h.Code, h.NewCode, h.Released, h.Reason, h.ActorName, h.OccurredAt))
+            .ToListAsync(cancellationToken);
+        IReadOnlyList<string> prefixes;
+        try
+        {
+            prefixes = await new ItemCodeRules(db).PrefixesAsync(categoryId.Value, cancellationToken);
+        }
+        catch (DomainRuleException)
+        {
+            // 分類設定有誤（找不到前綴）：明細頁照常顯示，核准或變更時才會出現錯誤訊息
+            prefixes = [];
+        }
+        return new ItemCodeOptions(prefixes, await SettingAllowsItemCodeChangeAsync(cancellationToken), history);
+    }
+
     /// <summary>核准的共同步驟（手動核准與提出時自動核准）：在呼叫端的交易內執行，回傳審核紀錄與正式料號。</summary>
     private async Task<(ItemReview Review, string ItemCode)> ApproveItemAsync(
         Item item, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment, Actor actor, DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? requestedItemCode = null)
     {
         RequireManager(actor);
         if (item.Status != ItemStatus.PendingApproval)
@@ -266,11 +349,23 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         await EnsureNoUnconfirmedCandidatesAsync(item, acknowledgedCandidateIds, cancellationToken);
         await EnsureBarcodesFitAsync(item.Id, item.BaseUnitId, item.TrackingMode, cancellationToken);
 
-        // 2. 發號：依分類前綴遞增計數器（同交易，失敗會一起回滾、不占號）。
+        // 2. 發號：依分類前綴遞增計數器（同交易，失敗會一起回滾、不占號）；物料管理員有指定料號時改用指定的（D-32）。
         //    先取分類樹的共享鎖：正在修改前綴的交易完成後才讀前綴，前綴不會在發號途中被改掉
         await AdvisoryLocks.LockCategoryTreeAsync(db, exclusive: false, cancellationToken);
-        var prefix = await ResolveItemCodePrefixAsync(item.CategoryId, cancellationToken);
-        var itemCode = await _numbers.NextItemCodeAsync(prefix, cancellationToken);
+        var rules = new ItemCodeRules(db);
+        var prefixes = await rules.PrefixesAsync(item.CategoryId, cancellationToken);
+        string itemCode;
+        if (string.IsNullOrWhiteSpace(requestedItemCode))
+        {
+            itemCode = await _numbers.NextItemCodeAsync(prefixes[0], item.Id, cancellationToken);
+        }
+        else
+        {
+            var requested = ItemCodeRules.Normalize(requestedItemCode);
+            var prefix = Item.IsValidItemCode(requested) ? Item.PrefixOf(requested) : prefixes[0];
+            await AdvisoryLocks.LockItemCodePrefixesAsync(db, [prefix], cancellationToken);
+            itemCode = await rules.EnsureAssignableAsync(requested, item.Id, prefixes, cancellationToken);
+        }
         item.Approve(itemCode, now);
         var review = ItemReview.Record(
             item.Id, ItemReviewAction.Approve, ItemStatus.PendingApproval, item.Status, actor.Id, actor.Name, now,
@@ -432,6 +527,10 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
     private Task<bool> SettingAllowsChangeWithActivityAsync(CancellationToken cancellationToken) =>
         db.SystemSettings.AsNoTracking().AnyAsync(
             s => s.Key == SettingKeys.AllowItemUnitTrackingChangeWithActivity && s.Value == "true", cancellationToken);
+
+    /// <summary>設定鍵 <see cref="SettingKeys.AllowItemCodeChange"/>（預設關閉，D-32）。</summary>
+    private Task<bool> SettingAllowsItemCodeChangeAsync(CancellationToken cancellationToken) =>
+        db.SystemSettings.AsNoTracking().AnyAsync(s => s.Key == SettingKeys.AllowItemCodeChange && s.Value == "true", cancellationToken);
 
     /// <summary>
     /// 交易內的檢查（修改送出時）：先鎖住物料列再判斷。其他交易新增引用此物料的明細、異動、預留時，
@@ -670,26 +769,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         {
             throw new DomainRuleException("基本單位不存在或已停用。");
         }
-    }
-
-    /// <summary>從物料的分類往上找，第一個設定了料號前綴的分類（子分類可沿用上層前綴）。</summary>
-    private async Task<string> ResolveItemCodePrefixAsync(Guid categoryId, CancellationToken cancellationToken)
-    {
-        // 分類表很小（數十筆），一次讀入後在記憶體往上找
-        var categories = await db.ItemCategories.AsNoTracking()
-            .Select(c => new { c.Id, c.ParentId, c.ItemCodePrefix })
-            .ToDictionaryAsync(c => c.Id, cancellationToken);
-
-        Guid? current = categoryId;
-        for (var depth = 0; depth < MaxCategoryDepth && current is { } id && categories.TryGetValue(id, out var category); depth++)
-        {
-            if (category.ItemCodePrefix is not null)
-            {
-                return category.ItemCodePrefix;
-            }
-            current = category.ParentId;
-        }
-        throw new DomainRuleException("找不到此分類的料號前綴，請檢查分類設定（頂層分類必須有前綴）。");
     }
 
     private static void RequireManager(Actor actor)

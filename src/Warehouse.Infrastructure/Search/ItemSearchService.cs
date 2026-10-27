@@ -49,8 +49,13 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
         // 原廠條碼（M5-01）與專屬別名同屬第 2 層：兩者互斥，都是全系統唯一的精確識別碼
         var barcodeItemIds = db.ItemBarcodes.Where(b => b.IsActive && b.NormalizedText == text).Select(b => b.ItemId);
         var keywordItemIds = db.ItemKeywords.Where(k => k.IsActive && k.NormalizedText == text).Select(k => k.ItemId);
+        // 保留中的歷史料號（D-32）：同一號碼以最新一筆判斷，已釋出的不算
+        var oldCodeItemIds = db.ItemCodeHistory
+            .Where(h => h.Code == text && !h.Released
+                && !db.ItemCodeHistory.Any(n => n.Code == h.Code && n.Seq > h.Seq))
+            .Select(h => h.ItemId);
         Expression<Func<Item, bool>> exact = i =>
-            i.ItemCode == text || i.RequestNo == text
+            i.ItemCode == text || i.RequestNo == text || oldCodeItemIds.Contains(i.Id)
             || aliasItemIds.Contains(i.Id) || barcodeItemIds.Contains(i.Id)
             || (compact != null && i.NormalizedPartNo == compact)
             || i.NormalizedName == text
@@ -66,7 +71,7 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
                 CategoryName = db.ItemCategories.Where(c => c.Id == i.CategoryId).Select(c => c.Name).First(),
                 UnitCode = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First(),
                 // 與上面的 exact 條件逐項對應（改其中一邊時兩邊都要改）
-                Tier = i.ItemCode == text || i.RequestNo == text ? 1
+                Tier = i.ItemCode == text || i.RequestNo == text || oldCodeItemIds.Contains(i.Id) ? 1
                     : aliasItemIds.Contains(i.Id) || barcodeItemIds.Contains(i.Id) ? 2
                     : (compact != null && i.NormalizedPartNo == compact) || i.NormalizedName == text ? 3
                     : keywordItemIds.Contains(i.Id) ? 4
@@ -94,7 +99,9 @@ public sealed class ItemSearchService(WarehouseDbContext db) : IItemSearchServic
             var itemKeywords = keywords.Where(k => k.ItemId == r.Id).ToList();
             var (reason, hitText) = r.Tier switch
             {
-                1 => r.ItemCode == text ? (HitReason.ItemCode, r.ItemCode!) : (HitReason.RequestNo, r.RequestNo),
+                1 => r.ItemCode == text ? (HitReason.ItemCode, r.ItemCode!)
+                    : r.RequestNo == text ? (HitReason.RequestNo, r.RequestNo)
+                    : (HitReason.OldItemCode, $"{text} → {r.ItemCode}"),
                 // 兩句查詢之間索引可能剛被停用（不同快照），找不到時就顯示查詢文字，不丟例外（M2 審查 R4）
                 2 => itemAliases.FirstOrDefault(a => a.Normalized == text) is { } alias
                     ? (HitReason.Alias, alias.Text)

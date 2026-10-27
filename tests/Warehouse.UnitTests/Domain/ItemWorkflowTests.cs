@@ -70,6 +70,32 @@ public class ItemWorkflowTests
         Assert.Null(item.ItemCode);
     }
 
+    // T-D32-10
+    [Fact]
+    public void 變更料號_只限已核准_格式正確_不可與目前相同()
+    {
+        var item = NewItem();
+        Assert.Throws<DomainRuleException>(() => item.ChangeItemCode("EL-000200", Now));
+
+        item.Approve("EL-000125", Now);
+        Assert.Throws<DomainRuleException>(() => item.ChangeItemCode("EL-200", Now));
+        Assert.Throws<DomainRuleException>(() => item.ChangeItemCode("EL-000125", Now));
+        Assert.Throws<DomainRuleException>(() => item.ChangeItemCode("EL-00000000000001", Now)); // 17 字，超過上限 16
+
+        item.ChangeItemCode("ELA-000001", Now);
+        Assert.Equal("ELA-000001", item.ItemCode);
+        Assert.Equal(ItemStatus.Active, item.Status);
+    }
+
+    [Fact]
+    public void 料號前綴與格式判斷()
+    {
+        Assert.Equal("ELA", Item.PrefixOf("ELA-000001"));
+        Assert.True(Item.IsValidItemCode("ME-000123"));
+        Assert.False(Item.IsValidItemCode("me-000123"));
+        Assert.False(Item.IsValidItemCode(null));
+    }
+
     [Fact]
     public void 退回後修改重送_回到待核准且不占料號()
     {

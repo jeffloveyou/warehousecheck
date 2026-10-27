@@ -71,6 +71,8 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
 
         public bool AllowItemUnitTrackingChangeWithActivity { get; set; }
 
+        public bool AllowItemCodeChange { get; set; }
+
         /// <summary>列印抬頭的公司名稱（空白＝不印）；表單空白時綁定為 null。</summary>
         public string? PrintCompanyName { get; set; }
 
@@ -107,6 +109,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 LineCrossTransferEnabled = LineCrossTransferEnabled,
                 LineLotSerialEnabled = LineLotSerialEnabled,
                 AllowItemUnitTrackingChangeWithActivity = AllowItemUnitTrackingChangeWithActivity,
+                AllowItemCodeChange = AllowItemCodeChange,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
                 RememberMeDays = RememberMeDays,
                 RetentionAuditYears = RetentionAuditYears,
@@ -140,6 +143,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             LineCrossTransferEnabled = s.LineCrossTransferEnabled,
             LineLotSerialEnabled = s.LineLotSerialEnabled,
             AllowItemUnitTrackingChangeWithActivity = s.AllowItemUnitTrackingChangeWithActivity,
+            AllowItemCodeChange = s.AllowItemCodeChange,
             PrintCompanyName = s.PrintCompanyName,
             RememberMeDays = s.RememberMeDays,
             RetentionAuditYears = s.RetentionAuditYears,
@@ -190,6 +194,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.LineCrossTransferEnabled => "明細：跨倉移庫",
         SettingKeys.LineLotSerialEnabled => "明細：批號序號欄",
         SettingKeys.AllowItemUnitTrackingChangeWithActivity => "有異動的物料可改單位／追蹤模式",
+        SettingKeys.AllowItemCodeChange => "已核准的物料可改料號",
         SettingKeys.RememberMeDays => "記住登入天數",
         SettingKeys.RetentionAuditYears => "操作日誌保留年數",
         SettingKeys.RetentionLoginDays => "登入紀錄保留天數",

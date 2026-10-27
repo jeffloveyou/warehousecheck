@@ -28,12 +28,28 @@ internal sealed class ItemNumberGenerator(WarehouseDbContext db)
         return $"MR-{number:D6}";
     }
 
-    /// <summary>取得該前綴的下一個正式料號，例如 EL-000125（流水號超過 6 位數時自動加長）。</summary>
-    public async Task<string> NextItemCodeAsync(string prefix, CancellationToken cancellationToken)
+    /// <summary>
+    /// 取得該前綴的下一個正式料號，例如 EL-000125（流水號超過 6 位數時自動加長）。
+    /// 號碼已被物料管理員指定給其他物料、或保留為歷史料號時往下跳（D-32，ADR-0025；跳過的號碼不回收）。
+    /// </summary>
+    public async Task<string> NextItemCodeAsync(string prefix, Guid itemId, CancellationToken cancellationToken)
     {
-        var number = await ScalarAsync(NextItemNumberSql, new NpgsqlParameter("prefix", prefix), cancellationToken);
-        return $"{prefix}-{number:D6}";
+        await AdvisoryLocks.LockItemCodePrefixesAsync(db, [prefix], cancellationToken);
+        var rules = new ItemCodeRules(db);
+        for (var attempt = 0; attempt < MaxSkips; attempt++)
+        {
+            var number = await ScalarAsync(NextItemNumberSql, new NpgsqlParameter("prefix", prefix), cancellationToken);
+            var code = $"{prefix}-{number:D6}";
+            if (!await rules.IsTakenAsync(code, itemId, cancellationToken))
+            {
+                return code;
+            }
+        }
+        throw new InvalidOperationException($"前綴 {prefix} 連續 {MaxSkips} 個號碼都已被占用，請檢查料號資料。");
     }
+
+    /// <summary>連續跳號上限（防止資料異常時無窮迴圈；正常情況跳過的只有手動指定的少數號碼）。</summary>
+    private const int MaxSkips = 1000;
 
     private async Task<long> ScalarAsync(string sql, DbParameter? parameter, CancellationToken cancellationToken)
     {

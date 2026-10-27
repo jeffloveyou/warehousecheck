@@ -63,6 +63,12 @@ public sealed record SystemSettings(
     public bool AllowItemUnitTrackingChangeWithActivity { get; init; }
 
     /// <summary>
+    /// 物料管理員可否變更已核准物料的正式料號（D-32，ADR-0025；預設 false）。
+    /// 開啟後仍要填寫原因；舊料號預設保留為歷史料號，不會給其他物料使用。
+    /// </summary>
+    public bool AllowItemCodeChange { get; init; }
+
+    /// <summary>
     /// 登入頁「記住我」保持登入的天數（M8-06，ADR-0024；0＝關閉此功能）。使用期間自動延長，
     /// 連續這麼多天沒使用才要重新登入；帳號停用、改角色、重設密碼後最慢 5 分鐘失效。
     /// </summary>
@@ -151,6 +157,7 @@ public static class SettingKeys
     public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
     public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
     public const string AllowItemUnitTrackingChangeWithActivity = "items.allow_unit_tracking_change_with_activity";
+    public const string AllowItemCodeChange = "items.allow_item_code_change";
     public const string RememberMeDays = "auth.remember_me_days";
     public const string RetentionAuditYears = "retention.audit_years";
     public const string RetentionLoginDays = "retention.login_days";
