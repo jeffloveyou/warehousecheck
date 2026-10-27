@@ -117,10 +117,15 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             return previous;
         }
 
-        // 提出、條碼、自動核准在同一個交易：任何一步失敗整筆不建立（下面的服務方法都加入這個交易）
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        // 提出、條碼、自動核准在同一個交易：任何一步失敗整筆不建立（下面的服務方法都加入這個交易）。
+        // 匯入（D-31）時加入匯入的外層交易，失敗由外層回到該列的 savepoint
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         try
         {
+            if (options.AutoApprove)
+            {
+                await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+            }
             var result = await SubmitAsync(requestId, draft, actor, cancellationToken);
             await AddBarcodesAsync(result.ItemId, barcodes, actor, cancellationToken);
             if (options.AutoApprove)
@@ -136,7 +141,7 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             await transaction.CommitAsync(cancellationToken);
             return result;
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception) when (!cancellationToken.IsCancellationRequested && transaction.IsOwned)
         {
             // 兩個相同請求同時送達時，後到的一方撞到 pk_items（交易已中止）：回滾後若找得到先到的結果就回傳它
             await transaction.RollbackAsync(CancellationToken.None);
@@ -255,7 +260,8 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         }
 
         // 1. 核准時重新檢查：分類與單位仍啟用、重複候選（使用者要求）。候選包含「待核准、退回」的物料，
-        //    所以兩筆重複的物料不論誰先核准，都會在對方的核准檢查中出現，不需要另外加鎖。
+        //    所以兩筆已提交的重複物料不論誰先核准，都會在對方的核准檢查中出現，不需要另外加鎖。
+        //    例外是「提出時自動核准」：新物料提交前別人看不到，所以呼叫端先取 LockItemAutoApproveAsync 排隊。
         await EnsureCategoryAndUnitUsableAsync(item.CategoryId, item.BaseUnitId, cancellationToken);
         await EnsureNoUnconfirmedCandidatesAsync(item, acknowledgedCandidateIds, cancellationToken);
         await EnsureBarcodesFitAsync(item.Id, item.BaseUnitId, item.TrackingMode, cancellationToken);

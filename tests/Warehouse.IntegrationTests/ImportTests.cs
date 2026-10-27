@@ -289,7 +289,7 @@ public partial class ImportTests
         public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + shift;
     }
 
-    private static async Task<HttpResponseMessage> UploadAsync(WebSession web, ImportKind kind, byte[] file, string name)
+    private static async Task<HttpResponseMessage> UploadAsync(WebSession web, ImportKind kind, byte[] file, string name, bool autoApprove = false)
     {
         var page = await web.GetStringAsync("/Import?Kind=" + kind);
         var token = WebUtility.HtmlDecode(TokenPattern().Match(page).Groups[1].Value);
@@ -298,6 +298,10 @@ public partial class ImportTests
             { new StringContent(kind.ToString()), "Kind" },
             { new StringContent(token), "__RequestVerificationToken" },
         };
+        if (autoApprove)
+        {
+            form.Add(new StringContent("true"), "AutoApprove");
+        }
         var content = new ByteArrayContent(file);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(content, "Upload", name);

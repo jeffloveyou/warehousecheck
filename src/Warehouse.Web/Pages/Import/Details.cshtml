@@ -17,6 +17,10 @@
 }
 <div class="panel">
     <p>檔案 @b.FileName@(b.TargetLabel is null ? "" : $"｜目標 {b.TargetLabel}")｜上傳 @b.CreatedByName @Display.Time(b.CreatedAt)</p>
+    @if (b.Kind == ImportKind.Items)
+    {
+        <p id="import-approve-mode">@(b.AutoApprove ? "自動核准：沒有疑似重複的物料直接發出正式料號；有警告的列維持待核准。" : "匯入後成為待核准物料，由物料管理員核准。")</p>
+    }
     <p id="import-summary">共 @b.RowCount 列；錯誤 <strong>@b.ErrorCount</strong> 列；警告 @b.WarningCount 列
         @if (b.Status == ImportStatus.Committed && b.CommittedAt is { } at) { <span class="chip" id="import-status">已匯入 @Display.Time(at)</span> }
     </p>
