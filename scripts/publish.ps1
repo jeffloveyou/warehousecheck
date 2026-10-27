@@ -99,6 +99,9 @@ $release = [ordered]@{
     runtime = $Runtime
     deployment = if ($SelfContained) { 'self-contained' } else { 'framework-dependent' }
     builtAt = (Get-Date).ToString('o')
+    # 換版包沿用已發布資料夾時檢查（new-update-package.ps1）：沒跑測試、含未提交修改的發布不能沿用
+    testsRun = -not $SkipTests
+    dirty = [bool]$dirty
     fileCount = $files.Count
     sizeMb = [math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB, 1)
 }

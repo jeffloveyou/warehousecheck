@@ -1,7 +1,7 @@
 @echo off
 rem Warehouse one-click rollback: switches traffic back to the standby slot after confirmation.
 rem Keep this file ASCII-only.
-setlocal EnableDelayedExpansion
+setlocal
 fltmc >nul 2>&1
 if errorlevel 1 (
     set "WH_SELF=%~f0"
@@ -14,6 +14,7 @@ if errorlevel 1 (
 )
 
 set "BASE=%~dp0"
+cd /d "%SystemRoot%"
 if exist "%BASE%scripts\windows\rollback-release.ps1" (
     set "PS1=%BASE%scripts\windows\rollback-release.ps1"
 ) else (
@@ -29,6 +30,7 @@ if not exist "%PWSH%" (
 
 rem The update replaces this .cmd while it runs; cmd re-reads a batch file line by line, so everything
 rem after pwsh is inside one parenthesized block that cmd has already parsed.
+setlocal EnableDelayedExpansion
 (
     "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
     set "RC=!ERRORLEVEL!"

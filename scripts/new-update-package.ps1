@@ -45,11 +45,16 @@ try {
     function Publish([string]$Project, [string]$Name, [switch]$SkipTests) {
         $dir = Join-Path $publishRoot $Name
         if (Test-Path $dir) {
-            # 沿用前確認：同一個 commit、檔案完整（publish 失敗留下的殘缺資料夾、-AllowDirty 的發布都擋下）
+            # 沿用前確認：同一個 commit、工作目錄乾淨時發布、（網站）有跑測試、檔案完整；
+            # publish 失敗留下的殘缺資料夾、-AllowDirty、-SkipTests 的網站發布都擋下
             $info = try { Get-Content (Join-Path $dir 'release.json') -Raw | ConvertFrom-Json } catch { $null }
-            $problems = @(if (-not $info -or $info.commit -ne $commit) { 'release.json 不存在或 commit 不同' } else { Test-FileHashes $dir -Ignore 'release.json' })
+            $problems = @(
+                if (-not $info -or $info.commit -ne $commit) { 'release.json 不存在或 commit 不同' }
+                elseif ($info.dirty -ne $false) { '發布時工作目錄有未提交的修改（或是舊版 publish.ps1 產生的，沒有記錄）' }
+                elseif (-not $SkipTests -and $info.testsRun -ne $true) { '發布時沒有跑測試' }
+                else { Test-FileHashes $dir -Ignore 'release.json' })
             if ($problems) { throw "已存在的 $dir 不能沿用（$($problems[0])）。請刪除它後重新執行。" }
-            Write-Host "沿用已發布的 $Name（commit 與雜湊相符）" -ForegroundColor DarkGray
+            Write-Host "沿用已發布的 $Name（commit、測試、雜湊都相符）" -ForegroundColor DarkGray
             return
         }
         $arguments = @{ Runtime = 'win-x64'; Project = $Project }
@@ -76,8 +81,12 @@ try {
     New-Item -ItemType Directory $package | Out-Null
     Copy-Item (Join-Path $publishRoot $webName) $package -Recurse
     if (-not $ExcludeProxy) { Copy-Item (Join-Path $publishRoot $proxyName) $package -Recurse }
-    # 只複製 git 追蹤的腳本：被 .gitignore 忽略的檔案（憑證、暫存）不會被帶進換版包
-    foreach ($file in git ls-files scripts) {
+    # 只複製 git 追蹤的腳本：被 .gitignore 忽略的檔案（憑證、暫存）不會被帶進換版包。
+    # 中文檔名（一鍵*.cmd）：關閉 quotepath 並以 UTF-8 讀 git 輸出，不論開發機的設定與主控台字碼頁
+    $encoding = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    try { $tracked = @(git -c core.quotepath=off ls-files scripts) } finally { [Console]::OutputEncoding = $encoding }
+    foreach ($file in $tracked) {
         $destination = Join-Path $package $file
         New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
         Copy-Item (Join-Path $repo $file) $destination
@@ -96,6 +105,9 @@ try {
         builtAt = (Get-Date).ToString('o')
         web = $webName
         proxy = if ($ExcludeProxy) { $null } else { $proxyName }
+        # 代理原始碼的指紋（目錄 tree 與共用設定檔的 blob hash）：正式主機只在它變了才詢問更新代理
+        proxySource = (@('src/Warehouse.Proxy', 'src/Warehouse.Web/ExternalConfiguration.cs', 'Directory.Build.props', 'global.json') |
+            ForEach-Object { git rev-parse "HEAD:$_" 2>$null }) -join ','
         previous = $previous.name
         migrations = $migrations
         newMigrations = $newMigrations
@@ -116,6 +128,9 @@ try {
         '變更（commit）：'
         $commits | ForEach-Object { "  $_" }
     )
+    if ($migrations -match 'M10_01_ItemCodeChange') {
+        $text += '', '提醒（D-32）：第一次換到含 M10_01_ItemCodeChange 的版本後，先不要開啟「已核准的物料可改料號」，等確定不回滾再開（docs/11 §7.5）。'
+    }
     $text | Set-Content (Join-Path $package '換版說明.txt') -Encoding utf8
 
     # 整個換版包的雜湊（正式主機複製或解壓後核對，確認沒有缺檔或被改過）

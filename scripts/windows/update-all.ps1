@@ -6,8 +6,8 @@
 .DESCRIPTION
     需要系統管理員（非管理員時以 UAC 重新執行；建議由一鍵換版.cmd 執行）。換版包由開發機的
     scripts\new-update-package.ps1 產生，可以是資料夾或 zip（WarehouseUpdate-<版本>-<commit>）。
-    候選只列：.cmd 所在的換版包、卸除式磁碟（隨身碟）根目錄、C:\WarehouseUpdate 裡擁有者是系統管理員的項目。
-    一般使用者可以在 C:\ 建立資料夾，所以不掃 C:\ 等固定磁碟的根目錄；其他位置請用 P 輸入路徑。
+    候選只列：.cmd 所在的換版包、卸除式磁碟（隨身碟）根目錄。一般使用者可以在 C:\ 建立資料夾，
+    所以不掃固定磁碟的根目錄，也不列 C:\WarehouseUpdate；其他位置請用 P 輸入路徑。
     換版包每次都重新複製或解壓到 C:\WarehouseUpdate（只有系統管理員可改），核對 SHA256SUMS 後，改由換版包裡的新版腳本執行。
     既有腳本 migrate-db、switch-release、install-backup-tasks 都不修改，依序呼叫。
 .PARAMETER Package
@@ -71,18 +71,12 @@ function Read-Notes([string]$Path) {
     } catch { return $null }
 }
 
-function Test-AdminOwned([string]$Path) {
-    try { (Get-Acl $Path).Owner -in 'BUILTIN\Administrators', 'NT AUTHORITY\SYSTEM' } catch { $false }
-}
-
 function Find-Candidates {
     $paths = [Collections.Generic.List[string]]::new()
     $own = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     if (Test-Path (Join-Path $own $notesName)) { $paths.Add($own) }
-    # C:\WarehouseUpdate：只列擁有者是系統管理員的項目（一般使用者事先放進去的不列）
-    Get-ChildItem $UpdateRoot -ErrorAction SilentlyContinue |
-        Where-Object { ($_.PSIsContainer -or $_.Extension -eq '.zip') -and (Test-AdminOwned $_.FullName) } | ForEach-Object { $paths.Add($_.FullName) }
-    # 只掃卸除式磁碟（隨身碟）的根目錄；C:\ 這類固定磁碟一般使用者也能建立資料夾
+    # 不列 C:\WarehouseUpdate：一般使用者可能在它建立前先放東西進去，擁有者之後會被改成系統管理員，看不出來源。
+    # 只掃卸除式磁碟（隨身碟）的根目錄；C:\ 這類固定磁碟一般使用者也能建立資料夾。其他位置用 P 輸入路徑
     foreach ($disk in Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=2' -ErrorAction SilentlyContinue) {
         Get-ChildItem "$($disk.DeviceID)\" -Filter 'WarehouseUpdate-*' -ErrorAction SilentlyContinue |
             Where-Object { $_.PSIsContainer -or $_.Extension -eq '.zip' } | ForEach-Object { $paths.Add($_.FullName) }
@@ -189,6 +183,8 @@ if (-not $Staged) {
 
     # 每次都重新複製或解壓到暫存資料夾，核對雜湊後才改名成正式位置（不沿用舊的、可能不完整或被動過的複本）
     Set-RootAcl $UpdateRoot
+    # 子項目上別人加的明確權限（例如 Everyone:F）一併清掉，全部只繼承系統管理員的設定
+    if (Get-ChildItem $UpdateRoot -Force | Select-Object -First 1) { icacls (Join-Path $UpdateRoot '*') /reset /T /C /Q | Out-Null }
     $staged = Join-Path $UpdateRoot $notes.name
     $partial = "$staged.partial-$PID"
     if (Test-Path $partial) { Remove-Item $partial -Recurse -Force }
@@ -285,18 +281,24 @@ try {
             ForEach-Object { Copy-Item $_.FullName $SetupRoot -Recurse }
     }
     $cmds = Get-ChildItem $Package -Filter '*.cmd' -File | ForEach-Object { Copy-Item $_.FullName $SetupRoot -Force -PassThru } | ForEach-Object FullName
-    $protect = @((Join-Path $SetupRoot 'scripts')) + @($cmds) + @(Get-ChildItem $SetupRoot -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'release.json') } | ForEach-Object FullName) + @($old)
-    foreach ($item in Protect-AdminOnly $protect) { Write-Host "    無法收緊 $item 的權限" -ForegroundColor Yellow }
-    Write-Host "    已換上新版（舊的保留在 $old）"
+    # 整個 C:\WarehouseSetup 只給系統管理員（一般使用者不能放進假的發布資料夾或改腳本）
+    foreach ($item in Protect-AdminOnly @($SetupRoot)) { Write-Host "    無法收緊 $item 的權限" -ForegroundColor Yellow }
+    # 舊版本只保留最近 3 份（每份含網站發布檔，約 35 MB）
+    Get-ChildItem $SetupRoot -Directory -Filter 'old-*' | Sort-Object Name -Descending | Select-Object -Skip 3 | Remove-Item -Recurse -Force
+    Write-Host "    已換上新版（舊的保留在 $old，最多保留 3 份）"
     $installed = Join-Path $Root 'scripts'
-    # 排程執行的是 C:\Warehouse\scripts 的副本：副本與新版不同就重裝；安裝腳本本身改了（排程參數）也重裝
+    # 排程執行的是 C:\Warehouse\scripts 的副本：副本與新版不同就重裝。安裝腳本本身改了（排程參數）也重裝：
+    # 以上次安裝成功時記下的雜湊比對（沒有紀錄就重裝一次）
+    $tasksMarker = Join-Path $installed 'install-backup-tasks.sha256'
+    $tasksHash = (Get-FileHash (Join-Path $Package 'scripts\windows\install-backup-tasks.ps1')).Hash
     $changed = @($backupScripts | Where-Object {
-        $new = Join-Path $Package "scripts\windows\$_"
-        $copy = if ($_ -eq 'install-backup-tasks.ps1') { Join-Path $old 'scripts\windows\install-backup-tasks.ps1' } else { Join-Path $installed $_ }
-        -not (Test-Path $copy) -or (Get-FileHash $new).Hash -ne (Get-FileHash $copy).Hash })
+        if ($_ -eq 'install-backup-tasks.ps1') { return -not (Test-Path $tasksMarker) -or (Get-Content $tasksMarker -Raw).Trim() -ne $tasksHash }
+        $copy = Join-Path $installed $_
+        -not (Test-Path $copy) -or (Get-FileHash (Join-Path $Package "scripts\windows\$_")).Hash -ne (Get-FileHash $copy).Hash })
     if ($changed) {
         Write-Host "    備份相關腳本有變動（$($changed -join '、')），重新安裝排程"
         Invoke-Script (Join-Path $PSScriptRoot 'install-backup-tasks.ps1') @{ Databases = @($Database); BackupRoot = $BackupRoot; Root = $Root }
+        Set-Content $tasksMarker $tasksHash -Encoding ascii
     } else { Write-Skip '備份相關腳本沒有變動' }
 
     $pending = @()
@@ -318,8 +320,15 @@ try {
 
     Write-Step '5. 代理'
     $proxyInfo = if ($proxyRelease) { Get-Content (Join-Path $proxyRelease 'release.json') -Raw | ConvertFrom-Json } else { $null }
+    # 代理原始碼指紋：上次經一鍵換版更新代理時記下；指紋相同表示代理程式沒變，不必詢問
+    $sourceMarker = Join-Path $Root 'proxy-source.txt'
+    $installedSource = if (Test-Path $sourceMarker) { (Get-Content $sourceMarker -Raw).Trim() } else { $null }
     if (-not $proxyInfo) { Write-Skip '換版包沒有代理' }
-    elseif ($current.Proxy -and $proxyInfo.commit -eq $current.Proxy.commit) { Write-Skip "代理已是 $($proxyInfo.name)" }
+    elseif ($current.Proxy -and $proxyInfo.commit -eq $current.Proxy.commit) {
+        Write-Skip "代理已是 $($proxyInfo.name)"
+        if ($notes.proxySource) { Set-Content $sourceMarker $notes.proxySource -Encoding ascii }
+    }
+    elseif ($notes.proxySource -and $installedSource -eq $notes.proxySource) { Write-Skip '代理程式沒有變動' }
     elseif ((Read-Host "    換版包有不同版本的代理（$($proxyInfo.name)，目前 $(${current}?.Proxy?.name ?? '不明')）。更新時約有幾秒連不上，輸入 Y 更新，直接按 Enter 跳過").Trim() -ne 'Y') {
         Write-Skip '使用者選擇不更新代理'
     } else {
@@ -328,16 +337,32 @@ try {
         $target = Join-Path $Root "releases\$($proxyInfo.name)"
         if (-not (Test-Path $target)) { Copy-Item $proxyRelease $target -Recurse }
         $newExe = Join-Path $target 'Warehouse.Proxy.exe'
+        # 換執行檔：停止（確認真的停了）→ 改路徑 → 啟動 → 確認服務用的是指定的 exe、而且代理有回應（任何 HTTP 狀態都算，
+        # 和 install-proxy 一致；網站槽位短暫未就緒不代表代理壞了）。任何例外都回傳 $false，由呼叫端改回舊版
         $switchProxy = {
             param([string]$Exe)
-            Stop-Service WarehouseProxy -ErrorAction SilentlyContinue
-            $service = Get-CimInstance Win32_Service -Filter "Name='WarehouseProxy'"
-            if ((Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = "`"$Exe`"" }).ReturnValue -ne 0) { return $false }
-            try { Start-Service WarehouseProxy } catch { return $false }
-            return (Wait-HttpReady "$proxyUrl/health/ready" -Seconds 30)
+            try {
+                Stop-Service WarehouseProxy
+                (Get-Service WarehouseProxy).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+                $service = Get-CimInstance Win32_Service -Filter "Name='WarehouseProxy'"
+                if ((Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = "`"$Exe`"" }).ReturnValue -ne 0) { return $false }
+                Start-Service WarehouseProxy
+                $service = Get-CimInstance Win32_Service -Filter "Name='WarehouseProxy'"
+                if ($service.State -ne 'Running' -or $service.PathName.Trim('"') -ne $Exe) { return $false }
+                $deadline = (Get-Date).AddSeconds(30)
+                while ((Get-Date) -lt $deadline) {
+                    try { if ((Invoke-WebRequest "$proxyUrl/health/ready" -TimeoutSec 3 -SkipHttpErrorCheck -SkipCertificateCheck).StatusCode) { return $true } } catch { }
+                    Start-Sleep -Milliseconds 500
+                }
+                return $false
+            } catch {
+                Write-Host "    $($_.Exception.Message)" -ForegroundColor Red
+                return $false
+            }
         }
         if (& $switchProxy $newExe) {
             Write-Host "    代理已更新為 $($proxyInfo.name)"
+            if ($notes.proxySource) { Set-Content $sourceMarker $notes.proxySource -Encoding ascii }
         } else {
             Write-Host '    新代理沒有啟動，改回原本的代理…' -ForegroundColor Red
             if ($oldExe -and (& $switchProxy $oldExe)) {
