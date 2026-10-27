@@ -1760,6 +1760,76 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemCodeHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("code");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("NewCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("new_code");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("reason");
+
+                    b.Property<bool>("Released")
+                        .HasColumnType("boolean")
+                        .HasColumnName("released");
+
+                    b.Property<long>("Seq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("seq");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Seq"));
+
+                    b.HasKey("Id")
+                        .HasName("pk_item_code_history");
+
+                    b.HasIndex("Code", "Seq")
+                        .HasDatabaseName("ix_item_code_history_code_seq");
+
+                    b.HasIndex("ItemId", "OccurredAt")
+                        .HasDatabaseName("ix_item_code_history_item_id_occurred_at");
+
+                    b.ToTable("item_code_history", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_item_code_history_code_format", "code ~ '^[A-Z0-9]{2,4}-[0-9]{6,}$' AND new_code ~ '^[A-Z0-9]{2,4}-[0-9]{6,}$'");
+
+                            t.HasCheckConstraint("ck_item_code_history_reason", "btrim(reason) <> ''");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Items.ItemKeyword", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1906,7 +1976,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                     b.ToTable("item_reviews", null, t =>
                         {
-                            t.HasCheckConstraint("ck_item_reviews_action", "action IN ('Submit', 'Update', 'Resubmit', 'Approve', 'Return', 'Reject', 'Withdraw', 'Deactivate', 'Reactivate')");
+                            t.HasCheckConstraint("ck_item_reviews_action", "action IN ('Submit', 'Update', 'Resubmit', 'Approve', 'Return', 'Reject', 'Withdraw', 'Deactivate', 'Reactivate', 'CodeChange')");
 
                             t.HasCheckConstraint("ck_item_reviews_comment_required", "action NOT IN ('Return', 'Reject') OR btrim(coalesce(comment, '')) <> ''");
 
@@ -1914,7 +1984,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_item_reviews_from_status", "from_status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
 
-                            t.HasCheckConstraint("ck_item_reviews_item_code_on_approve", "(action = 'Approve') = (item_code IS NOT NULL)");
+                            t.HasCheckConstraint("ck_item_reviews_item_code_on_approve", "(action IN ('Approve', 'CodeChange')) = (item_code IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_item_reviews_to_status", "to_status IN ('PendingApproval', 'Returned', 'Rejected', 'Active', 'Inactive')");
                         });
@@ -3192,6 +3262,16 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_item_categories_item_categories_parent_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Items.ItemCodeHistory", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_code_history_items_item_id");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Items.ItemKeyword", b =>

@@ -12,6 +12,9 @@ public enum ItemReviewAction
     Withdraw,
     Deactivate,
     Reactivate,
+
+    /// <summary>核准後變更正式料號（D-32，ADR-0025）；<see cref="ItemReview.ItemCode"/> 為新料號。</summary>
+    CodeChange,
 }
 
 /// <summary>
@@ -84,7 +87,7 @@ public sealed class ItemReview
 
     public ItemStatus ToStatus { get; private set; }
 
-    /// <summary>核准時發出的正式料號；其他動作為 null。</summary>
+    /// <summary>核准時發出的正式料號、變更料號時的新料號；其他動作為 null。</summary>
     public string? ItemCode { get; private set; }
 
     /// <summary>判定重複時，與哪個既有物料重複。</summary>

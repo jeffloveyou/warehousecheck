@@ -63,6 +63,15 @@
         {
             <p class="muted">沒有找到可能重複的物料。</p>
         }
+        <p>
+            <label for="RequestedItemCode">正式料號（空白＝自動流水號）</label>
+            <input type="text" id="RequestedItemCode" name="RequestedItemCode" value="@Model.RequestedItemCode" maxlength="@Warehouse.Domain.Items.Item.ItemCodeMaxLength"
+                   placeholder="@(Model.CodeOptions.Prefixes.Count > 0 ? $"例：{Model.CodeOptions.Prefixes[0]}-000123" : "")" autocomplete="off" />
+            @if (Model.CodeOptions.Prefixes.Count > 0)
+            {
+                <span class="muted">可用前綴：@string.Join("、", Model.CodeOptions.Prefixes)（分類與上層分類）；格式為前綴-至少 6 位數字。</span>
+            }
+        </p>
         <p><label for="Comment">意見（退回、拒絕必填）</label><textarea id="Comment" name="Comment" maxlength="@ItemReview.CommentMaxLength"></textarea></p>
         <div class="actions">
             <button type="submit" asp-page-handler="Approve" id="approve-button">核准並發料號</button>
@@ -91,6 +100,51 @@
         <input type="text" id="ActiveComment" name="Comment" maxlength="@ItemReview.CommentMaxLength" />
         <div class="actions"><button type="submit" class="@(active ? "danger" : "")" id="active-button">@(active ? "停用（料號保留）" : "重新啟用")</button></div>
     </form>
+}
+
+@if (Model.CanChangeItemCode)
+{
+    <form method="post" asp-page-handler="ChangeItemCode" class="panel" id="item-code-form">
+        <h2>變更料號</h2>
+        <input type="hidden" asp-for="Version" />
+        <p class="muted">單據、庫存都以物料內部識別碼關聯，變更後歷史紀錄會顯示新料號。可用前綴：@string.Join("、", Model.CodeOptions.Prefixes)。已印出的舊標籤請盡快換新。</p>
+        <div class="form-grid">
+            <label for="NewItemCode">新料號</label>
+            <input type="text" id="NewItemCode" name="NewItemCode" value="@Model.NewItemCode" maxlength="@Warehouse.Domain.Items.Item.ItemCodeMaxLength" autocomplete="off" required />
+            <label for="CodeChangeReason">原因（必填）</label>
+            <input type="text" id="CodeChangeReason" name="CodeChangeReason" value="@Model.CodeChangeReason" maxlength="@ItemCodeHistory.ReasonMaxLength" required />
+            <span>舊料號 @item.ItemCode</span>
+            <span>
+                <label><input type="radio" name="ReleaseOldCode" value="false" checked="@(!Model.ReleaseOldCode)" /> 保留為歷史料號（仍可搜尋、掃碼找到這個物料，不給其他物料使用）</label><br />
+                <label><input type="radio" name="ReleaseOldCode" value="true" checked="@Model.ReleaseOldCode" id="release-old-code" /> 釋出（之後查不到，其他物料可以使用）</label>
+            </span>
+            <label for="ConfirmOldCode">釋出時再輸入一次舊料號</label>
+            <input type="text" id="ConfirmOldCode" name="ConfirmOldCode" maxlength="@Warehouse.Domain.Items.Item.ItemCodeMaxLength" autocomplete="off" />
+        </div>
+        <div class="actions"><button type="submit" id="item-code-change-button">變更料號</button></div>
+    </form>
+}
+@if (Model.CodeOptions.History.Count > 0)
+{
+    <h2 id="item-code-history">歷史料號</h2>
+    <div class="table-wrap">
+        <table id="item-code-history-list">
+            <thead><tr><th>舊料號</th><th>改為</th><th>處理</th><th>原因</th><th>操作者</th><th>時間</th></tr></thead>
+            <tbody>
+                @foreach (var h in Model.CodeOptions.History)
+                {
+                    <tr>
+                        <td>@h.Code</td>
+                        <td>@h.NewCode</td>
+                        <td>@(h.Released ? "已釋出" : "保留")</td>
+                        <td>@h.Reason</td>
+                        <td>@h.ActorName</td>
+                        <td>@Display.Time(h.OccurredAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 <h2 id="negative-policy">負庫存</h2>

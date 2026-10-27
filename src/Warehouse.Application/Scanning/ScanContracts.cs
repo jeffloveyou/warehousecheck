@@ -25,6 +25,9 @@ public enum ScanMatch
     ItemCode,
     Barcode,
     Alias,
+
+    /// <summary>掃到保留中的歷史料號（D-32，ADR-0025）；<see cref="ScanItem.ItemCode"/> 是目前的新料號。</summary>
+    OldItemCode,
 }
 
 /// <summary>

@@ -18,12 +18,12 @@ public class ItemReviewConfiguration : IEntityTypeConfiguration<ItemReview>
         builder.ToTable("item_reviews", t =>
         {
             t.HasCheckConstraint("ck_item_reviews_action",
-                "action IN ('Submit', 'Update', 'Resubmit', 'Approve', 'Return', 'Reject', 'Withdraw', 'Deactivate', 'Reactivate')");
+                "action IN ('Submit', 'Update', 'Resubmit', 'Approve', 'Return', 'Reject', 'Withdraw', 'Deactivate', 'Reactivate', 'CodeChange')");
             t.HasCheckConstraint("ck_item_reviews_from_status", $"from_status IN ({Statuses})");
             t.HasCheckConstraint("ck_item_reviews_to_status", $"to_status IN ({Statuses})");
             t.HasCheckConstraint("ck_item_reviews_comment_required",
                 "action NOT IN ('Return', 'Reject') OR btrim(coalesce(comment, '')) <> ''");
-            t.HasCheckConstraint("ck_item_reviews_item_code_on_approve", "(action = 'Approve') = (item_code IS NOT NULL)");
+            t.HasCheckConstraint("ck_item_reviews_item_code_on_approve", "(action IN ('Approve', 'CodeChange')) = (item_code IS NOT NULL)");
             t.HasCheckConstraint("ck_item_reviews_duplicate_on_reject",
                 "duplicate_of_item_id IS NULL OR (action = 'Reject' AND duplicate_of_item_id <> item_id)");
         });

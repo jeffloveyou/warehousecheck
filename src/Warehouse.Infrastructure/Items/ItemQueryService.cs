@@ -63,9 +63,15 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
             var upper = keyword.ToUpperInvariant();
             var pattern = LikePattern.Contains(keyword);
             var partNo = TextNormalizer.NormalizePartNo(keyword);
+            // 保留中的歷史料號（D-32）也找得到：同一號碼以最新一筆判斷
+            var oldCodeItemIds = db.ItemCodeHistory
+                .Where(h => h.Code == upper && !h.Released
+                    && !db.ItemCodeHistory.Any(n => n.Code == h.Code && n.Seq > h.Seq))
+                .Select(h => h.ItemId);
             items = items.Where(i =>
                 i.RequestNo == upper
                 || i.ItemCode == upper
+                || oldCodeItemIds.Contains(i.Id)
                 || EF.Functions.ILike(i.Name, pattern, LikePattern.Escape)
                 || (i.ManufacturerPartNo != null && EF.Functions.ILike(i.ManufacturerPartNo, pattern, LikePattern.Escape))
                 || (partNo != null && i.NormalizedPartNo == partNo));
@@ -73,8 +79,10 @@ public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
         return items;
     }
 
+    /// <summary>目前的料號；找不到時改查保留中的歷史料號（D-32），對應到改號後的同一物料。</summary>
     public async Task<Guid?> FindIdByItemCodeAsync(string itemCode, CancellationToken cancellationToken) =>
-        await db.Items.AsNoTracking().Where(i => i.ItemCode == itemCode).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken);
+        await db.Items.AsNoTracking().Where(i => i.ItemCode == itemCode).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken)
+        ?? (Item.IsValidItemCode(itemCode) ? await new ItemCodeRules(db).ReservedOwnerAsync(itemCode, cancellationToken) : null);
 
     public async Task<ItemDetails?> GetAsync(Guid id, CancellationToken cancellationToken)
     {

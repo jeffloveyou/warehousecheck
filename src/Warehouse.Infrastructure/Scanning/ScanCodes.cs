@@ -37,7 +37,7 @@ internal static class ScanCodes
         if (scan.Kind == ScanCodeKind.Item)
         {
             var code = scan.ItemCode!;
-            return (db.Items.Where(i => i.ItemCode == code), code);
+            return (await ByCodeAsync(db, code, cancellationToken), code);
         }
         var text = scan.Normalized;
         var barcode = await db.ItemBarcodes.AsNoTracking()
@@ -46,7 +46,7 @@ internal static class ScanCodes
             .SingleOrDefaultAsync(cancellationToken);
         if (barcode is null)
         {
-            return (db.Items.Where(i => i.ItemCode == text), text);
+            return (await ByCodeAsync(db, text, cancellationToken), text);
         }
         if (barcode.PackQuantity != 1m)
         {
@@ -54,5 +54,21 @@ internal static class ScanCodes
                 $"「{text}」是一次代表 {barcode.PackQuantity:0.####} 個基本單位的包裝條碼，這個欄位的數量是基本單位；請改用連續掃碼面板，或直接輸入料號。");
         }
         return (db.Items.Where(i => i.Id == barcode.ItemId), text);
+    }
+
+    /// <summary>
+    /// 目前的料號；沒有物料使用、而且是保留中的歷史料號時（D-32，舊標籤、舊 Excel）對應到改號後的同一個物料。
+    /// 格式不像料號的文字不查歷史表。
+    /// </summary>
+    private static async Task<IQueryable<Item>> ByCodeAsync(WarehouseDbContext db, string code, CancellationToken cancellationToken)
+    {
+        var current = db.Items.Where(i => i.ItemCode == code);
+        if (!Item.IsValidItemCode(code) || await current.AnyAsync(cancellationToken))
+        {
+            return current;
+        }
+        return await new Items.ItemCodeRules(db).ReservedOwnerAsync(code, cancellationToken) is { } ownerId
+            ? db.Items.Where(i => i.Id == ownerId)
+            : current;
     }
 }

@@ -86,6 +86,22 @@ public sealed record UnitTrackingChangeCheck(bool HasActivity, bool SettingAllow
 }
 
 /// <summary>
+/// 變更已核准物料的正式料號（D-32，ADR-0025）。
+/// <paramref name="ReleaseOldCode"/> = false（預設）：舊料號保留為歷史料號，仍可搜尋、掃碼找到，不給其他物料使用。
+/// true：釋出舊料號，<paramref name="ConfirmOldCode"/> 必須再輸入一次舊料號。
+/// </summary>
+public sealed record ItemCodeChangeRequest(string NewItemCode, string Reason, bool ReleaseOldCode, string? ConfirmOldCode);
+
+/// <summary>物料的歷史料號（明細頁顯示）。</summary>
+public sealed record ItemCodeHistoryRow(string Code, string NewCode, bool Released, string Reason, string ActorName, DateTimeOffset OccurredAt);
+
+/// <summary>
+/// 物料明細頁的料號資訊：可用的前綴（分類往上整條路徑，第一個是自動發號用）、
+/// 系統設定是否開放變更已核准的料號、歷史料號（新的在前）。
+/// </summary>
+public sealed record ItemCodeOptions(IReadOnlyList<string> Prefixes, bool ChangeAllowed, IReadOnlyList<ItemCodeHistoryRow> History);
+
+/// <summary>
 /// 核准時有核准者尚未確認過的重複候選（可能是剛被別人提出或核准的）。
 /// 畫面應顯示 <see cref="Candidates"/>，請核准者確認不是重複後，帶著這些 ID 再核准一次。
 /// </summary>
@@ -152,6 +168,25 @@ public interface IItemWorkflowService
     Task<string> ApproveAsync(
         Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
         Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 核准並指定正式料號（D-32，ADR-0025）：<paramref name="requestedItemCode"/> 空白時自動發流水號；
+    /// 有填時前綴必須屬於物料分類（含上層），且沒有被其他物料使用或保留，否則丟 <c>ConflictException</c>（item.code_taken）或規則錯誤。
+    /// </summary>
+    Task<string> ApproveAsync(
+        Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
+        string? requestedItemCode, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 變更已核准物料的正式料號（D-32，ADR-0025；物料管理員、系統設定開放、原因必填）。
+    /// 單據、庫存都以物料 ID 關聯，不受影響；舊料號依 <see cref="ItemCodeChangeRequest.ReleaseOldCode"/> 保留或釋出。
+    /// 回傳新料號。
+    /// </summary>
+    Task<string> ChangeItemCodeAsync(
+        Guid itemId, uint expectedVersion, ItemCodeChangeRequest request, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>明細頁用的料號資訊（可用前綴、是否開放變更、歷史料號）。找不到物料時為 null。</summary>
+    Task<ItemCodeOptions?> GetItemCodeOptionsAsync(Guid itemId, CancellationToken cancellationToken);
 
     /// <summary>退回給提出人修改（管理員，意見必填）。</summary>
     Task ReturnAsync(Guid itemId, uint expectedVersion, string comment, Actor actor, CancellationToken cancellationToken);

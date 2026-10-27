@@ -41,6 +41,12 @@ public sealed class ScanResolver(WarehouseDbContext db, IWarehouseService wareho
         {
             var code = scan.ItemCode!;
             var byCode = await FindItemAsync(db.Items.Where(i => i.ItemCode == code), ScanMatch.ItemCode, 1m, cancellationToken);
+            if (byCode.Item is null && !byCode.Unusable
+                && await new Items.ItemCodeRules(db).ReservedOwnerAsync(code, cancellationToken) is { } ownerId)
+            {
+                // 舊標籤上的歷史料號（D-32）：對應到同一個物料，畫面顯示目前的新料號
+                byCode = await FindItemAsync(db.Items.Where(i => i.Id == ownerId), ScanMatch.OldItemCode, 1m, cancellationToken);
+            }
             return byCode.Item is not null
                 ? new ScanResolution(ScanResultKind.Item, original, value, null, null, byCode.Item)
                 : Rejected(original, value, byCode.Unusable ? $"料號 {code} 尚未核准或已拒絕，不能使用。" : $"找不到料號 {code}。");

@@ -70,6 +70,7 @@ public partial class AuthorizationSweepTests
         ["Items.DetailsModel.OnPostAddIndexAsync"] = Policies.ItemsIndex,
         ["Items.DetailsModel.OnPostAddItemLocationAsync"] = Policies.WarehousesManage,
         ["Items.DetailsModel.OnPostApproveAsync"] = Policies.ItemsReview,
+        ["Items.DetailsModel.OnPostChangeItemCodeAsync"] = Policies.ItemsReview,
         ["Items.DetailsModel.OnPostDeactivateAsync"] = Policies.ItemsReview,
         ["Items.DetailsModel.OnPostDeactivateIndexAsync"] = Policies.ItemsIndex,
         ["Items.DetailsModel.OnPostDefaultItemLocationAsync"] = Policies.WarehousesManage,

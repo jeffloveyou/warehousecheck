@@ -98,6 +98,39 @@ public class DetailsModel(
     [BindProperty]
     public Guid? DuplicateOfItemId { get; set; }
 
+    /// <summary>核准時指定的正式料號（空白＝自動流水號，D-32）。</summary>
+    [BindProperty]
+    public string? RequestedItemCode { get; set; }
+
+    /// <summary>變更料號表單（D-32，ADR-0025）。</summary>
+    [BindProperty]
+    public string? NewItemCode { get; set; }
+
+    [BindProperty]
+    public string? CodeChangeReason { get; set; }
+
+    [BindProperty]
+    public bool ReleaseOldCode { get; set; }
+
+    [BindProperty]
+    public string? ConfirmOldCode { get; set; }
+
+    /// <summary>可用前綴、是否開放變更、歷史料號。</summary>
+    public ItemCodeOptions CodeOptions { get; private set; } = new([], false, []);
+
+    /// <summary>顯示「變更料號」：物料管理員、已核准、系統設定已開放。</summary>
+    public bool CanChangeItemCode =>
+        IsManager && Item.Status is (ItemStatus.Active or ItemStatus.Inactive) && CodeOptions.ChangeAllowed;
+
+    public Task<IActionResult> OnPostChangeItemCodeAsync(Guid id, CancellationToken cancellationToken) =>
+        RunAsync(id, Policies.ItemsReview, async actor =>
+        {
+            var code = await workflow.ChangeItemCodeAsync(
+                id, Version, new ItemCodeChangeRequest(NewItemCode ?? string.Empty, CodeChangeReason ?? string.Empty, ReleaseOldCode, ConfirmOldCode),
+                actor, cancellationToken);
+            return $"料號已變更為 {code}。";
+        }, cancellationToken);
+
     public IReadOnlyList<ItemIndexRow> Indexes { get; private set; } = [];
 
     /// <summary>新增索引的文字；從搜尋頁「把搜尋文字加到物料」過來時以 ?indexText= 預先填入（M2-04）。</summary>
@@ -126,7 +159,7 @@ public class DetailsModel(
     public Task<IActionResult> OnPostApproveAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.ItemsReview, async actor =>
         {
-            var code = await workflow.ApproveAsync(id, Version, AcknowledgedIds, Comment, actor, cancellationToken);
+            var code = await workflow.ApproveAsync(id, Version, AcknowledgedIds, Comment, RequestedItemCode, actor, cancellationToken);
             return $"已核准，正式料號 {code}。";
         }, cancellationToken);
 
@@ -226,6 +259,7 @@ public class DetailsModel(
         Item = item;
         Version = item.Version;
         Indexes = await index.ListAsync(id, cancellationToken);
+        CodeOptions = await workflow.GetItemCodeOptionsAsync(id, cancellationToken) ?? CodeOptions;
         ItemLocations = await itemLocations.ListAsync(id, cancellationToken);
         CanManageLocations = item.Status == ItemStatus.Active && await CanManageLocationsAsync();
         CanEditNegativePolicy = item.Status == ItemStatus.Active && item.TrackingMode == TrackingMode.None

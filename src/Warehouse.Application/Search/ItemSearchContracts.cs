@@ -31,6 +31,9 @@ public enum HitReason
 
     /// <summary>第 2 層：有效原廠條碼完全相同（M5-01；與專屬別名同層，兩者互斥）。</summary>
     Barcode = 8,
+
+    /// <summary>第 1 層：保留中的歷史料號完全相同（D-32，ADR-0025；物料已改為新料號）。</summary>
+    OldItemCode = 9,
 }
 
 /// <summary>

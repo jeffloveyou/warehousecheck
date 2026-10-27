@@ -27,6 +27,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<ItemCodeCounter> ItemCodeCounters => Set<ItemCodeCounter>();
 
+    public DbSet<ItemCodeHistory> ItemCodeHistory => Set<ItemCodeHistory>();
+
     public DbSet<ItemAlias> ItemAliases => Set<ItemAlias>();
 
     public DbSet<ItemKeyword> ItemKeywords => Set<ItemKeyword>();
