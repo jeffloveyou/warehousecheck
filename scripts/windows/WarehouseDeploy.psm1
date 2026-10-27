@@ -149,6 +149,56 @@ function Protect-SecretDirectory {
 
 <#
 .SYNOPSIS
+    套件或換版包裡會以系統管理員身分執行的項目（腳本、.cmd、發布資料夾）：擁有者改為 Administrators、
+    不繼承、只給 Administrators 與 SYSTEM，子項目重設為繼承這個設定。只處理指定的項目，不碰它們所在的上層資料夾
+    （上層可能是 Downloads 或磁碟根目錄）。FAT32／exFAT 不支援權限時回傳失敗的項目，由呼叫端決定是否繼續。
+#>
+function Protect-AdminOnly {
+    param([Parameter(Mandatory)][string[]]$Paths)
+    $failed = @()
+    foreach ($item in $Paths | Where-Object { Test-Path $_ }) {
+        icacls $item /setowner Administrators /T /C /Q | Out-Null
+        if (Test-Path $item -PathType Container) {
+            icacls $item /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /Q | Out-Null
+            $ok = $LASTEXITCODE -eq 0
+            if (Get-ChildItem $item -Force | Select-Object -First 1) { icacls (Join-Path $item '*') /reset /T /C /Q | Out-Null }
+        } else {
+            icacls $item /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' /Q | Out-Null
+            $ok = $LASTEXITCODE -eq 0
+        }
+        if (-not $ok) { $failed += $item }
+    }
+    return $failed
+}
+
+<#
+.SYNOPSIS
+    依資料夾裡的 SHA256SUMS（publish.ps1、new-update-package.ps1 產生，格式「雜湊  相對路徑」）檢查每個檔案；
+    回傳問題清單（缺檔、雜湊不符、清單外多出的檔案），空陣列表示完整。SHA256SUMS 本身與 -Ignore 列出的檔名不檢查。
+#>
+function Test-FileHashes {
+    param([Parameter(Mandatory)][string]$Dir, [string[]]$Ignore = @())
+    $sums = Join-Path $Dir 'SHA256SUMS'
+    if (-not (Test-Path $sums)) { return @("$Dir 沒有 SHA256SUMS") }
+    $problems = @()
+    $listed = @{}
+    foreach ($line in Get-Content $sums -Encoding utf8 | Where-Object { $_ }) {
+        $hash, $relative = $line -split '  ', 2
+        $listed[$relative] = $true
+        $file = Join-Path $Dir ($relative.Replace('/', '\'))
+        if (-not (Test-Path $file -PathType Leaf)) { $problems += "缺少 $relative"; continue }
+        if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $hash.ToUpperInvariant()) { $problems += "雜湊不符 $relative" }
+    }
+    $root = (Resolve-Path $Dir).Path.TrimEnd('\')
+    foreach ($file in Get-ChildItem $Dir -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($root.Length + 1).Replace('\', '/')
+        if ($relative -ne 'SHA256SUMS' -and $relative -notin $Ignore -and -not $listed.ContainsKey($relative)) { $problems += "多出 $relative" }
+    }
+    return $problems
+}
+
+<#
+.SYNOPSIS
     A/B 槽位：固定的服務名稱與埠（M0-12）。反向代理只轉給 upstream.json 指定的槽位。
 #>
 function Get-Slot {
@@ -310,5 +360,5 @@ function Invoke-WarehouseCli {
 }
 
 Export-ModuleMember -Function Test-Administrator, Invoke-ElevatedSelf, Wait-HttpReady, Get-ReleaseInfo, Set-FileAtomically,
-    Set-RootAcl, Protect-SecretDirectory, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput,
+    Set-RootAcl, Protect-SecretDirectory, Protect-AdminOnly, Test-FileHashes, Get-Slot, New-UpstreamContent, Get-DeployState, Set-SlotState, Read-ChildOutput,
     Set-ConsoleEncoding, Set-ProcessVariable, Invoke-WarehouseCli

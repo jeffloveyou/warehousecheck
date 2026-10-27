@@ -150,19 +150,10 @@ try {
         (Join-Path $SetupRoot 'scripts'), (Join-Path $SetupRoot 'installers'), $webRelease, $proxyRelease,
         (Join-Path $SetupRoot 'warehouse-server.pfx'), (Join-Path $SetupRoot 'pfx-password.txt')
     ) + @(Get-ChildItem $SetupRoot -Filter '*.cmd' -File | ForEach-Object FullName) | Where-Object { Test-Path $_ }
-    foreach ($item in $packageItems) {
-        # 從網路下載再解壓的檔案帶有「來自網際網路」標記，靜默安裝會停在安全性警告
-        Get-ChildItem $item -Recurse -File -ErrorAction SilentlyContinue | Unblock-File
-        if (Test-Path $item -PathType Container) {
-            icacls $item /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' /Q | Out-Null
-            icacls (Join-Path $item '*') /reset /T /C /Q | Out-Null
-        } else {
-            Unblock-File $item
-            icacls $item /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' /Q | Out-Null
-        }
-        # FAT32／exFAT（例如直接從隨身碟執行）不支援權限，略過即可
-        if ($LASTEXITCODE -ne 0) { Write-Host "    無法收緊 $item 的權限（檔案系統不支援？），繼續安裝。" -ForegroundColor Yellow }
-    }
+    # 從網路下載再解壓的檔案帶有「來自網際網路」標記，靜默安裝會停在安全性警告
+    foreach ($item in $packageItems) { Get-ChildItem $item -Recurse -File -ErrorAction SilentlyContinue | Unblock-File }
+    # FAT32／exFAT（例如直接從隨身碟執行）不支援權限，略過即可
+    foreach ($item in Protect-AdminOnly $packageItems) { Write-Host "    無法收緊 $item 的權限（檔案系統不支援？），繼續安裝。" -ForegroundColor Yellow }
     Write-Host "網站版本：$(Split-Path $webRelease -Leaf)；代理版本：$(Split-Path $proxyRelease -Leaf)"
     $state = Get-State
 

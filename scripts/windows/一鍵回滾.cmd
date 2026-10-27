@@ -1,7 +1,7 @@
 @echo off
 rem Warehouse one-click rollback: switches traffic back to the standby slot after confirmation.
 rem Keep this file ASCII-only.
-setlocal
+setlocal EnableDelayedExpansion
 fltmc >nul 2>&1
 if errorlevel 1 (
     set "WH_SELF=%~f0"
@@ -27,8 +27,12 @@ if not exist "%PWSH%" (
     exit /b 1
 )
 
-"%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
-set "RC=%ERRORLEVEL%"
-echo.
-pause
-exit /b %RC%
+rem The update replaces this .cmd while it runs; cmd re-reads a batch file line by line, so everything
+rem after pwsh is inside one parenthesized block that cmd has already parsed.
+(
+    "%PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
+    set "RC=!ERRORLEVEL!"
+    echo.
+    pause
+    exit /b !RC!
+)

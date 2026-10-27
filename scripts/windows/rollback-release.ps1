@@ -18,6 +18,8 @@ if (-not (Test-Administrator)) {
     exit (Invoke-ElevatedSelf $PSCommandPath $PSBoundParameters -PathParameters 'Root')
 }
 
+$rollbackLog = if ($LogFile) { $LogFile } else { Join-Path $Root "logs\rollback-$(Get-Date -Format 'yyyyMMdd-HHmmss').log" }
+Start-Transcript -Path $rollbackLog -Append | Out-Null
 try {
     Write-Host '倉庫管理系統：一鍵回滾' -ForegroundColor Green
     $active = (Get-Content (Join-Path $Root 'proxy-config\upstream.json') -Raw | ConvertFrom-Json).ActiveSlot
@@ -29,6 +31,7 @@ try {
     Write-Host ''
     Write-Host '回滾會把流量切回待命槽位的版本，過程和換版一樣不會中斷。'
     Write-Host '資料庫不會退回：新版新增的資料表、欄位會留著，舊版不會讀它們。' -ForegroundColor Yellow
+    Write-Host '代理也不會退回（代理很少變動，新代理可以轉給舊版網站）。' -ForegroundColor Yellow
     Write-Host '例外：D-32 之後如果有人改過料號，舊版讀不到「變更料號」紀錄，那些物料的明細頁可能打不開（docs/11 §7.5）。' -ForegroundColor Yellow
     if (-not ($state[$standby]?.good)) {
         throw "待命槽位 $standby 沒有曾成功上線的版本，無法回滾。要部署特定版本請用一鍵換版選擇那個換版包。"
@@ -40,9 +43,12 @@ try {
     $version = try { (Invoke-RestMethod 'https://localhost:5443/api/system/info' -SkipCertificateCheck -TimeoutSec 10).version } catch { '讀不到' }
     Write-Host ''
     Write-Host "回滾完成，目前版本：$version" -ForegroundColor Green
+    Write-Host "回滾記錄：$rollbackLog"
     exit 0
 } catch {
     Write-Host ''
     Write-Host "錯誤：$($_.Exception.Message)" -ForegroundColor Red
     exit 1
+} finally {
+    try { Stop-Transcript | Out-Null } catch { }
 }
