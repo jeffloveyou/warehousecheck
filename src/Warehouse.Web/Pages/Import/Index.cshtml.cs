@@ -30,6 +30,12 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
     [BindProperty]
     public IFormFile? Upload { get; set; }
 
+    /// <summary>物料匯入時自動核准沒有疑似重複的列（D-31，只限物料管理員）。</summary>
+    [BindProperty]
+    public bool AutoApprove { get; set; }
+
+    public bool CanAutoApprove => Kind == ImportKind.Items && User.ToActor().IsItemManager;
+
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
 
     public IReadOnlySet<Guid>? Operable { get; private set; }
@@ -52,7 +58,7 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
 
     public static string LabelOf(ImportKind kind) => kind switch
     {
-        ImportKind.Items => "物料主檔（成為待核准物料）",
+        ImportKind.Items => "物料主檔",
         ImportKind.Indexes => "別名與共用關鍵字",
         ImportKind.Locations => "儲位",
         _ => "期初單明細",
@@ -98,7 +104,7 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
                 throw new ConflictException("import.too_large", $"檔案超過 {IImportService.MaxBytes / 1024 / 1024} MB，請分成多個檔案。");
             }
             await using var stream = Upload.OpenReadStream();
-            var id = await imports.UploadAsync(Kind, Target, Upload.FileName, stream, User.ToActor(), cancellationToken);
+            var id = await imports.UploadAsync(Kind, Target, Upload.FileName, stream, AutoApprove && CanAutoApprove, User.ToActor(), cancellationToken);
             return RedirectToPage("/Import/Details", new { id });
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)

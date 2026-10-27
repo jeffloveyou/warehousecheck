@@ -22,6 +22,15 @@ internal static class AdvisoryLocks
             : db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock_shared(hashtext({CategoryTree}))", cancellationToken);
 
     /// <summary>
+    /// 「提出時自動核准」的鎖（D-31 審查 🟠-1）：提出與核准在同一個交易，提交前別人看不到這筆新物料，
+    /// 兩個自動核准同時進行時，重複檢查會互相看不到。所有自動核准（表單、匯入）都先取這把鎖排隊，
+    /// 後到的在先到的提交後才查重複。一般提出、手動核准不需要（待核准物料已提交，核准檢查看得到）。
+    /// 必須在交易內呼叫。鍵名不可變更（A/B 兩版需鎖到同一把）。
+    /// </summary>
+    public static Task LockItemAutoApproveAsync(WarehouseDbContext db, CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"item-auto-approve"}))", cancellationToken);
+
+    /// <summary>
     /// 精確識別碼的鎖（M5-01，ADR-0016）：新增專屬別名與原廠條碼前，先以正規化文字取這把鎖，再檢查另一張表。
     /// 兩張表各自的部分唯一索引只能擋「同表重複」；跨表（別名＝條碼）靠這把鎖讓兩個新增排隊，不會同時通過檢查。
     /// 必須在交易內呼叫。鍵名前綴不可變更（A/B 兩版需鎖到同一把）。

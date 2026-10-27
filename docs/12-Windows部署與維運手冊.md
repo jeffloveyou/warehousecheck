@@ -213,6 +213,8 @@ Select-String -Path C:\Warehouse\logs\WarehouseB-*.log -Pattern '<requestId>' | 
 - 更換方法：`psql -h localhost -U postgres -d postgres` 登入後執行 `\password postgres`。
 
 ### 8.4 伺服器憑證到期（2027-11-22）或 IP 改變
+> 效期維持 397 天（瀏覽器對伺服器憑證的上限，使用者 2026-10-27 決定），大約每年換一次。建議在行事曆設提醒：到期前一個月更換。
+
 1. 用建立根 CA 的同一個 Windows 使用者（jeff）開 PowerShell 執行：
    ```powershell
    .\scripts\new-dev-certs.ps1 -IpAddress 192.168.0.86

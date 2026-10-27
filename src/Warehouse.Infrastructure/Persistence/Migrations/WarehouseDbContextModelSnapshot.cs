@@ -2482,6 +2482,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<bool>("AutoApprove")
+                        .HasColumnType("boolean")
+                        .HasColumnName("auto_approve");
+
                     b.Property<DateTimeOffset?>("CommittedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("committed_at");

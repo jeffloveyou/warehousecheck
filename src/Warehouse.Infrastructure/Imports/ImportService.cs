@@ -45,6 +45,7 @@ public sealed class ImportService(
             ("品牌", false, ""),
             ("原廠型號", false, ""),
             ("規格", false, ""),
+            ("原廠條碼", false, "包裝上的條碼（英數字），多個用頓號、逗號或分號分隔，最多 10 個；這一欄請設為「文字」格式"),
         ],
         [ImportKind.Indexes] =
         [
@@ -75,8 +76,12 @@ public sealed class ImportService(
     public IReadOnlyList<(string Name, bool Required, string Note)> Columns(ImportKind kind) => Layouts[kind];
 
     public async Task<Guid> UploadAsync(
-        ImportKind kind, Guid? targetId, string fileName, Stream content, Actor actor, CancellationToken cancellationToken)
+        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken)
     {
+        if (autoApprove && (kind != ImportKind.Items || !actor.IsItemManager))
+        {
+            throw new PermissionDeniedException("import.forbidden", "只有物料管理員匯入物料時可以選擇自動核准。");
+        }
         var bytes = await ReadLimitedAsync(content, cancellationToken);
         var (headers, rows) = ImportFileReader.Read(fileName, bytes);
         var missing = Layouts[kind].Where(c => c.Required && !headers.Contains(c.Name)).Select(c => c.Name).ToList();
@@ -90,11 +95,12 @@ public sealed class ImportService(
         }
         await EnsureTargetAsync(kind, targetId, actor, cancellationToken);
 
-        var issues = await RunAsync(kind, targetId, rows, actor, commit: false, null, cancellationToken);
+        var issues = await RunAsync(kind, targetId, autoApprove, rows, actor, commit: false, null, cancellationToken);
         var batch = new ImportBatch
         {
             Id = Guid.NewGuid(),
             Kind = kind,
+            AutoApprove = autoApprove,
             Status = ImportStatus.Validated,
             FileName = Path.GetFileName(fileName).Length > 200 ? Path.GetFileName(fileName)[..200] : Path.GetFileName(fileName),
             FileHash = Convert.ToHexString(SHA256.HashData(bytes)),
@@ -119,7 +125,7 @@ public sealed class ImportService(
         var batch = await db.ImportBatches.AsNoTracking().Where(b => b.Id == id)
             .Select(b => new
             {
-                b.Id, b.Kind, b.Status, b.FileName, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount, b.IssuesJson,
+                b.Id, b.Kind, b.AutoApprove, b.Status, b.FileName, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount, b.IssuesJson,
                 b.CreatedById, b.CreatedByName, b.CreatedAt, b.CommittedAt,
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -134,7 +140,8 @@ public sealed class ImportService(
             batch.RowCount, batch.ErrorCount, batch.WarningCount,
             issues.OrderBy(i => i.IsError ? 0 : 1).ThenBy(i => i.RowNo).Take(maxIssues).ToList(),
             batch.CreatedById, batch.CreatedByName, batch.CreatedAt, expires, batch.CommittedAt,
-            batch.Status == ImportStatus.Validated && batch.ErrorCount == 0 && batch.CreatedById == viewer.Id && clock.GetUtcNow() < expires);
+            batch.Status == ImportStatus.Validated && batch.ErrorCount == 0 && batch.CreatedById == viewer.Id && clock.GetUtcNow() < expires,
+            batch.AutoApprove);
     }
 
     public async Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken)
@@ -150,11 +157,16 @@ public sealed class ImportService(
         {
             return existing.RowCount;
         }
+        if (existing.AutoApprove && !actor.IsItemManager)
+        {
+            // 上傳後失去物料管理員身分：直接拒絕，不把每一列都寫成權限錯誤（D-31 審查 🟡-1）
+            throw new PermissionDeniedException("import.forbidden", "這個匯入選了自動核准，只有物料管理員可以確認；請重新上傳且不要勾選自動核准。");
+        }
         var rows = JsonSerializer.Deserialize<List<ImportRow>>(existing.RowsJson, Json) ?? [];
         IReadOnlyList<ImportIssue> issues;
         try
         {
-            issues = await RunAsync(existing.Kind, existing.TargetId, rows, actor, commit: true, id, cancellationToken);
+            issues = await RunAsync(existing.Kind, existing.TargetId, existing.AutoApprove, rows, actor, commit: true, id, cancellationToken);
         }
         catch (AlreadyCommittedException)
         {
@@ -202,7 +214,7 @@ public sealed class ImportService(
     /// 否則把批次標記為已匯入、寫稽核並提交。
     /// </summary>
     private async Task<IReadOnlyList<ImportIssue>> RunAsync(
-        ImportKind kind, Guid? targetId, IReadOnlyList<ImportRow> rows, Actor actor, bool commit, Guid? batchId,
+        ImportKind kind, Guid? targetId, bool autoApprove, IReadOnlyList<ImportRow> rows, Actor actor, bool commit, Guid? batchId,
         CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
@@ -225,8 +237,13 @@ public sealed class ImportService(
                 throw new ConflictException("import.has_errors", "這個檔案有錯誤，不能匯入；請修正後重新上傳。");
             }
         }
+        if (autoApprove)
+        {
+            // 先排隊再查重複：別人的自動核准提交後，這批的重複檢查才看得到它（D-31 審查 🟠-1）
+            await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+        }
         var issues = new List<ImportIssue>();
-        var context = new RowContext(await LookupsAsync(kind, cancellationToken), targetId);
+        var context = new RowContext(await LookupsAsync(kind, cancellationToken), targetId, autoApprove);
         foreach (var row in rows)
         {
             await transaction.CreateSavepointAsync("import_row", cancellationToken);
@@ -254,6 +271,7 @@ public sealed class ImportService(
                     PostgresException pg => $"資料庫拒絕這一列（{pg.SqlState}）。",
                     DbUpdateException { InnerException: PostgresException pg } => $"資料庫拒絕這一列（{pg.SqlState}）。",
                     DbUpdateException => "資料庫拒絕這一列。",
+                    DuplicateCandidatesUnconfirmedException => "自動核准時發現新的疑似重複物料（可能剛被他人建立），請重新上傳試算。",
                     _ => ex.Message,
                 };
                 issues.Add(new ImportIssue(row.Row, message, true));
@@ -272,7 +290,7 @@ public sealed class ImportService(
             .SetProperty(b => b.IssuesJson, JsonSerializer.Serialize(issues, Json))
             .SetProperty(b => b.WarningCount, issues.Count), cancellationToken);
         AuditLog.Add(db, actor, clock.GetUtcNow(), "import.commit", "import_batch", batch!.Id.ToString(), null,
-            new { Kind = kind.ToString(), Rows = rows.Count, batch.FileName, batch.FileHash, TargetId = targetId });
+            new { Kind = kind.ToString(), Rows = rows.Count, batch.FileName, batch.FileHash, TargetId = targetId, AutoApprove = autoApprove });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return issues;
@@ -281,7 +299,7 @@ public sealed class ImportService(
     /// <summary>執行一列；回傳警告（不擋匯入）或 null。錯誤以例外丟出。</summary>
     private async Task<string?> ExecuteRowAsync(ImportKind kind, ImportRow row, RowContext context, Actor actor, CancellationToken cancellationToken)
     {
-        RejectDates(row, "品名", "分類", "基本單位", "原廠型號", "料號", "文字", "儲位碼", "儲位", "批號", "序號");
+        RejectDates(row, "品名", "分類", "基本單位", "原廠型號", "原廠條碼", "料號", "文字", "儲位碼", "儲位", "批號", "序號");
         switch (kind)
         {
             case ImportKind.Items:
@@ -296,12 +314,25 @@ public sealed class ImportService(
                     "序號" or "Serial" => TrackingMode.Serial,
                     var other => throw new DomainRuleException($"追蹤模式「{other}」不正確，請填 不追蹤、批號 或 序號。"),
                 };
+                if (row.IsNumber("原廠條碼"))
+                {
+                    // Excel 數字格式會去掉前導零、把 15 位以後的數字改成 0，讀到的已經不是包裝上的條碼（D-31 審查 🟠-3）
+                    throw new DomainRuleException("「原廠條碼」是 Excel 的數字格式，前導零或長條碼的尾數可能已被改掉；請把這一欄設為「文字」格式後重新輸入。");
+                }
                 var partNo = row.Get("原廠型號");
                 var candidates = await items.FindDuplicateCandidatesAsync(name, partNo, null, cancellationToken);
+                // 自動核准（D-31）：疑似重複的列照常匯入但維持待核准，由物料管理員逐筆確認（使用者 2026-10-27 決定）
+                var approve = context.AutoApprove && candidates.Count == 0;
                 await items.SubmitAsync(Guid.NewGuid(), new ItemDraft(name, category, unit, tracking, row.Get("品牌"), partNo, row.Get("規格")),
-                    actor, cancellationToken);
-                return candidates.Count == 0 ? null
-                    : $"疑似與既有物料重複：{string.Join("、", candidates.Take(3).Select(c => c.ItemCode ?? c.RequestNo))}（物料管理員核准時會再確認）。";
+                    new ItemSubmitOptions(Barcodes(row.Get("原廠條碼")), approve, []), actor, cancellationToken);
+                if (candidates.Count == 0)
+                {
+                    return null;
+                }
+                var similar = string.Join("、", candidates.Take(3).Select(c => c.ItemCode ?? c.RequestNo));
+                return context.AutoApprove
+                    ? $"疑似與既有物料重複：{similar}，這一列不自動核准、維持待核准，請物料管理員確認。"
+                    : $"疑似與既有物料重複：{similar}（物料管理員核准時會再確認）。";
             }
             case ImportKind.Indexes:
             {
@@ -357,7 +388,15 @@ public sealed class ImportService(
         }
     }
 
-    private sealed record RowContext(Dictionary<string, Dictionary<string, Guid>> Lookups, Guid? TargetId);
+    private sealed record RowContext(Dictionary<string, Dictionary<string, Guid>> Lookups, Guid? TargetId, bool AutoApprove);
+
+    /// <summary>
+    /// 「原廠條碼」欄：多個以頓號、逗號、分號（含全形）分隔，包裝數量為 1 個基本單位（其他包裝數量請在物料頁登錄）。
+    /// 不以空白分隔：含空白的條碼才不會被拆成兩個短碼（D-31 審查 🟡-3）。
+    /// </summary>
+    private static List<ItemBarcodeDraft> Barcodes(string? text) => text is null ? []
+        : text.Split(['、', ',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(b => new ItemBarcodeDraft(b)).ToList();
 
     /// <summary>物料匯入要用的分類（代碼與名稱都可以）與單位對照，一次讀出。</summary>
     private async Task<Dictionary<string, Dictionary<string, Guid>>> LookupsAsync(ImportKind kind, CancellationToken cancellationToken)

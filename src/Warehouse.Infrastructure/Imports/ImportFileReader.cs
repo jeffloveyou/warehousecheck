@@ -10,13 +10,16 @@ namespace Warehouse.Infrastructure.Imports;
 /// <summary>
 /// 一列資料：工作表中的列號（標題是第 1 列）與「欄名 → 文字」。
 /// <see cref="DateColumns"/>：xlsx 中被 Excel 存成日期的欄位（代碼欄若是日期，代表 Excel 自動轉換過，例如 1-2 → 1月2日）。
+/// <see cref="NumberColumns"/>：xlsx 中存成數字的欄位（條碼存成數字時，前導零與第 16 位以後的數字已被 Excel 改掉，D-31 審查 🟠-3）。
 /// </summary>
-public sealed record ImportRow(int Row, Dictionary<string, string> Cells, List<string>? DateColumns = null)
+public sealed record ImportRow(int Row, Dictionary<string, string> Cells, List<string>? DateColumns = null, List<string>? NumberColumns = null)
 {
     public string? Get(string column) =>
         Cells.TryGetValue(column, out var value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
 
     public bool IsDate(string column) => DateColumns?.Contains(column) == true;
+
+    public bool IsNumber(string column) => NumberColumns?.Contains(column) == true;
 }
 
 /// <summary>
@@ -35,10 +38,10 @@ public static class ImportFileReader
     public static (IReadOnlyList<string> Headers, IReadOnlyList<ImportRow> Rows) Read(string fileName, byte[] content)
     {
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        var (table, dates) = extension switch
+        var (table, dates, numbers) = extension switch
         {
             ".xlsx" => ReadXlsx(content),
-            ".csv" => (ReadCsv(content), new Dictionary<int, List<int>>()),
+            ".csv" => (ReadCsv(content), new Dictionary<int, List<int>>(), new Dictionary<int, List<int>>()),
             _ => throw BadFile("只接受 .xlsx 或 .csv 檔。"),
         };
         if (table.Count == 0)
@@ -71,11 +74,14 @@ public static class ImportFileReader
                     dict[headers[c]] = cells[c];
                 }
             }
-            var dateColumns = dates.TryGetValue(i, out var list) ? list.Where(c => c < headers.Count).Select(c => headers[c]).ToList() : null;
-            rows.Add(new ImportRow(i + 1, dict, dateColumns is { Count: > 0 } ? dateColumns : null));
+            rows.Add(new ImportRow(i + 1, dict, ColumnsOf(dates, i, headers), ColumnsOf(numbers, i, headers)));
         }
         return (headers, rows);
     }
+
+    private static List<string>? ColumnsOf(Dictionary<int, List<int>> cells, int row, List<string> headers) =>
+        cells.TryGetValue(row, out var list) && list.Where(c => c < headers.Count).Select(c => headers[c]).ToList() is { Count: > 0 } names
+            ? names : null;
 
     /// <summary>xlsx 是 zip：逐項實際解壓計數（不只相信宣告的長度），超過上限就拒絕，再交給 ClosedXML。</summary>
     private static void CheckZip(byte[] content)
@@ -109,7 +115,7 @@ public static class ImportFileReader
         }
     }
 
-    private static (List<List<string>> Table, Dictionary<int, List<int>> Dates) ReadXlsx(byte[] content)
+    private static (List<List<string>> Table, Dictionary<int, List<int>> Dates, Dictionary<int, List<int>> Numbers) ReadXlsx(byte[] content)
     {
         CheckZip(content);
         try
@@ -120,7 +126,7 @@ public static class ImportFileReader
             var used = sheet.RangeUsed();
             if (used is null)
             {
-                return ([], []);
+                return ([], [], []);
             }
             var lastRow = used.LastRow().RowNumber();
             if (lastRow > IImportService.MaxRows + 1000)
@@ -135,6 +141,7 @@ public static class ImportFileReader
             }
             var table = new List<List<string>>(lastRow);
             var dates = new Dictionary<int, List<int>>();
+            var numbers = new Dictionary<int, List<int>>();
             for (var r = 1; r <= lastRow; r++)
             {
                 var row = new List<string>(lastColumn);
@@ -152,12 +159,16 @@ public static class ImportFileReader
                     }
                     else
                     {
+                        if (cell.DataType == XLDataType.Number)
+                        {
+                            (numbers.TryGetValue(r - 1, out var list) ? list : numbers[r - 1] = []).Add(c - 1);
+                        }
                         row.Add(cell.GetFormattedString());
                     }
                 }
                 table.Add(row);
             }
-            return (table, dates);
+            return (table, dates, numbers);
         }
         catch (Exception ex) when (ex is not AppException)
         {

@@ -32,7 +32,7 @@ public sealed record ImportIssue(int RowNo, string Message, bool IsError);
 public sealed record ImportBatchView(
     Guid Id, ImportKind Kind, ImportStatus Status, string FileName, Guid? TargetId, string? TargetLabel, int RowCount,
     int ErrorCount, int WarningCount, IReadOnlyList<ImportIssue> Issues, Guid CreatedById, string CreatedByName,
-    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? CommittedAt, bool CanCommit);
+    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? CommittedAt, bool CanCommit, bool AutoApprove);
 
 /// <summary>
 /// Excel／CSV 匯入（M6-03，ADR-0019）：上傳 → 試算（每列錯誤與警告）→ 確認。
@@ -56,11 +56,18 @@ public interface IImportService
     /// <summary>試算有效時間：超過後必須重新上傳（資料可能已變動）。</summary>
     static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
 
+    /// <summary>上傳並試算（不自動核准），見另一個多載。</summary>
+    Task<Guid> UploadAsync(
+        ImportKind kind, Guid? targetId, string fileName, Stream content, Actor actor, CancellationToken cancellationToken) =>
+        UploadAsync(kind, targetId, fileName, content, autoApprove: false, actor, cancellationToken);
+
     /// <summary>
     /// 上傳並試算，回傳批次 ID。<paramref name="targetId"/>：儲位＝倉庫 ID；期初單明細＝期初單 ID；其他為 null。
+    /// <paramref name="autoApprove"/>（D-31，只限物料管理員匯入物料，否則丟 <c>import.forbidden</c>）：
+    /// 沒有疑似重複的物料直接核准、發正式料號；疑似重複的列維持待核准並列為警告。選項存在批次裡，確認時照同一個選項執行。
     /// </summary>
     Task<Guid> UploadAsync(
-        ImportKind kind, Guid? targetId, string fileName, Stream content, Actor actor, CancellationToken cancellationToken);
+        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken);
 
     /// <summary>檢視批次（建立者或系統管理員）；問題清單最多回傳前 <paramref name="maxIssues"/> 筆。</summary>
     Task<ImportBatchView?> GetAsync(Guid id, Actor viewer, bool viewerIsAdmin, int maxIssues, CancellationToken cancellationToken);

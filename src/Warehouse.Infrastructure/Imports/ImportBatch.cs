@@ -23,6 +23,9 @@ public sealed class ImportBatch
 
     public Guid? TargetId { get; set; }
 
+    /// <summary>物料匯入時自動核准沒有疑似重複的列（D-31，只限物料管理員）；試算與確認都依這個值執行。</summary>
+    public bool AutoApprove { get; set; }
+
     /// <summary>解析後的列：[{ "row": 2, "cells": { "品名": "…" } }]。</summary>
     public string RowsJson { get; set; } = "[]";
 

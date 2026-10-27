@@ -22,7 +22,11 @@
 }
 <div class="panel">
     <h2>@IndexModel.LabelOf(Model.Kind)：欄位</h2>
-    <p><a href="/Import?handler=Template&Kind=@Model.Kind" id="template-link">下載範本（.xlsx）</a>　第一列是標題，欄名要與範本相同；最多 5,000 列、5 MB。</p>
+    <p><a href="/Import?handler=Template&Kind=@Model.Kind" id="template-link">下載範本（.xlsx）</a>　第一列是標題，欄名要與範本相同；最多 @IImportService.MaxRows.ToString("N0") 列、5 MB。</p>
+    @if (Model.Kind == ImportKind.Items)
+    {
+        <p class="muted">匯入的物料預設成為待核准，由物料管理員核准後發出正式料號。物料管理員可以勾選「自動核准」，期初建帳時不必逐筆核准。</p>
+    }
     <div class="table-wrap">
         <table id="import-columns">
             <thead><tr><th>欄名</th><th>必填</th><th>說明</th></tr></thead>
@@ -66,6 +70,10 @@ else
             <label for="Upload">檔案</label>
             <input type="file" id="Upload" name="Upload" accept=".xlsx,.csv" required />
         </div>
+        @if (Model.CanAutoApprove)
+        {
+            <p><label><input type="checkbox" name="AutoApprove" value="true" checked="@Model.AutoApprove" id="import-auto-approve" /> 匯入後自動核准（立即發出正式料號；疑似重複的列維持待核准）</label></p>
+        }
         <div class="actions"><button type="submit" id="import-upload">上傳並試算</button></div>
     </form>
 }
