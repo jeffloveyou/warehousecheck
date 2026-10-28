@@ -303,6 +303,24 @@ public class OpeningTests
         Assert.Equal(StockDocumentStatus.Cancelled, (await Opening(s => s.GetAsync(doc, Ct)))!.Status);
     }
 
+    // T-D33-01：沒有料號＝確認為空儲位，數量必須是 0、不可帶批號序號（漏填料號時有庫存的儲位不能被默默記成空的）
+    [Fact]
+    public async Task 沒有料號但有數量或批號_被拒_數量0才算空儲位()
+    {
+        var (warehouse, _) = await WarehouseAsync("E-01", "E-02");
+        var doc = await Opening(s => s.CreateAsync(warehouse, null, Operator, Ct));
+
+        var withQty = await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Opening(s => s.AddLineAsync(doc, new OpeningLineInput("E-01", null, null, null, null, 30), Operator, Ct)));
+        Assert.Contains("數量要填 0", withQty.Message);
+        await Assert.ThrowsAsync<DomainRuleException>(() =>
+            Opening(s => s.AddLineAsync(doc, new OpeningLineInput("E-01", "  ", "LOT1", null, null, 0), Operator, Ct)));
+        Assert.Empty((await Opening(s => s.GetAsync(doc, Ct)))!.Lines);
+
+        await Opening(s => s.AddLineAsync(doc, new OpeningLineInput("E-02", null, null, null, null, 0), Operator, Ct));
+        Assert.Single((await Opening(s => s.GetAsync(doc, Ct)))!.Lines);
+    }
+
     // T-M3-03-12（審查 #13）：結存合併路徑——同一維度（批號、序號都是 NULL）兩次增加，只有一列、數量相加
     [Fact]
     public async Task 過帳服務_同一維度兩次增加_合併成一列_NULL維度也視為相同()

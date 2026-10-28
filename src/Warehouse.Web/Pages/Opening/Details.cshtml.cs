@@ -86,9 +86,10 @@ public class DetailsModel(
     public Task<IActionResult> OnPostAddLineAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.OpeningEdit, async actor =>
         {
-            var input = new OpeningLineInput(
-                Line.LocationCode, Line.EmptyLocation ? null : Line.ItemCode, Line.LotNo, Line.SerialNo, Line.ExpiryDate,
-                Line.EmptyLocation ? 0 : Line.Quantity);
+            // 勾「確認為空」時只送儲位：其他欄位即使有殘留的輸入也不送（服務會拒絕空儲位帶數量或批號）
+            var input = Line.EmptyLocation
+                ? new OpeningLineInput(Line.LocationCode, null, null, null, null, 0)
+                : new OpeningLineInput(Line.LocationCode, Line.ItemCode, Line.LotNo, Line.SerialNo, Line.ExpiryDate, Line.Quantity);
             await openings.AddLineAsync(id, input, actor, cancellationToken);
             return Line.EmptyLocation ? $"已將儲位 {Line.LocationCode.Trim()} 標記為空。" : "已新增明細。";
         }, cancellationToken);

@@ -22,10 +22,7 @@
     <div class="message warn" id="scan-focus-warning" hidden>
         掃碼框不在焦點，條碼槍掃的字可能跑到別處。<button type="button" class="link" id="scan-refocus">點這裡回到掃碼框</button>
     </div>
-    <div class="scan-camera-box" id="scan-camera-box" hidden>
-        <video id="scan-video" playsinline muted></video>
-        <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
-    </div>
+
 </form>
 
 @* 常駐的朗讀區：結果區整塊替換後，scan-page.js 把摘要複製到這裡，報讀軟體才會唸出新結果 *@
@@ -144,6 +141,10 @@
             </div>
         }
     }
+</div>
+<div class="scan-camera-box" id="scan-camera-box" hidden>
+    <video id="scan-video" playsinline muted></video>
+    <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
 </div>
 @section Scripts {
     <script src="~/js/scan-input.js" asp-append-version="true"></script>
