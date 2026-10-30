@@ -24,8 +24,12 @@ public class CartModel(IScanCartService carts) : PageModel
         await LoadAsync(id, cancellationToken) ? Page() : Missing();
 
     /// <summary>掃碼加入（JSON，antiforgery 由 RequestVerificationToken 標頭驗證）：成功回傳重繪的明細表，規則錯誤回 400 JSON。</summary>
-    public async Task<IActionResult> OnPostAddAsync(Guid id, [FromBody] AddRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostAddAsync(Guid id, [FromBody] AddRequest? request, CancellationToken cancellationToken)
     {
+        if (request is null || request.ItemCode is not { Length: > 0 and <= 200 } || request.LocationCode is { Length: > 200 })
+        {
+            return BadRequest(new { message = "請掃物料或輸入料號。" });
+        }
         try
         {
             await carts.AddAsync(id, new ScanCartAddInput(request.ItemCode ?? string.Empty, request.LocationCode, request.Quantity),
@@ -37,6 +41,10 @@ public class CartModel(IScanCartService carts) : PageModel
         }
         return await LoadAsync(id, cancellationToken) ? Partial("_CartLines", Cart) : NotFound();
     }
+
+    /// <summary>重新讀取明細表（加入結果不確定時，畫面用它核對實際內容）。</summary>
+    public async Task<IActionResult> OnGetLinesAsync(Guid id, CancellationToken cancellationToken) =>
+        await LoadAsync(id, cancellationToken) ? Partial("_CartLines", Cart) : NotFound();
 
     public Task<IActionResult> OnPostUpdateLineAsync(Guid id, Guid lineId, decimal quantity, string? locationCode, CancellationToken cancellationToken) =>
         RunAsync(id, () => carts.UpdateLineAsync(id, lineId, quantity, locationCode, User.ToActor(), cancellationToken), "已更新。", cancellationToken);

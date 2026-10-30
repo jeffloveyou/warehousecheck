@@ -130,6 +130,14 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         END IF;
                   """
                 : "";
+            // from_scan_cart 只在建立時（INSERT）決定，之後不可改：否則一般草稿可被改成「可刪除」（審查 5）
+            var lockFlag = allowScanCartDraftDelete
+                ? """
+                    IF NEW.from_scan_cart IS DISTINCT FROM OLD.from_scan_cart THEN
+                        RAISE EXCEPTION '單據來源不可修改（%）', OLD.doc_no USING ERRCODE = 'restrict_violation';
+                    END IF;
+                  """
+                : "";
             return $$"""
                 CREATE OR REPLACE FUNCTION stock_documents_protect() RETURNS trigger
                 LANGUAGE plpgsql AS $$
@@ -141,6 +149,7 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     IF OLD.status IN ('Posted', 'Cancelled') THEN
                         RAISE EXCEPTION '已過帳或已取消的單據不可修改（%）', OLD.doc_no USING ERRCODE = 'restrict_violation';
                     END IF;
+                {{lockFlag}}
                     RETURN NEW;
                 END;
                 $$;

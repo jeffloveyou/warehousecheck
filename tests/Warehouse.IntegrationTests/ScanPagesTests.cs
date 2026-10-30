@@ -152,6 +152,7 @@ public partial class ScanPagesTests
         var rejected = await AddAsync(op, new { itemCode = "NOPE-" + Guid.NewGuid().ToString("N")[..6], quantity = 1m }, token);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Contains("找不到料號", await rejected.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op, null!, token)).StatusCode); // 空的 JSON：400，不是 500
 
         // 別的作業員：看不到（回快速進出）、加不進去
         var other = await op2.Client.GetAsync(cartUrl, Ct);

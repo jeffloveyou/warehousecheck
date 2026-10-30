@@ -194,13 +194,14 @@ Check(await page.InputValueAsync("#scan-item") == itemCodes[0], "數量欄收到
 var afterQtyScan = await LinesAsync(docId, "A-01");
 Check(!afterQtyScan.Values.Any(q => q > 1000), "沒有把條碼數字當成數量加入");
 await page.ClickAsync("#scan-clear");
-// 數量欄收到 3 碼英數條碼（例 B12）：不是純數字，當成掃碼處理，不會變成數量 12（PR 2 審查 M3）
+// 數量欄收到 3 碼英數條碼（例 Q12）：不是純數字，當成掃碼處理，不會變成數量 12（PR 2 審查 M3）。
+// 用 Q 開頭：測試庫的物料名稱含 GUID（只有 0-9a-f），用 B12 會被搜尋到而變成「列出候選」
 await ScanAsync(page, "WH:ITEM:" + itemCodes[3]);
 await WaitIdleAsync(page);
-await ScanAsync(page, "B12");
+await ScanAsync(page, "Q12");
 await WaitIdleAsync(page);
 Check(!(await LinesAsync(docId, "A-01")).ContainsKey(itemCodes[3]), "數量欄收到英數短碼時不會加入明細");
-Check((await page.InnerTextAsync("#scan-status")).Contains("B12"), "英數短碼被當成掃碼並提示");
+Check((await page.InnerTextAsync("#scan-status")).Contains("Q12"), "英數短碼被當成掃碼並提示");
 await page.ClickAsync("#scan-clear");
 
 // 5. 逐件累加：A-02 連掃 8 種物料共 50 筆（Enter）、再 50 筆（Tab），不等處理完；結果每種物料的數量＝掃的次數
@@ -666,6 +667,19 @@ Check(quickRows.Length == 3
       && quickRows.Any(r => r.StartsWith(itemCodes[6] + "|", StringComparison.Ordinal) && r.Contains("（未指定）") && r.Contains("|1 PCS"))
       && quickRows.Any(r => r.StartsWith(itemCodes[7] + "|", StringComparison.Ordinal) && r.Contains("|5 PCS")),
     "快速進出：同料同儲位合併 3、清除儲位後不指定、手動數量 5（" + string.Join(" / ", quickRows) + "）");
+// 登入逾時（清掉 Cookie）後再掃：不能顯示「已加入」、不能有成功音效，明細不變（審查 1）
+var quickContext = page.Context;
+var savedCookies = await quickContext.CookiesAsync();
+await quickContext.ClearCookiesAsync();
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
+await WaitIdleAsync(page);
+var expiredStatus = await page.InnerTextAsync("#scan-status");
+Check(!expiredStatus.Contains("已加入") && (await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]) && !(await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[8]),
+    "快速進出：登入逾時時不顯示已加入（" + expiredStatus + "）");
+Check(expiredStatus.Contains("登入已逾時"), "快速進出：登入逾時有明確提示");
+consoleErrors.RemoveAll(e => e.Contains("/Quick/Cart/", StringComparison.Ordinal) && e.Contains("status of 401", StringComparison.Ordinal)); // 刻意清 Cookie 造成的 401
+await quickContext.AddCookiesAsync(savedCookies.Select(c => new Cookie { Name = c.Name, Value = c.Value, Domain = c.Domain, Path = c.Path, Expires = c.Expires, HttpOnly = c.HttpOnly, Secure = c.Secure, SameSite = c.SameSite }));
 var otherDevice = await LoginAsync(390);
 await otherDevice.GotoAsync(quickCartUrl);
 Check((await otherDevice.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]), "快速進出：換裝置登入，購物車內容還在");

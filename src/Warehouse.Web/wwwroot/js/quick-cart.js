@@ -5,7 +5,8 @@
 //     物料 → 手動：帶出數量欄（預設包裝量），按 Enter 加入；自動：直接加入一個包裝量（外箱條碼＝一箱的數量）。
 //     其他 → 提示（只有儲位碼不知道是哪個倉庫，請掃儲位 QR）。
 // - 加入：POST ?handler=Add（JSON＋RequestVerificationToken），成功換掉明細表（不重新載入頁面）；伺服器同料同儲位合併。
-// - 結果訊息一律顯示在掃碼框正下方（#scan-status）。網路錯誤不自動重送（避免加兩次）。
+// - 結果訊息一律顯示在掃碼框正下方（#scan-status）。只有拿到重繪的明細表才算「已加入」；
+//   登入逾時（被轉址）＝沒有加入；網路錯誤或伺服器錯誤＝不確定，重新讀取購物車給人核對，不自動重送（避免加兩次）。
 (function () {
   'use strict';
 
@@ -14,6 +15,7 @@
   function $(id) { return document.getElementById(id); }
 
   var addUrl = panel.getAttribute('data-add-url');
+  var linesUrl = panel.getAttribute('data-lines-url');
   var tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
   var el = {
     input: $('scan-input'), status: $('scan-status'), qtyRow: $('quick-qty-row'), qty: $('quick-qty'), qtyItem: $('quick-qty-item'),
@@ -67,24 +69,57 @@
         body: JSON.stringify({ itemCode: itemCode, locationCode: location ? location.code : null, quantity: quantity })
       });
     } catch (e) {
-      status('網路錯誤，沒有加入「' + label + '」，請確認連線後重掃。', 'bad');
+      // 伺服器可能已經加入、只是回應斷掉：不能說「沒有加入」，否則重掃會變兩倍（審查 2）
+      await uncertain(label);
+      return;
+    }
+    // 登入逾時或沒有權限時會被轉址到登入頁（也是 200 HTML）：一定要拿到重繪的明細表才算成功（審查 1）
+    if (res.redirected) {
+      status('登入已逾時，沒有加入「' + label + '」。請重新整理頁面並登入後再掃。', 'bad');
       window.WhScan.feedback('error');
       return;
     }
-    if (res.ok && (res.headers.get('Content-Type') || '').indexOf('html') >= 0) {
-      var template = document.createElement('template');
-      template.innerHTML = await res.text();
-      var fresh = template.content.querySelector('[data-quick-lines]');
-      var old = document.querySelector('[data-quick-lines]');
-      if (fresh && old) old.parentNode.replaceChild(fresh, old);
+    var fresh = res.ok && (res.headers.get('Content-Type') || '').indexOf('html') >= 0 ? linesFrom(await res.text()) : null;
+    if (fresh) {
+      replaceLines(fresh);
       status('已加入 ' + label + ' × ' + fmt(quantity) + (location ? '（儲位 ' + location.label + '）' : '（未指定儲位）'), 'ok');
       window.WhScan.feedback('ok');
       return;
     }
-    var body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
-    status(body && body.message ? body.message : res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '加入失敗（HTTP ' + res.status + '）。', 'bad');
+    if (res.status === 400) {
+      var body = null;
+      try { body = await res.json(); } catch (e) { body = null; }
+      status(body && body.message ? body.message : '沒有加入「' + label + '」。', 'bad');
+      window.WhScan.feedback('error');
+      return;
+    }
+    await uncertain(label);
+  }
+
+  function linesFrom(html) {
+    var template = document.createElement('template');
+    template.innerHTML = html;
+    return template.content.querySelector('[data-quick-lines]');
+  }
+  function replaceLines(fresh) {
+    var old = document.querySelector('[data-quick-lines]');
+    if (old) old.parentNode.replaceChild(fresh, old);
+  }
+
+  // 結果不確定（網路斷、伺服器錯誤）：重新讀取購物車給人核對，不自動重送
+  async function uncertain(label) {
     window.WhScan.feedback('error');
+    status('不確定「' + label + '」是否已加入，正在重新讀取購物車…', 'bad');
+    try {
+      var res = await fetch(linesUrl, { headers: { 'Accept': 'text/html' }, credentials: 'same-origin' });
+      var fresh = res.ok && !res.redirected ? linesFrom(await res.text()) : null;
+      if (fresh) {
+        replaceLines(fresh);
+        status('不確定「' + label + '」是否已加入：已重新讀取購物車，請核對下方數量後再決定要不要重掃。', 'bad');
+        return;
+      }
+    } catch (e) { /* 仍然連不上 */ }
+    status('不確定「' + label + '」是否已加入，而且讀不到購物車。請確認連線後重新整理頁面核對，再決定要不要重掃。', 'bad');
   }
 
   async function onScan(value) {
@@ -99,7 +134,7 @@
       return;
     }
     if (!body) {
-      status(res && res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '查詢失敗：' + value, 'bad');
+      status(res && (res.redirected || res.status === 401) ? '登入已逾時，沒有處理「' + value + '」。請重新整理頁面並登入後再掃。' : '查詢失敗：' + value, 'bad');
       window.WhScan.feedback('error');
       return;
     }

@@ -215,6 +215,98 @@ public class ScanCartTests
         Assert.Equal([2m, 9m, null, null], options.Select(o => o.Quantity).ToArray());
     }
 
+    // T-QC-08（審查 4、9）：同一個 RequestId 同時轉單兩次 → 都回傳同一張、只有一張單
+    [Fact]
+    public async Task 轉單_同一請求同時送兩次_只建一張()
+    {
+        var me = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), me, Ct));
+        var input = new ScanCartConvertInput(StockDocumentType.Inbound, w, PurchaseIn, [new ScanCartConvertLine(line, "A-01")], Guid.NewGuid());
+        var results = await Task.WhenAll(
+            Docs(s => s.CreateFromScanCartAsync(cart, input, me, Ct)),
+            Docs(s => s.CreateFromScanCartAsync(cart, input, me, Ct)));
+        Assert.All(results, r => Assert.Equal(input.RequestId, r));
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        Assert.Equal(1, await db.StockDocuments.CountAsync(d => d.Id == input.RequestId, Ct));
+    }
+
+    // T-QC-09（審查 9）：沒有倉庫權限：加入儲位、轉單都被拒；停用物料轉進倉整批不轉
+    [Fact]
+    public async Task 權限與停用物料()
+    {
+        var limited = await UserAsync(allWarehouses: false);
+        var me = await UserAsync();
+        var (w, c) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, limited, Ct));
+        Assert.Equal("warehouse.forbidden", await CodeAsync(() => Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, $"WH:LOC:{c}:A-01", 1m), limited, Ct))));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), limited, Ct));
+        Assert.Equal("warehouse.forbidden", await CodeAsync(() => Docs(s => s.CreateFromScanCartAsync(cart,
+            new ScanCartConvertInput(StockDocumentType.Inbound, w, PurchaseIn, [new ScanCartConvertLine(line, "A-01")], Guid.NewGuid()), limited, Ct))));
+
+        // 停用物料：可以放進購物車（出倉清空用），但轉進倉整批不轉
+        var inactive = await ItemCodeAsync(TrackingMode.None);
+        await DeactivateAsync(inactive);
+        var cart2 = await Carts(s => s.CreateAsync(null, me, Ct));
+        var ok = await Carts(s => s.AddAsync(cart2, new ScanCartAddInput(item, null, 1m), me, Ct));
+        var stopped = await Carts(s => s.AddAsync(cart2, new ScanCartAddInput(inactive, null, 1m), me, Ct));
+        var request = Guid.NewGuid();
+        Assert.Contains("第 2 行", await MessageAsync(() => Docs(s => s.CreateFromScanCartAsync(cart2, new ScanCartConvertInput(StockDocumentType.Inbound, w, PurchaseIn,
+            [new ScanCartConvertLine(ok, "A-01"), new ScanCartConvertLine(stopped, "A-01")], request), me, Ct))));
+        Assert.Equal(2, (await Carts(s => s.GetAsync(cart2, me, Ct)))!.Lines.Count);
+    }
+
+    // T-QC-10（審查 5、6）：送審又退回的購物車草稿不能刪（有審核紀錄）；資料庫不准把一般草稿改成購物車草稿
+    [Fact]
+    public async Task 刪除購物車草稿_送審退回不能刪_來源不可改()
+    {
+        var me = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), me, Ct));
+        var doc = await Docs(s => s.CreateFromScanCartAsync(cart,
+            new ScanCartConvertInput(StockDocumentType.Inbound, w, PurchaseIn, [new ScanCartConvertLine(line, "A-01")], Guid.NewGuid()), me, Ct));
+        await SetApprovalAsync(true);
+        try
+        {
+            await Docs(async s => await s.SubmitAsync(doc, await VersionAsync(doc), "key-" + Guid.NewGuid(), me, Ct));
+            await Docs(async s => await s.ReturnAsync(doc, await VersionAsync(doc), "數量不對", Manager, Ct));
+        }
+        finally
+        {
+            await SetApprovalAsync(false);
+        }
+        Assert.Contains("有審核紀錄", await MessageAsync(async () => await Docs(async s => await s.DeleteScanCartDraftAsync(doc, await VersionAsync(doc), me, Ct))));
+
+        var normal = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, w, new StockDocumentHeader(PurchaseIn, null, null, null), me, Ct));
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE stock_documents SET from_scan_cart = true WHERE id = {normal}", Ct));
+        Assert.Contains("單據來源不可修改", ex.Message);
+    }
+
+    private static async Task SetApprovalAsync(bool enabled)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        var service = new SettingsService(db, TimeProvider.System);
+        var current = await service.GetAsync(Ct);
+        if (current.DocumentApprovalEnabled != enabled)
+        {
+            await service.UpdateAsync(current, current with { DocumentApprovalEnabled = enabled }, new Actor(Guid.NewGuid(), "系統管理員", false), Ct);
+        }
+    }
+
+    private static async Task DeactivateAsync(string itemCode)
+    {
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        var id = await db.Items.Where(i => i.ItemCode == itemCode).Select(i => i.Id).SingleAsync(Ct);
+        var version = await db.Items.Where(i => i.Id == id).Select(i => EF.Property<uint>(i, "Version")).SingleAsync(Ct);
+        await new ItemWorkflowService(db, TimeProvider.System).DeactivateAsync(id, version, "測試停用", ItemManager, Ct);
+    }
+
     private static async Task InboundAsync(Guid warehouse, (string Location, string Item, decimal Qty) line, Actor actor)
     {
         var doc = await Docs(s => s.CreateAsync(StockDocumentType.Inbound, warehouse, new StockDocumentHeader(PurchaseIn, null, null, null), actor, Ct));
@@ -225,11 +317,11 @@ public class ScanCartTests
     private static string Suffix() => Guid.NewGuid().ToString("N")[..8];
 
     /// <summary>購物車擁有者必須是存在的帳號（外鍵）。</summary>
-    private static async Task<Actor> UserAsync()
+    private static async Task<Actor> UserAsync(bool allWarehouses = true)
     {
         var name = "qc" + Suffix();
         await using var db = MigratedDatabaseFixture.CreateContext();
-        var user = new AppUser { Id = Guid.NewGuid(), UserName = name, NormalizedUserName = name.ToUpperInvariant(), DisplayName = name, SecurityStamp = Guid.NewGuid().ToString() };
+        var user = new AppUser { Id = Guid.NewGuid(), UserName = name, NormalizedUserName = name.ToUpperInvariant(), DisplayName = name, SecurityStamp = Guid.NewGuid().ToString(), AllWarehouses = allWarehouses };
         db.Users.Add(user);
         await db.SaveChangesAsync(Ct);
         return new Actor(user.Id, name, false);

@@ -21,6 +21,8 @@ namespace Warehouse.Web.Pages.Quick;
 /// 移庫目的、批號／序號。送出時整批轉成一張草稿（同一交易、規則與手動加行相同），轉到單據頁確認過帳。
 /// </summary>
 [Authorize(Policy = Policies.DocumentEdit)]
+// 每行最多 7 個欄位 × 500 行（ScanCart.MaxLines）＋表頭：預設 1024 個欄位不夠（審查 3）
+[RequestFormLimits(ValueCountLimit = ScanCart.MaxLines * 8 + 100)]
 public partial class ConvertModel(
     IScanCartService carts, IStockDocumentService documents, IWarehouseService warehouses, IDocumentMasterDataService master,
     ISettingsService settings, IUserPreferenceService preferences) : PageModel

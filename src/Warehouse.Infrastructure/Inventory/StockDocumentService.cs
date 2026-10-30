@@ -273,8 +273,16 @@ public sealed class StockDocumentService(
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             // 鎖購物車：同一台在別的裝置同時轉單或修改時，後到的等前一個完成（之後找不到購物車）
             await ExecuteAsync(db, "SELECT 1 FROM scan_carts WHERE id = @id FOR UPDATE", cancellationToken, Param("id", cartId));
-            var cart = await db.ScanCarts.Include(c => c.Lines).SingleOrDefaultAsync(c => c.Id == cartId && c.OwnerId == actor.Id, cancellationToken)
-                ?? throw new NotFoundException("scan_cart.not_found", "找不到購物車（可能已在其他裝置轉成單據或放棄）。");
+            var cart = await db.ScanCarts.Include(c => c.Lines).SingleOrDefaultAsync(c => c.Id == cartId && c.OwnerId == actor.Id, cancellationToken);
+            if (cart is null)
+            {
+                // 同一個轉單請求送了兩次：後到的等鎖結束後購物車已刪除，回傳先到的那張（審查 4）
+                if (await SameRequestAsync(input.RequestId, actor, cancellationToken))
+                {
+                    return input.RequestId;
+                }
+                throw new NotFoundException("scan_cart.not_found", "找不到購物車（可能已在其他裝置轉成單據或放棄）。");
+            }
             if (cart.Lines.Count == 0)
             {
                 throw new DomainRuleException("購物車是空的。");
@@ -358,15 +366,30 @@ public sealed class StockDocumentService(
         {
             throw new DomainRuleException("這張單有附件，不能刪除；請改用取消。");
         }
-        // 曾送審又退回的單有預留紀錄（已釋放）指向它：保留歷史，不刪
-        if (await db.StockReservations.AnyAsync(r => r.ReferenceType == ReservationReference && r.ReferenceId == id, cancellationToken))
+        // 曾送審（又退回）的單有審核歷程（退回意見、送審命令、預留紀錄）指向它：保留歷史，不刪（審查 6）
+        if (doc.ReturnComment is not null
+            || await db.ProcessedCommands.AnyAsync(p => p.ResultRef == id.ToString(), cancellationToken)
+            || await db.StockReservations.AnyAsync(r => r.ReferenceType == ReservationReference && r.ReferenceId == id, cancellationToken))
         {
-            throw new DomainRuleException("這張單曾送審並建立過預留紀錄，不能刪除；請改用取消。");
+            throw new DomainRuleException("這張單曾送審，有審核紀錄，不能刪除；請改用取消。");
         }
         var now = clock.GetUtcNow();
-        // 稽核紀錄保留（單據本身不留）：日後查得到誰在何時刪了哪個單號
-        AuditLog.Add(db, actor, now, "document.delete_scan_cart_draft", "stock_document", doc.Id.ToString(), null,
-            new { doc.DocNo, DocType = doc.DocType.ToString(), Lines = doc.Lines.Count });
+        // 稽核紀錄保留（單據本身不留）：日後查得到誰在何時刪了哪個單號、原本有哪些明細（審查 7）
+        var itemIds = doc.Lines.Where(l => l.ItemId is not null).Select(l => l.ItemId!.Value).Distinct().ToList();
+        var locationIds = doc.Lines.Select(l => l.LocationId).Concat(doc.Lines.Where(l => l.TargetLocationId is not null).Select(l => l.TargetLocationId!.Value)).Distinct().ToList();
+        var itemCodes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.ItemCode, cancellationToken);
+        var locationCodes = await db.Locations.AsNoTracking().Where(l => locationIds.Contains(l.Id)).ToDictionaryAsync(l => l.Id, l => l.Code, cancellationToken);
+        AuditLog.Add(db, actor, now, "document.delete_scan_cart_draft", "stock_document", doc.Id.ToString(), null, new
+        {
+            doc.DocNo, DocType = doc.DocType.ToString(), doc.PurposeId,
+            Lines = doc.Lines.OrderBy(l => l.LineNo).Select(l => new
+            {
+                ItemCode = l.ItemId is { } i ? itemCodes.GetValueOrDefault(i) : null,
+                Location = locationCodes.GetValueOrDefault(l.LocationId),
+                Target = l.TargetLocationId is { } t ? locationCodes.GetValueOrDefault(t) : null,
+                l.LotNo, l.SerialNo, l.Quantity,
+            }).ToList(),
+        });
         db.StockDocuments.Remove(doc);
         await SaveAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

@@ -17,7 +17,8 @@
 }
 
 @* 掃碼階段（quick-cart.js）：結果訊息在掃碼框正下方；沒有 JS 時只能用下方每行的表單修改 *@
-<div class="panel scan-panel" id="quick-cart" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })">
+<div class="panel scan-panel" id="quick-cart" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })"
+     data-lines-url="@Url.Page("/Quick/Cart", "Lines", new { id = c.Id })">
     <div class="scan-bar">
         <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
                enterkeyhint="done" maxlength="200" placeholder="掃物料或儲位 QR，或輸入料號後按 Enter" aria-label="掃碼輸入" />
