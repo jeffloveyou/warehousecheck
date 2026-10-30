@@ -34,6 +34,7 @@
       var fresh = template.content.querySelector('[data-scan-result]');
       var old = document.querySelector('[data-scan-result]');
       if (!fresh || !old) throw new Error('查詢結果格式不正確');
+      if (window.WhCameraField) window.WhCameraField.release(old); // 登錄欄的相機開著：先關掉再換
       old.parentNode.replaceChild(fresh, old);
       if (window.WhCameraField) window.WhCameraField.enhance(fresh); // 新結果區的登錄欄也要有相機按鈕
       history.replaceState(null, '', url);

@@ -150,7 +150,7 @@ export async function createDecoder(options) {
           switching = fallbackDecoder().then(function (next) {
             current = next;
             if (options && options.onSwitch) options.onSwitch(next.name);
-          }).finally(function () { switching = null; failures = 0; });
+          }).catch(function () { /* WASM 與 jsQR 都載不到：繼續用內建解碼器 */ }).finally(function () { switching = null; failures = 0; });
         }
         throw e;
       }

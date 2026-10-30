@@ -52,6 +52,7 @@ public partial class StocktakePagesTests
         // 實盤輸入欄有相機按鈕：儲位限本盤點單的倉庫，批號／序號填原文（只填值，不自動記錄）
         Assert.Contains($"data-camera-field=\"location\" data-camera-warehouse=\"{w}\"", page);
         Assert.Equal(2, Regex.Matches(page, "data-camera-field=\"raw\"").Count);
+        Assert.Contains("data-camera-field=\"item\" data-camera-allow-inactive", page); // 停用物料仍可盤點（與手打一致）
         Assert.Contains("/js/camera-field.js", page);
         var count = await counter.PostFormAsync(url, url + "?handler=Count", new Dictionary<string, string>
         {

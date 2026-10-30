@@ -492,6 +492,19 @@ await camMulti.ScreenshotAsync(new() { Path = Path.Combine(shots, "4-camera-fiel
 await camMulti.ClickAsync(".camera-field-box button");
 Check(await camMulti.EvaluateAsync<bool>("() => document.body.dataset.trackState === 'ended'"), "多碼入鏡：停止相機釋放鏡頭");
 
+// 12h2. 查料頁：登錄欄的相機開著（空白畫面，一直掃不到），條碼槍查下一筆換掉結果區 → 相機要關掉、畫面不留在頁面外
+var blankFrame = await FrameAsync("frame-blank");
+var camBlank = await CameraPageAsync(blankFrame);
+await camBlank.GotoAsync(baseUrl + "/Scan");
+await ScanAsync(camBlank, "UNKNOWN4" + suffix);
+await camBlank.WaitForSelectorAsync("#RegisterItemCode + .camera-field-button");
+await camBlank.ClickAsync("#RegisterItemCode + .camera-field-button");
+Check(await WaitForAsync(camBlank, "() => document.body.dataset.cameraState === '掃描中'"), "查料頁：登錄欄相機開啟");
+await camBlank.FocusAsync("#scan-input");
+await ScanAsync(camBlank, "WH:ITEM:" + itemCodes[2]);
+await camBlank.WaitForSelectorAsync("[data-scan-result][data-kind='Item']");
+Check(await WaitForAsync(camBlank, "() => document.body.dataset.trackState === 'ended'", 5000), "查料頁：結果區被換掉時，登錄欄的相機一起關掉（釋放鏡頭）");
+
 // 12h. 手機寬 390：有相機按鈕的頁面不可水平捲動
 var camMobile = await LoginAsync(390, cameraBrowsers[0]);
 foreach (var url in new[] { "/Search", "/Stock", "/Items/Create", "/Reservations" })

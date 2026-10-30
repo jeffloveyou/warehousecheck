@@ -38,9 +38,12 @@
   // 回傳是否成功；失敗時欄位保留原文、訊息說明原因
   async function resolveItem(input, value, opts) {
     opts = opts || {};
+    var before = input.value;
     try {
       var res = await fetch('/api/scan?code=' + encodeURIComponent(value), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
       var body = res.ok && (res.headers.get('Content-Type') || '').indexOf('json') >= 0 ? await res.json() : null;
+      // 等回應期間使用者改了欄位（例如相機還在查、先手打了別的料號）：晚到的結果不蓋掉
+      if (input.value !== before) return false;
       var item = body && body.kind === 'Item' ? body.item : null;
       if (item && (item.isActive || opts.allowInactive) && (item.packQuantity === 1 || opts.allowPack)) {
         input.value = item.itemCode;

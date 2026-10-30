@@ -172,6 +172,13 @@
   }
 
   function applyRaw(input, text, format) {
+    // 本系統的物料／儲位 QR 不是包裝上的原廠條碼（伺服器也會拒絕登錄）：提示、不改索引類型
+    if (/^WH:/i.test(text)) {
+      input.value = text;
+      show(input, 'bad', '「' + text + '」是本系統的物料或儲位 QR，不是包裝上的原廠條碼，請改掃包裝條碼。');
+      feedback('error');
+      return;
+    }
     var note = '';
     var kindSelect = input.getAttribute('data-camera-kind-select') && document.getElementById(input.getAttribute('data-camera-kind-select'));
     if (kindSelect && kindSelect.value !== 'Barcode') {
@@ -240,6 +247,16 @@
     open(input);
   });
 
-  window.WhCameraField = { enhance: enhance };
+  // 某個區塊要被整塊換掉（/Scan 查料換結果區）前呼叫：相機正掃這個區塊裡的欄位就關掉，相機畫面搬出來，
+  // 不然畫面被移除後鏡頭還開著、看不到「停止相機」
+  function release(root) {
+    if (!box || !root.contains(box)) return;
+    if (activeInput && camera) camera.stop();
+    session++;
+    hideBox();
+    document.body.appendChild(box);
+  }
+
+  window.WhCameraField = { enhance: enhance, release: release };
   enhance(document);
 })();

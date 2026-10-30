@@ -42,7 +42,7 @@
                    data-camera-field="location" data-camera-warehouse="@d.WarehouseId" />
             <label for="Count_ItemCode">料號</label>
             <input type="text" id="Count_ItemCode" name="Count.ItemCode" value="" autocomplete="off" required autofocus="@(Model.Count.LocationCode.Length > 0)"
-                   data-camera-field="item" />
+                   data-camera-field="item" data-camera-allow-inactive />
             <label for="Count_LotNo">批號</label>
             <input type="text" id="Count_LotNo" name="Count.LotNo" autocomplete="off" placeholder="批號管理的物料才填" data-camera-field="raw" />
             <label for="Count_SerialNo">序號</label>
