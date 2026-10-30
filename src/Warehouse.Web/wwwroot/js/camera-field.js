@@ -45,6 +45,7 @@
   var working = Promise.resolve(); // 掃到的結果依序處理（解析要等伺服器）
   var lastFocused = new WeakMap();  // 表單 → 最後點選的相機欄位
   var groupItem = new WeakMap();    // 表單 → 最後解析到的物料（決定批號／序號要不要跳）
+  var filling = false;              // 相機自己填值時觸發的 input 事件不算「人改了」
 
   function groupOf(input) { return input.form || input.closest('form') || document.body; }
   function visible(el) { return el.isConnected && el.getClientRects().length > 0 && !el.disabled; }
@@ -143,6 +144,7 @@
     stopButton.textContent = '停止相機';
     stopButton.addEventListener('click', function () {
       var input = target;
+      session++; // 停止後還在等伺服器的結果不再填值（審查 4）
       forgetReopen();
       if (camera) camera.stop();
       hideBox();
@@ -213,8 +215,9 @@
       },
       onResult: function (text, ms, format) {
         if (mine !== session) return;
-        var input = target;
+        // 輪到它處理時才讀當前欄：前一筆解析完跳欄後，下一筆填進跳過去的欄位（審查 5）
         working = working.then(function () {
+          var input = target;
           if (mine !== session || !input || !input.isConnected) return undefined;
           return apply(group, input, clean(text), format);
         }).catch(function () { /* 單筆失敗已在欄位下方提示 */ });
@@ -351,24 +354,45 @@
       feedback('error');
       return false;
     }
-    var counted = qtyInput ? Number(qtyInput.value || 0) : 0;
-    var sameItem = input.value.trim() === item.itemCode;
-    if (qmode === 'each' && counted > 0 && !sameItem) {
-      show(input, 'bad', '數量已累加 ' + counted + '（' + input.value.trim() + '），掃到的是另一個物料 ' + item.itemCode + '，沒有填入；請先按記錄／建立。');
+    // 數量欄只能是一筆序號（盤點）：序號物料的外箱條碼不收
+    var serialOne = qtyInput && qtyInput.hasAttribute('data-camera-serial-one') && item.trackingMode === 'Serial';
+    if (serialOne && pack !== 1) {
+      show(input, 'bad', '序號管理的物料一行只能是一個序號，請掃單件條碼，不要掃外箱條碼。');
       feedback('error');
       return false;
     }
-    input.value = item.itemCode;
-    input.dataset.resolved = item.itemCode;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dataset.resolved = item.itemCode; // input 事件會清掉 scan-field.js 的標記，再設一次（鍵盤 Enter 不必重查）
-    groupItem.set(group, item);
-    var qtyNote = '';
-    if (qtyInput) {
-      if (item.trackingMode === 'Serial') qtyInput.value = '1';
-      else if (qmode === 'pack') qtyInput.value = String(pack);
-      else if (qmode === 'each') qtyInput.value = String((sameItem ? counted : 0) + pack);
-      if (qmode !== 'manual' || item.trackingMode === 'Serial') qtyNote = '　數量 ' + qtyInput.value;
+    var counted = qtyInput ? Number(qtyInput.value || 0) : 0;
+    // 「目前累加的物料」只認相機填的標記，且料號欄現值也要相同：手改或條碼槍換了料號、手改了數量，都不算同一物料（審查 1）
+    var countedItem = qtyInput ? qtyInput.dataset.cameraItem || '' : '';
+    var sameItem = countedItem === item.itemCode && input.value.trim() === item.itemCode;
+    if (qmode === 'each' && counted > 0 && !sameItem) {
+      show(input, 'bad', '數量已有 ' + counted + (countedItem ? '（' + countedItem + '）' : '（手動輸入）') + '，掃到的是 ' + item.itemCode + '，沒有填入；請先按記錄／建立，或清空數量再掃。');
+      feedback('error');
+      return false;
+    }
+    filling = true;
+    try {
+      input.value = item.itemCode;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dataset.resolved = item.itemCode; // input 事件會清掉 scan-field.js 的標記，再設一次（鍵盤 Enter 不必重查）
+      groupItem.set(group, item);
+      var qtyNote = '';
+      if (qtyInput) {
+        var places = Number(item.decimalPlaces) || 0;
+        var round = function (n) { return String(Number(n.toFixed(places))); }; // 小數包裝量累加不留浮點誤差（審查 7）
+        if (serialOne) qtyInput.value = '1';
+        else if (qmode === 'pack') qtyInput.value = round(pack);
+        else if (qmode === 'each') qtyInput.value = round((sameItem ? counted : 0) + pack);
+        else if (countedItem && countedItem !== item.itemCode) qtyInput.value = ''; // 換物料：清掉相機帶的舊數量（審查 3）
+        if (qmode !== 'manual' || serialOne) {
+          qtyInput.dataset.cameraItem = item.itemCode;
+          qtyNote = '　數量 ' + qtyInput.value;
+        } else {
+          delete qtyInput.dataset.cameraItem;
+        }
+      }
+    } finally {
+      filling = false;
     }
     show(input, 'ok', item.itemCode + ' ' + item.name + '（單位 ' + item.unitCode + '，' + (TRACKING[item.trackingMode] || item.trackingMode)
       + (pack !== 1 ? '，外箱條碼一次 ' + pack + ' ' + item.unitCode : '') + (item.isActive ? '' : '，已停用') + '）' + qtyNote);
@@ -472,8 +496,19 @@
 
   // 相機開著時送出表單（人按記錄／建立）：重新載入後自動重開
   document.addEventListener('submit', function (ev) {
+    if (ev.defaultPrevented) return; // 被其他程式擋下的送出不算（審查 6）
     if (activeGroup && ev.target === activeGroup && camera && camera.isRunning()) rememberReopen(activeGroup);
-  }, true);
+  });
+
+  // 人改了料號欄或數量欄（手打、條碼槍）：數量不再算是相機累加的
+  document.addEventListener('input', function (ev) {
+    if (filling) return;
+    var el = ev.target;
+    if (!el || el.tagName !== 'INPUT') return;
+    var qtyId = el.getAttribute('data-camera-qty');
+    var qty = qtyId ? document.getElementById(qtyId) : (el.id && document.querySelector('input[data-camera-qty="' + el.id + '"]') ? el : null);
+    if (qty) delete qty.dataset.cameraItem;
+  });
 
   // 某個區塊要被整塊換掉（/Scan 查料換結果區）前呼叫：相機正掃這個區塊裡的表單就關掉，相機畫面搬出來，
   // 不然畫面被移除後鏡頭還開著、看不到「停止相機」

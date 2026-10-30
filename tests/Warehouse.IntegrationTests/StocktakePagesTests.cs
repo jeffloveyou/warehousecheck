@@ -55,6 +55,8 @@ public partial class StocktakePagesTests
         Assert.Contains("data-camera-field=\"item\" data-camera-allow-inactive data-camera-qty=\"Count_Quantity\"", page); // 停用物料仍可盤點（與手打一致）
         Assert.Contains("data-camera-qty-mode=\"stocktake.qtyMode\"", page);
         Assert.Contains("data-camera-tracking=\"Lot\"", page);
+        Assert.Contains("data-camera-tracking=\"Serial\"", page);
+        Assert.Contains("data-camera-serial-one", page); // 盤點一行一個序號；預留不強制 1
         Assert.Contains("/js/camera-field.js", page);
         var count = await counter.PostFormAsync(url, url + "?handler=Count", new Dictionary<string, string>
         {

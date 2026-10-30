@@ -508,7 +508,8 @@ await stub.Context.RouteAsync(new Regex(@"/js/camera-scan\.js"), route => route.
 async Task FakeScanAsync(string text)
 {
     await stub.EvaluateAsync("(t) => window.__fakeScan(t)", text);
-    await stub.WaitForTimeoutAsync(600); // 等 /api/scan 回來
+    await stub.WaitForLoadStateAsync(LoadState.NetworkIdle); // 等 /api/scan 回來（舊電腦也不靠固定秒數）
+    await stub.WaitForTimeoutAsync(100);
 }
 async Task<string> InfoAsync(string id) => await stub.InnerTextAsync($"#{id} + .scan-field-info");
 
@@ -516,7 +517,7 @@ async Task<string> InfoAsync(string id) => await stub.InnerTextAsync($"#{id} + .
 await stub.GotoAsync(baseUrl + "/Stocktakes/Details/" + stocktakeId);
 await stub.SelectOptionAsync("#stocktake-qty-mode", "manual");
 await stub.ClickAsync("#stocktake-count-form .camera-field-open");
-Check(await stub.EvaluateAsync<bool>("() => window.__stubContinuous === true"), "表單相機以連續模式開啟");
+Check(await WaitForAsync(stub, "() => window.__stubContinuous === true", 5000), "表單相機以連續模式開啟");
 Check(await stub.EvaluateAsync<string>("() => document.activeElement.id") == "Count_LocationCode", "盤點：相機從第一個空白欄（儲位）開始");
 await FakeScanAsync(Ean);
 Check(await stub.InputValueAsync("#Count_LocationCode") == "" && (await InfoAsync("Count_LocationCode")).Contains("這一欄是「儲位」"), "盤點：儲位欄掃到物料 → 不填、在儲位欄下方提示");
@@ -542,6 +543,12 @@ Check(await stub.InputValueAsync("#Count_ItemCode") == eanItem && await stub.Inp
     "盤點（逐件累加）：掃到別的物料不填，提示先按記錄");
 await FakeScanAsync(boxBarcode);
 Check(await stub.InputValueAsync("#Count_Quantity") == "3", "盤點（逐件累加）：別的物料的外箱條碼也不累加");
+// 審查 1：人把料號改成 B（手打），再掃 B → 不能把 A 累加的 3 算到 B
+await stub.FillAsync("#Count_ItemCode", itemCodes[3]);
+await stub.FocusAsync("#Count_ItemCode");
+await FakeScanAsync("WH:ITEM:" + itemCodes[3]);
+Check(await stub.InputValueAsync("#Count_Quantity") == "3" && (await InfoAsync("Count_ItemCode")).Contains("沒有填入"),
+    "盤點（逐件累加）：手改料號後再掃，不把前一個物料的數量算進去");
 
 // 帶入包裝量：外箱條碼帶 12
 await stub.SelectOptionAsync("#stocktake-qty-mode", "pack");
@@ -559,6 +566,21 @@ Check(await WaitForAsync(stub, Running, 5000) && await stub.EvaluateAsync<string
 await stub.ClickAsync(".camera-field-stop");
 await stub.ReloadAsync();
 Check(!await stub.EvaluateAsync<bool>(Running), "按停止相機後重新整理不會自動開相機");
+
+// 建立預留：帶入包裝量（外箱 12）；逐件累加序號物料（預留可一次多件，不強制 1）；都不自動送出
+await stub.GotoAsync(baseUrl + "/Reservations");
+await stub.SelectOptionAsync("#reservation-qty-mode", "pack");
+await stub.ClickAsync("#reservation-create-form .camera-field-open");
+await FakeScanAsync(boxBarcode);
+Check(await stub.InputValueAsync("#Create_ItemCode") == itemCodes[1] && await stub.InputValueAsync("#Create_Quantity") == "12", "預留（帶入包裝量）：外箱條碼填料號、數量 12");
+await stub.SelectOptionAsync("#reservation-qty-mode", "each");
+await stub.FillAsync("#Create_ItemCode", "");
+await stub.FillAsync("#Create_Quantity", "");
+await stub.FocusAsync("#Create_ItemCode");
+for (var n = 0; n < 3; n++) await FakeScanAsync("WH:ITEM:" + serialCode);
+Check(await stub.InputValueAsync("#Create_Quantity") == "3", "預留（逐件累加）：序號物料掃 3 次，數量 3（目前 " + await stub.InputValueAsync("#Create_Quantity") + "）");
+Check(stub.Url.EndsWith("/Reservations", StringComparison.Ordinal), "預留：相機不會自動送出建立");
+await stub.ClickAsync(".camera-field-stop");
 
 // 物料提出：條碼列連掃，沒有空白列就新增；同一個碼不重複；本系統 QR 不收
 await stub.GotoAsync(baseUrl + "/Items/Create");
