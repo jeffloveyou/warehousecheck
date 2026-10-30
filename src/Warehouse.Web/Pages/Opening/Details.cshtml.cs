@@ -211,6 +211,13 @@ public class DetailsModel(
             return "已送出，等待倉庫主管核准。";
         }, cancellationToken);
 
+    public Task<IActionResult> OnPostConfirmAsync(Guid id, CancellationToken cancellationToken) =>
+        RunAsync(id, Policies.OpeningEdit, async actor =>
+        {
+            await openings.ConfirmAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
+            return "已確認並過帳。";
+        }, cancellationToken);
+
     public Task<IActionResult> OnPostCancelAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.OpeningEdit, async actor =>
         {

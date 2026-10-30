@@ -88,10 +88,22 @@
         <p class="muted">尚未清點的儲位（前 @Model.Uncounted.Count 個）：@string.Join("、", Model.Uncounted.Select(u => u.LocationCode))</p>
     }
     <div class="actions">
-        <form method="post" asp-page-handler="Submit" class="inline">
-            <input type="hidden" name="Version" value="@Model.Version" />
-            <button type="submit" id="opening-submit">送出核准</button>
-        </form>
+        @if (Model.LineSettings.OpeningApprovalEnabled)
+        {
+            <form method="post" asp-page-handler="Submit" class="inline">
+                <input type="hidden" name="Version" value="@Model.Version" />
+                <button type="submit" id="opening-submit">送出核准</button>
+            </form>
+        }
+        else
+        {
+            @* 期初審核關閉（M12）：確認即過帳，儲位標記為已清點、之後不能再做期初 *@
+            <form method="post" asp-page-handler="Confirm" class="inline">
+                <input type="hidden" name="Version" value="@Model.Version" />
+                <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+                <button type="submit" id="opening-confirm">確認過帳</button>
+            </form>
+        }
         <form method="post" asp-page-handler="Cancel" class="inline">
             <input type="hidden" name="Version" value="@Model.Version" />
             <button type="submit" class="secondary" id="opening-cancel">取消這張單</button>

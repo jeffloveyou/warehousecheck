@@ -64,12 +64,22 @@
 }
 
 <div class="panel">
-    @if (Model.CanCount)
+    @if (Model.CanCount && Model.ApprovalEnabled)
     {
         <form method="post" asp-page-handler="Submit" asp-route-id="@d.Id" class="inline">
             <input type="hidden" name="Version" value="@Model.Version" />
             <button type="submit" id="stocktake-submit">送審</button>
         </form>
+    }
+    else if (Model.CanCount)
+    {
+        @* 盤點審核關閉（M12）：確認即產生調整單並過帳，不經主管核准 *@
+        <form method="post" asp-page-handler="Confirm" asp-route-id="@d.Id" class="inline">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+            <button type="submit" id="stocktake-confirm">確認盤點（有差異時調整庫存）</button>
+        </form>
+        <span class="muted">盤點不需審核：確認後依差異（@d.DifferenceCount 行）直接調整庫存。</span>
     }
     @if (Model.CanManage && d.Status is StocktakeStatus.Counting or StocktakeStatus.Submitted)
     {

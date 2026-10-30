@@ -5,6 +5,7 @@ using Warehouse.Api.Authorization;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
+using Warehouse.Application.Settings;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
 
@@ -17,7 +18,7 @@ namespace Warehouse.Web.Pages.Stocktakes;
 /// - 待核准：倉庫主管看差異（快照、計數當下帳面、期間異動、實盤），勾選要重盤的行退回，或核准產生調整單。
 /// 盲盤時由服務決定不回傳帳面量（畫面只是照著顯示）。核准帶開頁時產生的冪等鍵，重送不會重複調整。
 /// </summary>
-public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService authorization) : PageModel
+public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService authorization, ISettingsService settings) : PageModel
 {
     [BindProperty(SupportsGet = true)]
     public string? Loc { get; set; }
@@ -51,6 +52,9 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
     public bool CanCount { get; private set; }
 
     public bool CanManage { get; private set; }
+
+    /// <summary>盤點審核（M12）：關閉時盤點中的人直接「確認盤點」產生調整單，不經送審。</summary>
+    public bool ApprovalEnabled { get; private set; } = true;
 
     public string? Error { get; private set; }
 
@@ -103,6 +107,13 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
         {
             await stocktakes.SubmitAsync(id, Version, actor, cancellationToken);
             return "已送審，等待倉庫主管核准。";
+        }, cancellationToken);
+
+    public Task<IActionResult> OnPostConfirmAsync(Guid id, CancellationToken cancellationToken) =>
+        RunAsync(id, Policies.StocktakeCount, async actor =>
+        {
+            var adjustment = await stocktakes.ConfirmAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
+            return adjustment is null ? "已確認盤點，沒有差異（不產生調整單）。" : "已確認盤點，調整單已過帳。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostRecountAsync(Guid id, CancellationToken cancellationToken) =>
@@ -172,6 +183,7 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
         Version = doc.Version;
         CanCount = doc.Status == StocktakeStatus.Counting && (await authorization.AuthorizeAsync(User, Policies.StocktakeCount)).Succeeded;
         CanManage = (await authorization.AuthorizeAsync(User, Policies.StocktakeManage)).Succeeded;
+        ApprovalEnabled = (await settings.GetAsync(cancellationToken)).StocktakeApprovalEnabled;
         return true;
     }
 }

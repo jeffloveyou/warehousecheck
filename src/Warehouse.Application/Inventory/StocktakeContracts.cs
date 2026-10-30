@@ -74,4 +74,10 @@ public interface IStocktakeService
 
     /// <summary>核准：有差異時產生並過帳調整單（回傳調整單 ID；沒有差異回傳 null）。同一冪等鍵重送不會重複調整。</summary>
     Task<Guid?> ApproveAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 盤點審核關閉時（M12，ADR-0027）：有盤點權限的人從盤點中直接確認（＝送審＋核准），調整單過帳與 <see cref="ApproveAsync"/> 相同。
+    /// 審核開啟時拒絕（請送審）。
+    /// </summary>
+    Task<Guid?> ConfirmAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
 }

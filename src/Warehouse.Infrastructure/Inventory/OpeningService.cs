@@ -26,6 +26,9 @@ public sealed class OpeningService(
 {
     private const string CommandType = "opening.approve";
 
+    /// <summary>審核關閉時直接過帳（M12）；冪等紀錄與稽核都用這個名稱，與核准分開。</summary>
+    private const string ConfirmCommandType = "opening.confirm";
+
     public async Task<PagedResult<OpeningRow>> ListAsync(
         Guid? warehouseId, StockDocumentStatus? status, int page, CancellationToken cancellationToken)
     {
@@ -155,10 +158,14 @@ public sealed class OpeningService(
         });
 
     public Task SubmitAsync(Guid documentId, uint expectedVersion, Actor actor, CancellationToken cancellationToken) =>
-        MutateAsync(documentId, expectedVersion, actor, editorOnly: true, cancellationToken, (doc, now) =>
+        MutateAsync(documentId, expectedVersion, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
+            if (!(await settings.GetAsync(cancellationToken)).OpeningApprovalEnabled)
+            {
+                throw new ConflictException("opening.approval_disabled", "系統未開啟期初審核，請直接按「確認過帳」。");
+            }
             doc.Submit(now);
-            return Task.FromResult<(string, object?)>(("opening.submit", null));
+            return ("opening.submit", (object?)null);
         });
 
     public Task ReturnAsync(Guid documentId, uint expectedVersion, string comment, Actor actor, CancellationToken cancellationToken) =>
@@ -188,26 +195,37 @@ public sealed class OpeningService(
     /// </summary>
     public async Task ApproveAsync(
         Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken)
+        => await PostWithRetryMessageAsync(documentId, expectedVersion, idempotencyKey, actor, confirm: false, cancellationToken);
+
+    /// <summary>期初審核關閉時，草稿直接過帳（M12）。步驟與 <see cref="ApproveAsync"/> 相同，只差狀態檢查與權限。</summary>
+    public async Task ConfirmAsync(
+        Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken)
+        => await PostWithRetryMessageAsync(documentId, expectedVersion, idempotencyKey, actor, confirm: true, cancellationToken);
+
+    private async Task PostWithRetryMessageAsync(
+        Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, bool confirm, CancellationToken cancellationToken)
     {
         try
         {
-            await ApproveCoreAsync(documentId, expectedVersion, idempotencyKey, actor, cancellationToken);
+            await PostCoreAsync(documentId, expectedVersion, idempotencyKey, actor, confirm, cancellationToken);
         }
         catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.DeadlockDetected
             or PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.LockNotAvailable)
         {
             // 同時有其他人在處理相同的儲位、批號或序號；交易已回滾，重試即可
-            throw new ConcurrencyConflictException("opening.busy", "有其他人同時在處理相同的儲位或批號，請稍後再按一次核准。");
+            throw new ConcurrencyConflictException("opening.busy",
+                $"有其他人同時在處理相同的儲位或批號，請稍後再按一次{(confirm ? "確認過帳" : "核准")}。");
         }
     }
 
-    private async Task ApproveCoreAsync(
-        Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken)
+    private async Task PostCoreAsync(
+        Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, bool confirm, CancellationToken cancellationToken)
     {
+        var commandType = confirm ? ConfirmCommandType : CommandType;
         var key = DocumentSupport.NormalizeKey(idempotencyKey);
         // 內容含操作者：別人拿同一個鍵送同一張單，不會被當成「自己已經做過」（M3-03 審查 #5）
-        var requestHash = DocumentSupport.Hash($"{CommandType}|{documentId}|{expectedVersion}|{actor.Id}");
-        if (await DocumentSupport.AlreadyProcessedAsync(db, key, CommandType, requestHash, cancellationToken))
+        var requestHash = DocumentSupport.Hash($"{commandType}|{documentId}|{expectedVersion}|{actor.Id}");
+        if (await DocumentSupport.AlreadyProcessedAsync(db, key, commandType, requestHash, cancellationToken))
         {
             return;
         }
@@ -216,15 +234,28 @@ public sealed class OpeningService(
         // 等鎖最多 5 秒，不無限等待（逾時轉成「請稍後再試」）
         await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
-        if (await DocumentSupport.AlreadyProcessedAsync(db, key, CommandType, requestHash, cancellationToken))
+        if (await DocumentSupport.AlreadyProcessedAsync(db, key, commandType, requestHash, cancellationToken))
         {
             return;
         }
         var doc = await LoadAsync(documentId, expectedVersion, actor, cancellationToken);
-        RequireWarehouseManager(actor);
         var now = clock.GetUtcNow();
-        var allowSelfApprove = (await settings.GetAsync(cancellationToken)).AllowSelfApproveOpening;
-        doc.MarkPosted(actor.Id, actor.Name, allowSelfApprove, now); // 先檢查狀態與自核，失敗就不做後面的事
+        var current = await settings.GetAsync(cancellationToken);
+        if (confirm)
+        {
+            if (current.OpeningApprovalEnabled)
+            {
+                throw new ConflictException("opening.approval_required", "系統已開啟期初審核，請送審，由倉庫主管核准後過帳。");
+            }
+            RequireEditor(doc, actor);
+            doc.PostDirect(actor.Id, actor.Name, now); // 先檢查狀態，失敗就不做後面的事
+        }
+        else
+        {
+            // 送審後才關閉審核的單，仍由主管核准（不檢查目前的審核開關）
+            RequireWarehouseManager(actor);
+            doc.MarkPosted(actor.Id, actor.Name, current.AllowSelfApproveOpening, now); // 先檢查狀態與自核，失敗就不做後面的事
+        }
 
         var locationIds = doc.Lines.Select(l => l.LocationId).Distinct().OrderBy(id => id).ToArray();
         var locations = await QueryAsync(db,
@@ -299,9 +330,9 @@ public sealed class OpeningService(
         await ExecuteAsync(db, "UPDATE locations SET opening_document_id = @doc WHERE id = ANY(@ids)",
             cancellationToken, Param("doc", doc.Id), Param("ids", locationIds));
 
-        AuditLog.Add(db, actor, now, "opening.approve", "stock_document", doc.Id.ToString(), null,
+        AuditLog.Add(db, actor, now, commandType, "stock_document", doc.Id.ToString(), null,
             new { doc.DocNo, Lines = doc.Lines.Count, Locations = locationIds.Length });
-        db.ProcessedCommands.Add(ProcessedCommand.Create(key, CommandType, requestHash, doc.Id.ToString(), now));
+        db.ProcessedCommands.Add(ProcessedCommand.Create(key, commandType, requestHash, doc.Id.ToString(), now));
         await SaveAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
@@ -314,9 +345,9 @@ public sealed class OpeningService(
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
         var doc = await LoadAsync(documentId, expectedVersion, actor, cancellationToken);
-        if (editorOnly && !actor.IsWarehouseManager && doc.CreatedById != actor.Id)
+        if (editorOnly)
         {
-            throw new PermissionDeniedException("opening.permission_denied", "只有建立者或倉庫主管可以修改這張期初單。");
+            RequireEditor(doc, actor);
         }
         var now = clock.GetUtcNow();
         var (name, after) = await action(doc, now);
@@ -367,6 +398,14 @@ public sealed class OpeningService(
             throw new DomainRuleException($"儲位 {code} 已經做過期初。");
         }
         return location;
+    }
+
+    private static void RequireEditor(StockDocument doc, Actor actor)
+    {
+        if (!actor.IsWarehouseManager && doc.CreatedById != actor.Id)
+        {
+            throw new PermissionDeniedException("opening.permission_denied", "只有建立者或倉庫主管可以修改這張期初單。");
+        }
     }
 
     private async Task SaveAsync(CancellationToken cancellationToken)

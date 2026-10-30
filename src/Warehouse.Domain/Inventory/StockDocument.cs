@@ -246,7 +246,7 @@ public sealed class StockDocument
     }
 
     /// <summary>
-    /// 不經審核直接過帳（系統設定「單據審核」關閉時，FR-08）：草稿 → 已過帳，確認者記為核准者。
+    /// 不經審核直接過帳（系統設定「單據審核」關閉時，FR-08；期初審核關閉時亦同，M12）：草稿 → 已過帳，確認者記為核准者。
     /// 呼叫端在同一交易內完成實際的結存異動。
     /// </summary>
     public void PostDirect(Guid actorId, string actorName, DateTimeOffset now)
@@ -254,7 +254,9 @@ public sealed class StockDocument
         EnsureDraft();
         if (_lines.Count == 0)
         {
-            throw new DomainRuleException("單據至少要有一行明細。");
+            throw new DomainRuleException(DocType == StockDocumentType.Opening
+                ? "期初單至少要有一行明細（確認為 0 也要寫一行）。"
+                : "單據至少要有一行明細。");
         }
         Status = StockDocumentStatus.Posted;
         SubmittedAt = now.ToUniversalTime();

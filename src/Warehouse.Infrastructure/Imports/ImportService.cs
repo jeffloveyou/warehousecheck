@@ -9,6 +9,7 @@ using Warehouse.Application.Exports;
 using Warehouse.Application.Imports;
 using Warehouse.Application.Inventory;
 using Warehouse.Application.Items;
+using Warehouse.Application.Settings;
 using Warehouse.Application.Warehousing;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
@@ -245,7 +246,10 @@ public sealed class ImportService(
             await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
         }
         var issues = new List<ImportIssue>();
-        var context = new RowContext(await LookupsAsync(kind, cancellationToken), targetId, autoApprove);
+        // 物料審核關閉時（M12）提出即啟用，疑似重複的列一樣維持待核准：警告文字與自動核准相同
+        var approvalDisabled = kind == ImportKind.Items && await db.SystemSettings.AsNoTracking()
+            .AnyAsync(s => s.Key == SettingKeys.ItemApprovalEnabled && s.Value == "false", cancellationToken);
+        var context = new RowContext(await LookupsAsync(kind, cancellationToken), targetId, autoApprove, approvalDisabled);
         foreach (var row in rows)
         {
             await transaction.CreateSavepointAsync("import_row", cancellationToken);
@@ -332,7 +336,7 @@ public sealed class ImportService(
                     return null;
                 }
                 var similar = string.Join("、", candidates.Take(3).Select(c => c.ItemCode ?? c.RequestNo));
-                return context.AutoApprove
+                return context.AutoApprove || context.ItemApprovalDisabled
                     ? $"疑似與既有物料重複：{similar}，這一列不自動核准、維持待核准，請物料管理員確認。"
                     : $"疑似與既有物料重複：{similar}（物料管理員核准時會再確認）。";
             }
@@ -401,7 +405,8 @@ public sealed class ImportService(
         }
     }
 
-    private sealed record RowContext(Dictionary<string, Dictionary<string, Guid>> Lookups, Guid? TargetId, bool AutoApprove);
+    private sealed record RowContext(
+        Dictionary<string, Dictionary<string, Guid>> Lookups, Guid? TargetId, bool AutoApprove, bool ItemApprovalDisabled);
 
     /// <summary>
     /// 「原廠條碼」欄：多個以頓號、逗號、分號（含全形）分隔，包裝數量為 1 個基本單位（其他包裝數量請在物料頁登錄）。

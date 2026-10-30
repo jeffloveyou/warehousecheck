@@ -32,7 +32,7 @@
                         <td>
                             @if (f.DocumentId is { } docId)
                             {
-                                @if (f.Command == "stocktake.approve")
+                                @if (f.Command is "stocktake.approve" or "stocktake.confirm")
                                 {
                                     <a href="/Stocktakes/Details/@docId">盤點單</a>
                                 }

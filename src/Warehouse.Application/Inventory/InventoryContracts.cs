@@ -105,6 +105,12 @@ public interface IOpeningService
 
     /// <summary>核准並過帳。<paramref name="idempotencyKey"/> 每次「按下核准」產生一個（頁面隱藏欄位或 API 標頭）。</summary>
     Task ApproveAsync(Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 期初審核關閉時（M12，ADR-0027）：建立者或倉庫主管把草稿直接過帳，過帳步驟與 <see cref="ApproveAsync"/> 相同。
+    /// 審核開啟時拒絕（請送審）。
+    /// </summary>
+    Task ConfirmAsync(Guid documentId, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
 }
 
 public sealed record BalanceRow(
