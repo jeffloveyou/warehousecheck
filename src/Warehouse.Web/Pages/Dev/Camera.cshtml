@@ -27,7 +27,7 @@
             secure.textContent = window.isSecureContext ? '是' : '否（相機無法使用，請改用 https）';
             secure.className = window.isSecureContext ? 'ok' : 'bad';
             document.getElementById('barcode-detector').textContent =
-                'BarcodeDetector' in window ? '支援（將檢查是否含 QR Code）' : '不支援（改用 jsQR）';
+                'BarcodeDetector' in window ? '支援（將檢查是否含 QR 與一維碼，不足時改用 zxing-wasm）' : '不支援（改用 zxing-wasm，可讀 QR 與一維碼）';
 
             var scanner = null;
             document.getElementById('camera-start').addEventListener('click', function () {
@@ -38,8 +38,8 @@
                     return module.start(document.getElementById('camera-video'), {
                         onDecoder: function (name) { document.getElementById('decoder').textContent = name; },
                         onState: function (state) { document.getElementById('camera-state').textContent = state; },
-                        onResult: function (text, ms) {
-                            document.getElementById('scan-result').textContent = text + '（' + ms + ' ms）';
+                        onResult: function (text, ms, format) {
+                            document.getElementById('scan-result').textContent = text + '（' + (format || '?') + '，' + ms + ' ms）';
                         },
                         onError: function (message) { document.getElementById('camera-error').textContent = message; }
                     });

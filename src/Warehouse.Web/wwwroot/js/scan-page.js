@@ -9,7 +9,20 @@
   var input = $('scan-input');
   input.removeAttribute('name'); // 改由 JS 處理，Enter 不送出表單
 
-  async function lookup(value) {
+  // 「登錄為原廠條碼」表單填寫中：連續查料相機讀到的碼不換掉結果區（不然正在填的料號會消失）
+  function registering() {
+    var code = $('RegisterItemCode');
+    return !!code && (code.value.trim() !== '' || document.activeElement === code || ($('RegisterPackQuantity') && $('RegisterPackQuantity').value !== ''));
+  }
+
+  async function lookup(value, source) {
+    if (source === 'camera' && registering()) {
+      if ($('scan-live')) $('scan-live').textContent = '登錄表單填寫中，相機讀到的「' + value + '」沒有查詢；要查詢請先登錄或清空料號欄。';
+      var state = $('scan-camera-state');
+      if (state) state.textContent = '相機：登錄表單填寫中，略過「' + value + '」';
+      window.WhScan.feedback('warn');
+      return;
+    }
     var url = '/Scan?code=' + encodeURIComponent(value);
     try {
       var res = await fetch(url, { credentials: 'same-origin' });
@@ -21,7 +34,9 @@
       var fresh = template.content.querySelector('[data-scan-result]');
       var old = document.querySelector('[data-scan-result]');
       if (!fresh || !old) throw new Error('查詢結果格式不正確');
+      if (window.WhCameraField) window.WhCameraField.release(old); // 登錄欄的相機開著：先關掉再換
       old.parentNode.replaceChild(fresh, old);
+      if (window.WhCameraField) window.WhCameraField.enhance(fresh); // 新結果區的登錄欄也要有相機按鈕
       history.replaceState(null, '', url);
       var summary = fresh.querySelector('#scan-summary');
       if (summary && $('scan-live')) $('scan-live').textContent = summary.textContent;

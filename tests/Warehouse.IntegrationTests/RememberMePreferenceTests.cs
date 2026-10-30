@@ -125,6 +125,14 @@ public partial class RememberMePreferenceTests
         await Assert.ThrowsAsync<DomainRuleException>(() => prefs.SetAsync(a, UserPreferenceKeys.ScanAddMode, "fast", Ct));
         await Assert.ThrowsAsync<DomainRuleException>(() => prefs.SetAsync(a, UserPreferenceKeys.ScanHiddenFields, "<script>", Ct));
         await Assert.ThrowsAsync<DomainRuleException>(() => prefs.SetAsync(a, UserPreferenceKeys.DocumentsLastWarehouse, "abc", Ct));
+        // 相機數量方式（盤點、建立預留）：只收 manual／pack／each
+        await prefs.SetAsync(a, UserPreferenceKeys.StocktakeQtyMode, "each", Ct);
+        await prefs.SetAsync(a, UserPreferenceKeys.ReservationQtyMode, "pack", Ct);
+        var modes = await prefs.GetAllAsync(a, Ct);
+        Assert.Equal("each", modes[UserPreferenceKeys.StocktakeQtyMode]);
+        Assert.Equal("pack", modes[UserPreferenceKeys.ReservationQtyMode]);
+        await Assert.ThrowsAsync<DomainRuleException>(() => prefs.SetAsync(a, UserPreferenceKeys.StocktakeQtyMode, "fast", Ct));
+        await Assert.ThrowsAsync<DomainRuleException>(() => prefs.SetAsync(a, UserPreferenceKeys.ReservationQtyMode, "auto", Ct));
 
         await prefs.SetAsync(a, UserPreferenceKeys.ScanAddMode, null, Ct);
         Assert.False((await prefs.GetAllAsync(a, Ct)).ContainsKey(UserPreferenceKeys.ScanAddMode));

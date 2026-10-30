@@ -6,7 +6,7 @@
 }
 <h1>搜尋物料</h1>
 <form method="get" class="filters" id="search-form">
-    <input type="text" name="Q" value="@Model.Q" maxlength="@ItemSearch.MaxTextLength" placeholder="料號、品名、型號、俗稱、用途…" aria-label="搜尋文字" autofocus />
+    <input type="text" name="Q" value="@Model.Q" maxlength="@ItemSearch.MaxTextLength" placeholder="料號、品名、型號、俗稱、用途…" aria-label="搜尋文字" autofocus data-camera-field="item-search" />
     <label><input type="checkbox" name="IncludeInactive" value="true" checked="@Model.IncludeInactive" /> 包含停用</label>
     <button type="submit" id="search-submit">搜尋</button>
 </form>
@@ -65,4 +65,10 @@
             下次就能直接查到。真的是新物料，請到 <a href="/Items/Create">提出新物料</a>（需經核准）。
         </div>
     }
+}
+@section Scripts {
+    @* 搜尋欄的相機按鈕（docs/04 §6.2）：物料碼換成正式料號再搜尋；不是物料碼只填原文 *@
+    <script src="~/js/scan-input.js" asp-append-version="true"></script>
+    <script src="~/js/scan-field.js" asp-append-version="true"></script>
+    <script src="~/js/camera-field.js" asp-append-version="true"></script>
 }

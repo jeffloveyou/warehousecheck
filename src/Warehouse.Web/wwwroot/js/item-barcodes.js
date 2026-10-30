@@ -1,4 +1,4 @@
-// 物料提出／修改表單的原廠條碼列（M8-05，docs/04 §4）。不使用框架，相容 Chrome 109；不載入相機程式。
+// 物料提出／修改表單的原廠條碼列（M8-05，docs/04 §4）。不使用框架，相容 Chrome 109；不載入相機程式（相機按鈕由 camera-field.js 提供）。
 // - 條碼槍送 Enter 時不送出表單，改把焦點移到同一列的包裝數量；包裝數量按 Enter 移到下一列（沒有就新增一列）。
 // - 「再加一個條碼」複製最後一列並重編 Input.Barcodes[i] 的索引，最多 data-max-rows 列（伺服器也會檢查）。
 (function () {
@@ -24,6 +24,8 @@
     var row = all[all.length - 1].cloneNode(true);
     row.querySelector('.barcode-text').value = '';
     row.querySelector('.barcode-pack').value = '';
+    // 上一列的掃碼訊息不要帶過來（camera-field.js）
+    row.querySelectorAll('.scan-field-info').forEach(function (info) { info.className = 'muted scan-field-info'; info.textContent = ''; });
     rows.appendChild(row);
     renumber();
     return row;
@@ -50,4 +52,6 @@
   });
 
   renumber();
+  // 相機連掃（camera-field.js）：掃完最後一列時新增一列；達上限回傳 null
+  window.WhItemBarcodes = { addRow: addRow };
 })();

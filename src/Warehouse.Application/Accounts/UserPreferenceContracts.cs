@@ -23,10 +23,16 @@ public static partial class UserPreferenceKeys
     /// <summary>建立單據時預設的倉庫（上次使用的倉庫 ID）。</summary>
     public const string DocumentsLastWarehouse = "documents.lastWarehouse";
 
+    /// <summary>盤點實盤輸入的相機數量方式：manual（手動）／pack（帶入包裝量）／each（逐件累加）。</summary>
+    public const string StocktakeQtyMode = "stocktake.qtyMode";
+
+    /// <summary>建立預留的相機數量方式：manual／pack／each。</summary>
+    public const string ReservationQtyMode = "reservation.qtyMode";
+
     public const int KeyMaxLength = 64;
     public const int ValueMaxLength = 500;
 
-    public static readonly IReadOnlyList<string> All = [ScanAddMode, ScanHiddenFields, ScanMute, ItemAutoApprove, DocumentsLastWarehouse];
+    public static readonly IReadOnlyList<string> All = [ScanAddMode, ScanHiddenFields, ScanMute, ItemAutoApprove, DocumentsLastWarehouse, StocktakeQtyMode, ReservationQtyMode];
 
     /// <summary>鍵在白名單內且值符合該鍵的格式。</summary>
     public static bool IsValid(string key, string value) => key switch
@@ -35,6 +41,7 @@ public static partial class UserPreferenceKeys
         ScanHiddenFields => value.Length <= ValueMaxLength && FieldListPattern().IsMatch(value),
         ScanMute or ItemAutoApprove => value is "0" or "1",
         DocumentsLastWarehouse => Guid.TryParse(value, out _),
+        StocktakeQtyMode or ReservationQtyMode => value is "manual" or "pack" or "each",
         _ => false,
     };
 

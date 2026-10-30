@@ -169,8 +169,9 @@
 @if (Model.CanAddIndex)
 {
     <form method="post" asp-page-handler="AddIndex" class="filters" id="index-form">
-        <input type="text" name="IndexText" value="@Model.IndexText" maxlength="@ItemAlias.TextMaxLength" placeholder="例：伺服AMP、維修用放大器，或掃描包裝條碼" aria-label="索引文字" autocomplete="off" required />
-        <select name="IndexKind" aria-label="索引類型">
+        <input type="text" name="IndexText" value="@Model.IndexText" maxlength="@ItemAlias.TextMaxLength" placeholder="例：伺服AMP、維修用放大器，或掃描包裝條碼" aria-label="索引文字" autocomplete="off" required
+               data-camera-field="raw" data-camera-kind-select="index-kind" />
+        <select name="IndexKind" aria-label="索引類型" id="index-kind">
             <option value="Keyword" selected="@(Model.IndexKind == ItemIndexKind.Keyword)">共用關鍵字</option>
             <option value="Alias" selected="@(Model.IndexKind == ItemIndexKind.Alias)">專屬別名</option>
             <option value="Barcode" selected="@(Model.IndexKind == ItemIndexKind.Barcode)">原廠條碼</option>
@@ -300,3 +301,12 @@ else if (item.Status != ItemStatus.Active)
         </tbody>
     </table>
 </div>
+@section Scripts {
+    @if (Model.CanAddIndex)
+    {
+        @* 新增索引的相機按鈕（docs/04 §6.2）：填原始條碼，索引類型自動改為原廠條碼 *@
+        <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/scan-field.js" asp-append-version="true"></script>
+        <script src="~/js/camera-field.js" asp-append-version="true"></script>
+    }
+}

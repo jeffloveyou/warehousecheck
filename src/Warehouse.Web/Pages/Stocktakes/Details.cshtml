@@ -4,6 +4,7 @@
 @{
     var d = Model.Doc;
     ViewData["Title"] = $"盤點 {d.StocktakeNo}";
+    ViewData["UsesPrefs"] = true; // 相機數量方式（camera-field.js）
     var reviewing = d.Status == StocktakeStatus.Submitted && Model.CanManage;
 }
 <p><a href="/Stocktakes">← 盤點列表</a></p>
@@ -36,17 +37,27 @@
     <form method="post" asp-page-handler="Count" asp-route-id="@d.Id" class="panel" id="stocktake-count-form">
         <h2>輸入實盤量</h2>
         <p class="muted">可直接掃儲位 QR、物料 QR 或原廠條碼（每格 Enter 跳下一格）。帳上沒有的物料會自動新增一行「現場找到」。同一行再輸入會覆蓋（留下紀錄）。</p>
+        <div data-camera-bar></div>
+        <label class="camera-qty-mode">相機數量方式
+            <select id="stocktake-qty-mode" data-camera-qty-mode="stocktake.qtyMode">
+                <option value="manual">手動：掃完儲位、料號後自己輸入實盤量</option>
+                <option value="pack">帶入包裝量：單件 1、外箱帶包裝數量</option>
+                <option value="each">逐件累加：同一物料每掃一次加一個包裝量</option>
+            </select>
+        </label>
         <div class="form-grid">
             <label for="Count_LocationCode">儲位</label>
-            <input type="text" id="Count_LocationCode" name="Count.LocationCode" value="@Model.Count.LocationCode" autocomplete="off" required />
+            <input type="text" id="Count_LocationCode" name="Count.LocationCode" value="@Model.Count.LocationCode" autocomplete="off" required
+                   data-camera-field="location" data-camera-warehouse="@d.WarehouseId" />
             <label for="Count_ItemCode">料號</label>
-            <input type="text" id="Count_ItemCode" name="Count.ItemCode" value="" autocomplete="off" required autofocus="@(Model.Count.LocationCode.Length > 0)" />
+            <input type="text" id="Count_ItemCode" name="Count.ItemCode" value="" autocomplete="off" required autofocus="@(Model.Count.LocationCode.Length > 0)"
+                   data-camera-field="item" data-camera-allow-inactive data-camera-qty="Count_Quantity" />
             <label for="Count_LotNo">批號</label>
-            <input type="text" id="Count_LotNo" name="Count.LotNo" autocomplete="off" placeholder="批號管理的物料才填" />
+            <input type="text" id="Count_LotNo" name="Count.LotNo" autocomplete="off" placeholder="批號管理的物料才填" data-camera-field="raw" data-camera-tracking="Lot" />
             <label for="Count_SerialNo">序號</label>
-            <input type="text" id="Count_SerialNo" name="Count.SerialNo" autocomplete="off" placeholder="序號管理的物料才填（數量 0 或 1）" />
+            <input type="text" id="Count_SerialNo" name="Count.SerialNo" autocomplete="off" placeholder="序號管理的物料才填（數量 0 或 1）" data-camera-field="raw" data-camera-tracking="Serial" />
             <label for="Count_Quantity">實盤量</label>
-            <input type="number" id="Count_Quantity" name="Count.Quantity" step="any" min="0" required />
+            <input type="number" id="Count_Quantity" name="Count.Quantity" step="any" min="0" required data-camera-serial-one />
         </div>
         <div class="actions"><button type="submit" id="stocktake-count">記錄</button></div>
     </form>
@@ -171,3 +182,12 @@
         <a href="@Model.LinesUrl(d.Lines.Page + 1)">下一頁</a>
     }
 </div>
+@section Scripts {
+    @if (Model.CanCount)
+    {
+        @* 實盤輸入欄的相機按鈕（docs/04 §6.2）：只填值，不自動記錄實盤 *@
+        <script src="~/js/scan-input.js" asp-append-version="true"></script>
+        <script src="~/js/scan-field.js" asp-append-version="true"></script>
+        <script src="~/js/camera-field.js" asp-append-version="true"></script>
+    }
+}
