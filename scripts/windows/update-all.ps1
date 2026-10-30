@@ -28,7 +28,7 @@ param(
     [string]$SetupRoot = 'C:\WarehouseSetup',
     [switch]$DetectOnly,
     # 內部使用：已複製到 UpdateRoot 並核對過，改由換版包裡的新版腳本執行
-    [switch]$Staged,
+    [switch]$IsStaged,
     [string]$LogFile
 )
 
@@ -134,7 +134,7 @@ function Find-Release([string]$Dir, [string]$Entry) {
 }
 
 # ---------- 第一階段：選擇換版包、驗證後複製到 C:\WarehouseUpdate，再交給換版包裡的新版腳本 ----------
-if (-not $Staged) {
+if (-not $IsStaged) {
     $current = Get-CurrentState
     Write-Host '倉庫管理系統：一鍵換版' -ForegroundColor Green
     Write-Host "目前版本：$($current.Version ?? '（讀不到，網站或代理沒有執行？）')；槽位 $($current.Slot ?? '?')"
@@ -209,7 +209,7 @@ if (-not $Staged) {
     Write-Host "已複製並核對：$staged"
 
     $next = Join-Path $staged 'scripts\windows\update-all.ps1'
-    $arguments = @{ Package = $staged; Database = $Database; Root = $Root; BackupRoot = $BackupRoot; UpdateRoot = $UpdateRoot; SetupRoot = $SetupRoot; Staged = $true }
+    $arguments = @{ Package = $staged; Database = $Database; Root = $Root; BackupRoot = $BackupRoot; UpdateRoot = $UpdateRoot; SetupRoot = $SetupRoot; IsStaged = $true }
     if ($LogFile) { $arguments.LogFile = $LogFile }
     & $next @arguments
     exit $LASTEXITCODE

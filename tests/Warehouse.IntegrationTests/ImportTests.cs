@@ -128,6 +128,30 @@ public partial class ImportTests
         Assert.Equal(1, (await imports.GetAsync(batchId, actor, false, 100, Ct))!.ErrorCount);
     }
 
+    // T-D33-02：期初明細檔沒有「料號」欄（例如上傳了核對用的對照表）→ 整檔拒絕，不逐列處理；
+    // 有料號欄但某列空白又有數量 → 該列錯誤
+    [Fact]
+    public async Task 期初明細_沒有料號欄整檔拒絕_空料號有數量是錯誤()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var actor = await UserAsync(factory, Roles.WarehouseManager, warehouseManager: true);
+        var (warehouse, _) = await WarehouseAsync("C-01", "C-02");
+        await using var scope = factory.Services.CreateAsyncScope();
+        var doc = await scope.ServiceProvider.GetRequiredService<IOpeningService>().CreateAsync(warehouse, null, actor, Ct);
+        var imports = scope.ServiceProvider.GetRequiredService<IImportService>();
+
+        var noItemColumn = Xlsx(["儲位", "原廠型號", "品名", "數量"], [["C-01", "MR-J4-10B", "伺服驅動器", "30"]]);
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            imports.UploadAsync(ImportKind.OpeningLines, doc, "對照.xlsx", new MemoryStream(noItemColumn), actor, Ct));
+        Assert.Equal("import.bad_file", ex.ErrorCode);
+        Assert.Contains("料號", ex.Message);
+
+        var blankWithQty = Xlsx(["儲位", "料號", "數量"], [["C-01", "", "30"], ["C-02", "", "0"]]);
+        var batch = await imports.UploadAsync(ImportKind.OpeningLines, doc, "open.xlsx", new MemoryStream(blankWithQty), actor, Ct);
+        var view = (await imports.GetAsync(batch, actor, false, 100, Ct))!;
+        Assert.Equal((1, 2), (view.ErrorCount, view.Issues.Single().RowNo));
+    }
+
     // T-M6-03-14：儲位匯入：倉庫範圍外整批拒絕（不試算）；範圍內可匯入
     [Fact]
     public async Task 儲位匯入與倉庫範圍()

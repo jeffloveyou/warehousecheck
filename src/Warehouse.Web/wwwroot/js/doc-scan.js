@@ -251,7 +251,49 @@
     el.itemResults.hidden = true;
     el.itemResults.textContent = '';
   }
+    // 點相機按鈕會讓輸入欄失焦，所以另外保存最後聚焦的欄位。
+    var lastCameraInputId = el.input.id;
 
+    panel.addEventListener('focusin', function (ev) {
+        var target = ev.target;
+
+        if (!target || target.tagName !== 'INPUT') return;
+
+        // 只記錄可輸入資料的欄位，不記錄靜音等勾選框。
+        if (['text', 'number', 'date', 'search', 'tel', 'email', 'url']
+            .indexOf(target.type) < 0) return;
+
+        if (target.id) lastCameraInputId = target.id;
+    });
+
+    // 搜尋結果只有一份，依照指定欄位搬動。
+    // 可搬動候選清單或掃碼提示；未指定元素時，搬動候選清單。
+    function placeResults(targetId, resultElement) {
+        var result = resultElement || el.itemResults;
+        var input = document.getElementById(targetId);
+
+        // 欄位不存在或已隱藏，就退回上方掃碼框。
+        if (!input || !panel.contains(input) ||
+            input.getClientRects().length === 0) {
+            input = el.input;
+        }
+
+        var anchor = input === el.input
+            ? panel.querySelector('.scan-bar')
+            : input;
+
+        if (!anchor) return;
+
+        // 避免批號、序號、數量等 grid 欄位的排列被打亂。
+        result.style.gridColumn =
+            anchor.parentElement.classList.contains('scan-fields')
+                ? '1 / -1'
+                : '';
+
+        if (anchor.nextElementSibling !== result) {
+            anchor.after(result);
+        }
+    }
   function setItem(body) {
     var it = body.item;
     lastItemQuery = null;
@@ -321,7 +363,7 @@
   }
 
   // ---- 物料搜尋（按 Enter 才查；候選由人點選，再以精確解析帶入） ----
-  async function searchItems(text) {
+    async function searchItems(text, resultTargetId) {
     if (!itemSearchUrl) return false;
     var body;
     try {
@@ -330,8 +372,9 @@
       fail('搜尋失敗，請確認連線後再試。');
       return false;
     }
-    el.itemResults.textContent = '';
-    el.itemResults.hidden = false;
+        placeResults(resultTargetId);
+        el.itemResults.textContent = '';
+        el.itemResults.hidden = false;
     if (!body.items.length) {
       el.itemResults.appendChild(document.createTextNode('找不到符合「' + text + '」的有效物料。'));
       fail('「' + text + '」不是已登錄的物料或儲位，也搜尋不到。若是包裝上的新條碼，請到物料頁登錄為原廠條碼。');
@@ -384,8 +427,15 @@
   }
 
   // 一筆掃碼或輸入：伺服器解析 → 依類型套用 → 欄位齊了就跳數量或自動加入
-  async function onScan(value, source) {
-    var s = step();
+    async function onScan(value, source, extra) {
+        if (source === 'camera') {
+            var statusTargetId =
+                (extra && extra.resultTargetId) || el.input.id;
+
+            placeResults(statusTargetId, el.status);
+        }
+
+        var s = step();
     var url = withQuery(resolveUrl, {
       code: value,
       target: mode === 'transfer' && el.location.value.trim() && !el.target.value.trim() ? 'true' : null
@@ -416,7 +466,11 @@
       applied = applyText(body, s, source);
       if (!applied) {
         // 不是已登錄的料號、條碼或儲位：當成物料搜尋，列出候選讓人點選
-        var found = await searchItems(value);
+          var resultTargetId = source === 'camera'
+              ? ((extra && extra.resultTargetId) || el.input.id)
+              : (source === 'item-field' ? el.item.id : el.input.id);
+
+          var found = await searchItems(value, resultTargetId);
         log(value, found ? '列出搜尋結果' : el.status.textContent, found);
         return;
       }
@@ -626,10 +680,13 @@
     focusScan();
   }
 
-  var scanner = window.WhScan.attach({
-    input: el.input,
-    container: panel,
-    onScan: onScan,
+    var scanner = window.WhScan.attach({
+        input: el.input,
+        container: panel,
+        getCameraResultTarget: function () {
+            return lastCameraInputId;
+        },
+        onScan: onScan,
     onReject: function (message) { fail(message); log('', message, false); focusScan(); },
     focusWarning: $('scan-focus-warning'),
     refocusButton: $('scan-refocus'),

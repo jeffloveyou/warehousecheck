@@ -172,7 +172,17 @@
         camera.start(o.cameraVideo, {
           onDecoder: function () { },
           onState: function (text) { if (o.cameraState) o.cameraState.textContent = '相機：' + text; },
-          onResult: function (text, ms, format) { enqueue(clean(text), 'camera', { symbology: format || null }); },
+            onResult: function (text, ms, format) {
+                var resultTargetId =
+                    typeof o.getCameraResultTarget === 'function'
+                        ? o.getCameraResultTarget()
+                        : null;
+
+                enqueue(clean(text), 'camera', {
+                    symbology: format || null,
+                    resultTargetId: resultTargetId
+                });
+            },
           onError: function (message) {
             if (o.cameraBox) o.cameraBox.hidden = true;
             o.onReject(message + ' 也可以直接在掃碼框輸入。');

@@ -113,6 +113,12 @@ public sealed class OpeningService(
             var lineId = Guid.NewGuid();
             if (string.IsNullOrWhiteSpace(input.ItemCode))
             {
+                // 沒有料號＝「這個儲位確認為空」：數量必須是 0、不可帶批號序號（D-33）。
+                // 否則料號欄漏填（或上傳了沒有料號欄的檔案）時，有庫存的儲位會被默默記成空的
+                if (input.Quantity != 0 || !string.IsNullOrWhiteSpace(input.LotNo) || !string.IsNullOrWhiteSpace(input.SerialNo) || input.ExpiryDate is not null)
+                {
+                    throw new DomainRuleException("沒有料號表示這個儲位確認為空，數量要填 0、批號序號與有效期限要空白；有庫存請填料號。");
+                }
                 doc.AddEmptyLocation(lineId, location.Id);
                 return ("opening.line_add", new { Location = location.Code, Empty = true });
             }
