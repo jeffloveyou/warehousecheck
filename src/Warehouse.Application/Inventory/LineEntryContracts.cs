@@ -14,6 +14,9 @@ public enum LocationListMode
 
     /// <summary>移庫目的、沒有料號：只依關鍵字列出。</summary>
     Plain,
+
+    /// <summary>快速進出補儲位（ADR-0026）：這個料號有庫存的儲位排前面，數量少的最前面（附數量）；之後是其他儲位。進、出、移都一樣。</summary>
+    StockAscending,
 }
 
 /// <summary>儲位選項。<see cref="Quantity"/>：料號在這個儲位的結存合計（沒有料號或沒有庫存時為 null）；<see cref="Reason"/>：Stock／Default／Frequent／null。</summary>

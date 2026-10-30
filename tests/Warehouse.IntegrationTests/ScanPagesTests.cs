@@ -113,6 +113,89 @@ public partial class ScanPagesTests
         Assert.Contains("/js/scan-field.js", reservations);
     }
 
+    // T-QC-06：快速進出畫面：作業員有選單、建立購物車、掃碼加入（JSON＋antiforgery）、選出倉補儲位產生草稿；別人看不到；系統管理員不能用
+    [Fact]
+    public async Task 快速進出_建立加入轉單_權限()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var op2 = await LoginAsync(factory, Roles.Operator);
+        var admin = await LoginAsync(factory, Roles.SystemAdmin);
+        var (warehouseCode, warehouseId, itemCode) = await SeedAsync(factory);
+
+        Assert.Contains("id=\"nav-quick\"", await op.GetStringAsync("/Quick"));
+        Assert.DoesNotContain("id=\"nav-quick\"", await admin.GetStringAsync("/"));
+        var denied = await admin.Client.GetAsync("/Quick", Ct);
+        Assert.Contains("/Account/AccessDenied", denied.Headers.Location?.OriginalString ?? "");
+
+        var created = await op.PostFormAsync("/Quick", "/Quick?handler=Create", new Dictionary<string, string> { ["Note"] = "頁面測試" });
+        Assert.Equal(HttpStatusCode.Redirect, created.StatusCode);
+        var cartUrl = created.Headers.Location!.OriginalString;
+        Assert.StartsWith("/Quick/Cart/", cartUrl);
+        var page = await op.GetStringAsync(cartUrl);
+        Assert.Contains("id=\"quick-cart\"", page);
+        Assert.Contains("/js/quick-cart.js", page);
+        Assert.DoesNotContain("camera-scan.js", page);
+        var token = WebUtility.HtmlDecode(TokenPattern().Match(page).Groups[1].Value);
+
+        async Task<HttpResponseMessage> AddAsync(WebSession who, object body, string antiforgery)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, cartUrl + "?handler=Add") { Content = JsonContent.Create(body) };
+            request.Headers.Add("RequestVerificationToken", antiforgery);
+            return await who.Client.SendAsync(request, Ct);
+        }
+        var added = await AddAsync(op, new { itemCode, locationCode = $"WH:LOC:{warehouseCode}:S-01", quantity = 3m }, token);
+        Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+        var lines = await added.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("data-quick-lines", lines);
+        Assert.Contains(itemCode, lines);
+        var rejected = await AddAsync(op, new { itemCode = "NOPE-" + Guid.NewGuid().ToString("N")[..6], quantity = 1m }, token);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Contains("找不到料號", await rejected.Content.ReadAsStringAsync(Ct));
+
+        // 別的作業員：看不到（回快速進出）、加不進去
+        var other = await op2.Client.GetAsync(cartUrl, Ct);
+        Assert.Equal("/Quick", other.Headers.Location?.OriginalString);
+        var otherToken = WebUtility.HtmlDecode(TokenPattern().Match(await op2.GetStringAsync("/Quick")).Groups[1].Value);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op2, new { itemCode, quantity = 1m }, otherToken)).StatusCode);
+
+        // 選出倉：補齊畫面帶入購物車的儲位；儲位選單有數量排序參數
+        var id = Guid.Parse(cartUrl["/Quick/Cart/".Length..]);
+        var convertUrl = $"/Quick/Convert/{id}?type=Inbound";
+        var convert = await op.GetStringAsync(convertUrl);
+        Assert.Contains("id=\"quick-convert-form\"", convert);
+        Assert.Contains("value=\"S-01\"", convert);
+        Guid lineId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            lineId = await scope.ServiceProvider.GetRequiredService<WarehouseDbContext>().Set<Warehouse.Domain.Inventory.ScanCartLine>()
+                .Where(l => l.CartId == id).Select(l => l.Id).SingleAsync(Ct);
+        }
+        var purchase = SeedData.Purposes.Single(p => p.Direction == Warehouse.Domain.Inventory.PurposeDirection.In && p.Code == "PURCHASE").Id;
+        var posted = await op.PostFormAsync(convertUrl, convertUrl, new Dictionary<string, string>
+        {
+            ["Type"] = "Inbound", ["WarehouseId"] = warehouseId.ToString(), ["PurposeId"] = purchase.ToString(), ["RequestId"] = Guid.NewGuid().ToString(),
+            ["Lines[0].LineId"] = lineId.ToString(), ["Lines[0].LocationCode"] = "S-01",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, posted.StatusCode);
+        var docUrl = posted.Headers.Location!.OriginalString;
+        Assert.StartsWith("/Documents/Details/", docUrl);
+        var doc = await op.GetStringAsync(docUrl);
+        Assert.Contains("id=\"scan-cart-draft-delete\"", doc);
+        Assert.Contains(itemCode, doc);
+        // 購物車已轉成單據：回快速進出
+        Assert.Equal("/Quick", (await op.Client.GetAsync(cartUrl, Ct)).Headers.Location?.OriginalString);
+
+        // 刪除草稿（不留單據）→ 回快速進出
+        var deleted = await op.PostFormAsync(docUrl, docUrl + "?handler=DeleteScanCartDraft", new Dictionary<string, string>
+        {
+            ["Version"] = Regex.Match(doc, "name=\"Version\" value=\"(\\d+)\"").Groups[1].Value,
+        });
+        Assert.Equal(HttpStatusCode.Redirect, deleted.StatusCode);
+        Assert.Equal("/Quick", deleted.Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.NotFound, (await op.Client.GetAsync(docUrl, Ct)).StatusCode);
+    }
+
     // T-CAM-01：各作業頁的表單相機欄位（data-camera-field、數量方式）與本機解碼器（同源、固定版本、application/wasm）
     [Fact]
     public async Task 相機入口_各頁欄位有相機_解碼器為本機靜態檔()

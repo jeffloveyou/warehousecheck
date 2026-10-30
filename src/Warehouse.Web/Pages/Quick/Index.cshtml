@@ -1,0 +1,43 @@
+@page
+@model Warehouse.Web.Pages.Quick.IndexModel
+@{
+    ViewData["Title"] = "快速進出";
+}
+<h1>快速進出</h1>
+<p class="muted">先把一批料掃進購物車（記在帳號，換手機也在），掃完再整批選「進倉／出倉／移庫」，補齊儲位後產生草稿單，到單據頁確認過帳。</p>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="post" asp-page-handler="Create" class="filters" id="quick-create-form">
+    <input type="text" name="Note" maxlength="@Warehouse.Domain.Inventory.ScanCart.NoteMaxLength" placeholder="備註（選填，例：A 專案領料）" aria-label="購物車備註" autocomplete="off" />
+    <button type="submit" id="quick-create">新購物車</button>
+</form>
+<h2>我的購物車（共 @Model.Carts.Count 台）</h2>
+@if (Model.Carts.Count == 0)
+{
+    <p class="muted" id="quick-empty">還沒有購物車。按「新購物車」開始掃碼。</p>
+}
+else
+{
+    <div class="table-wrap">
+        <table id="quick-carts">
+            <thead><tr><th>購物車</th><th>倉庫</th><th>筆數</th><th>最後更新</th></tr></thead>
+            <tbody>
+                @foreach (var c in Model.Carts)
+                {
+                    <tr>
+                        <td><a href="/Quick/Cart/@c.Id">@Warehouse.Web.Pages.Quick.IndexModel.Name(c.CreatedAt, c.Note)</a></td>
+                        <td>@(c.WarehouseCode ?? "—")</td>
+                        <td class="num">@c.LineCount</td>
+                        <td>@Display.Time(c.UpdatedAt)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

@@ -34,7 +34,12 @@ public sealed class LineEntryQueryService(WarehouseDbContext db) : ILineEntryQue
             : [];
 
         var priority = new List<(Guid Id, string? Reason)>();
-        if (itemId is not null && mode == LocationListMode.Source)
+        if (itemId is not null && mode == LocationListMode.StockAscending)
+        {
+            // 超過上限時保留數量少的儲位（使用者要先清掉零散的）
+            priority.AddRange(stock.OrderBy(kv => kv.Value).Select(kv => (kv.Key, (string?)"Stock")));
+        }
+        else if (itemId is not null && mode == LocationListMode.Source)
         {
             // 超過上限時保留數量多的儲位
             priority.AddRange(stock.OrderByDescending(kv => kv.Value).Select(kv => (kv.Key, (string?)"Stock")));
@@ -63,9 +68,9 @@ public sealed class LineEntryQueryService(WarehouseDbContext db) : ILineEntryQue
         var reasons = priority.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First().Reason);
         // 依原因排序（預設 → 常用 → 有庫存），同一原因依儲位碼（字典的順序不固定，不能用加入順序）
         static int Rank(string? reason) => reason switch { "Default" => 0, "Frequent" => 1, _ => 2 };
-        var ordered = first
-            .OrderBy(l => Rank(reasons.GetValueOrDefault(l.Id)))
-            .ThenBy(l => l.Code, StringComparer.Ordinal)
+        var ordered = (mode == LocationListMode.StockAscending
+                ? first.OrderBy(l => stock.GetValueOrDefault(l.Id)).ThenBy(l => l.Code, StringComparer.Ordinal)
+                : first.OrderBy(l => Rank(reasons.GetValueOrDefault(l.Id))).ThenBy(l => l.Code, StringComparer.Ordinal))
             .Concat(rest);
         return ordered
             .Select(l => new LocationOption(

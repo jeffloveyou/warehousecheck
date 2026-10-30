@@ -54,6 +54,7 @@ public partial class AuthorizationSweepTests
         ["Documents.DetailsModel.OnPostApproveAsync"] = Policies.DocumentApprove,
         ["Documents.DetailsModel.OnPostCancelAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostConfirmAsync"] = Policies.DocumentEdit,
+        ["Documents.DetailsModel.OnPostDeleteScanCartDraftAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostRemoveAttachmentAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostRemoveLineAsync"] = Policies.DocumentEdit,
         ["Documents.DetailsModel.OnPostRemoveLinesAsync"] = Policies.DocumentEdit,
@@ -98,6 +99,14 @@ public partial class AuthorizationSweepTests
         ["Opening.DetailsModel.OnPostScanAddLineAsync"] = Policies.OpeningEdit,
         ["Opening.DetailsModel.OnPostSubmitAsync"] = Policies.OpeningEdit,
         ["Opening.IndexModel.OnPostCreateAsync"] = Policies.OpeningEdit,
+        // 快速進出（ADR-0026）：整個頁面要 DocumentEdit；購物車只限擁有者（服務層檢查）
+        ["Quick.CartModel.OnPostAddAsync"] = Policies.DocumentEdit,
+        ["Quick.CartModel.OnPostDeleteAsync"] = Policies.DocumentEdit,
+        ["Quick.CartModel.OnPostNoteAsync"] = Policies.DocumentEdit,
+        ["Quick.CartModel.OnPostRemoveLineAsync"] = Policies.DocumentEdit,
+        ["Quick.CartModel.OnPostUpdateLineAsync"] = Policies.DocumentEdit,
+        ["Quick.ConvertModel.OnPostAsync"] = Policies.DocumentEdit,
+        ["Quick.IndexModel.OnPostCreateAsync"] = Policies.DocumentEdit,
         ["Reservations.IndexModel.OnPostCancelAsync"] = Policies.ReservationManage,
         ["Reservations.IndexModel.OnPostCreateAsync"] = Policies.ReservationManage,
         ["Scan.IndexModel.OnPostRegisterAsync"] = Policies.ItemsIndex,
@@ -161,7 +170,7 @@ public partial class AuthorizationSweepTests
 
     /// <summary>需要 {id} 路由參數的頁面。</summary>
     private static readonly HashSet<string> IdRoutes =
-        ["Documents/Details", "Items/Details", "Items/Edit", "Opening/Details", "Stocktakes/Details", "Warehouses/Location", "Import/Details"];
+        ["Documents/Details", "Items/Details", "Items/Edit", "Opening/Details", "Stocktakes/Details", "Warehouses/Location", "Import/Details", "Quick/Cart", "Quick/Convert"];
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

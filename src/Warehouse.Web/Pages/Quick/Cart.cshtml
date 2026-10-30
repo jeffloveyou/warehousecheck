@@ -1,0 +1,79 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Quick.CartModel
+@{
+    var c = Model.Cart;
+    ViewData["Title"] = "購物車 " + Warehouse.Web.Pages.Quick.IndexModel.Name(c.CreatedAt, c.Note);
+    ViewData["UsesPrefs"] = true; // 加入方式、靜音（M8-06）
+}
+<p><a href="/Quick">← 快速進出</a></p>
+<h1>購物車 @Warehouse.Web.Pages.Quick.IndexModel.Name(c.CreatedAt, c.Note)</h1>
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+
+@* 掃碼階段（quick-cart.js）：結果訊息在掃碼框正下方；沒有 JS 時只能用下方每行的表單修改 *@
+<div class="panel scan-panel" id="quick-cart" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })">
+    <div class="scan-bar">
+        <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
+               enterkeyhint="done" maxlength="200" placeholder="掃物料或儲位 QR，或輸入料號後按 Enter" aria-label="掃碼輸入" />
+        <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
+    </div>
+    <div class="scan-status" id="scan-status" role="status" aria-live="polite"></div>
+    <div class="quick-qty" id="quick-qty-row" hidden>
+        <label for="quick-qty">數量</label>
+        <input type="text" id="quick-qty" inputmode="decimal" autocomplete="off" maxlength="20" />
+        <span class="muted" id="quick-qty-item"></span>
+        <button type="button" id="quick-qty-add">加入</button>
+    </div>
+    <div class="scan-options">
+        <label>加入方式
+            <select id="quick-add-mode" aria-label="加入方式">
+                <option value="manual">手動：掃到後輸入數量，按 Enter 加入</option>
+                <option value="auto">自動：每掃一次加一個包裝量（同料同儲位合併）</option>
+            </select>
+        </label>
+        <span>目前儲位：<strong id="quick-location">（未指定）</strong> <button type="button" class="link" id="quick-location-clear" hidden>清除</button></span>
+        <label><input type="checkbox" id="scan-mute" /> 靜音</label>
+        <span id="scan-caps" class="bad" hidden>大寫鎖定開著（不影響比對）</span>
+    </div>
+    <div class="message warn" id="scan-focus-warning" hidden>
+        掃碼框不在焦點，條碼槍掃的字可能跑到別處。<button type="button" class="link" id="scan-refocus">點這裡回到掃碼框</button>
+    </div>
+    <div class="scan-camera-box" id="scan-camera-box" hidden>
+        <video id="scan-video" playsinline muted></video>
+        <div><span id="scan-camera-state" class="muted"></span> <button type="button" class="secondary" id="scan-camera-stop">停止相機</button></div>
+    </div>
+</div>
+
+<partial name="_CartLines" model="c" />
+
+<div class="panel" id="quick-actions">
+    <h2>掃完了？整批選動作</h2>
+    <p class="muted">選了之後到下一頁選倉庫、用途，補齊沒有儲位的行，再產生草稿單。</p>
+    <form method="get" action="/Quick/Convert/@c.Id" class="actions" id="quick-action-form">
+        <button type="submit" name="type" value="Inbound" id="quick-inbound">進倉</button>
+        <button type="submit" name="type" value="Outbound" id="quick-outbound">出倉</button>
+        <button type="submit" name="type" value="Transfer" id="quick-transfer">移庫</button>
+    </form>
+</div>
+
+<div class="panel">
+    <form method="post" asp-page-handler="Note" asp-route-id="@c.Id" class="filters" id="quick-note-form">
+        <input type="text" name="note" value="@c.Note" maxlength="@Warehouse.Domain.Inventory.ScanCart.NoteMaxLength" placeholder="備註" aria-label="購物車備註" autocomplete="off" />
+        <button type="submit" class="secondary">更新備註</button>
+    </form>
+    <form method="post" asp-page-handler="Delete" asp-route-id="@c.Id" id="quick-delete-form">
+        <label class="inline-check"><input type="checkbox" required id="quick-delete-confirm" /> 確定放棄（不留紀錄）</label>
+        <button type="submit" class="danger" id="quick-delete">放棄這台購物車</button>
+    </form>
+</div>
+
+@section Scripts {
+    <script src="~/js/scan-input.js" asp-append-version="true"></script>
+    <script src="~/js/quick-cart.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,131 @@
+@page "{id:guid}"
+@model Warehouse.Web.Pages.Quick.ConvertModel
+@using Warehouse.Domain.Inventory
+@{
+    var c = Model.Cart;
+    var isTransfer = Model.Type == StockDocumentType.Transfer;
+    var isInbound = Model.Type == StockDocumentType.Inbound;
+    var locked = c.WarehouseId is not null;
+    ViewData["Title"] = "快速" + Model.TypeName;
+}
+<p><a href="/Quick/Cart/@c.Id">← 回購物車</a></p>
+<h1>快速@(Model.TypeName)：@Warehouse.Web.Pages.Quick.IndexModel.Name(c.CreatedAt, c.Note)</h1>
+<p class="muted">補齊每行的@(isInbound ? "進倉" : "來源")儲位@(isTransfer ? "與目的儲位" : "")後按「產生草稿」，到單據頁核對、確認過帳。儲位選單中有這個料的儲位排前面，數量少的最前面。</p>
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+<form method="post" asp-route-id="@c.Id" class="panel" id="quick-convert-form"
+      data-locations-url="@Model.LocationsUrl" data-lots-url="@(isInbound ? "" : Model.LotsUrl)" data-type="@Model.Type">
+    <input type="hidden" name="Type" value="@Model.Type" />
+    <input type="hidden" name="RequestId" value="@Model.RequestId" />
+    <div class="form-grid">
+        <label for="quick-warehouse">倉庫 <span class="required-mark">*</span></label>
+        @if (locked)
+        {
+            @* 掃過儲位 QR 的購物車已鎖定倉庫 *@
+            <div>
+                <input type="hidden" name="WarehouseId" value="@c.WarehouseId" id="quick-warehouse" />
+                <strong>@c.WarehouseCode</strong> <span class="muted">（購物車裡的儲位都在這個倉庫）</span>
+            </div>
+        }
+        else
+        {
+            <select id="quick-warehouse" name="WarehouseId" required>
+                <option value="">選擇倉庫</option>
+                @foreach (var w in Model.WarehouseOptions)
+                {
+                    <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name</option>
+                }
+            </select>
+        }
+        @if (!isTransfer && Model.Settings.DocumentPurposeEnabled)
+        {
+            <label for="quick-purpose">用途 @if (Model.Settings.DocumentPurposeRequired) { <span class="required-mark">*</span> }</label>
+            <select id="quick-purpose" name="PurposeId">
+                <option value="">（不指定）</option>
+                @foreach (var p in Model.Purposes)
+                {
+                    <option value="@p.Id" selected="@(p.Id == Model.PurposeId)">@p.Code @p.Name</option>
+                }
+            </select>
+        }
+    </div>
+
+    <div class="table-wrap">
+        <table id="quick-convert-lines">
+            <thead>
+                <tr>
+                    <th>#</th><th>物料</th><th>數量</th><th>@(isInbound ? "進倉儲位" : "來源儲位")</th>
+                    @if (isTransfer)
+                    {
+                        @if (Model.Settings.LineCrossTransferEnabled) { <th>目的倉庫</th> }
+                        <th>目的儲位</th>
+                    }
+                    <th>批號／序號</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < c.Lines.Count; i++)
+                {
+                    var l = c.Lines[i];
+                    var form = Model.Lines.FirstOrDefault(x => x.LineId == l.Id) ?? new Warehouse.Web.Pages.Quick.ConvertModel.LineForm { LineId = l.Id, LocationCode = l.LocationCode };
+                    <tr data-item-id="@l.ItemId">
+                        <td>@l.LineNo<input type="hidden" name="Lines[@i].LineId" value="@l.Id" /></td>
+                        <td>@l.ItemCode @l.ItemName<span class="muted">@(l.ItemActive ? "" : "（已停用）")</span></td>
+                        <td class="num">@Display.Qty(l.Quantity) @l.UnitCode</td>
+                        <td>
+                            <input type="text" name="Lines[@i].LocationCode" value="@form.LocationCode" class="quick-location" data-item-id="@l.ItemId"
+                                   autocomplete="off" required maxlength="200" placeholder="點選或輸入儲位" aria-label="第 @l.LineNo 行儲位" />
+                        </td>
+                        @if (isTransfer)
+                        {
+                            @if (Model.Settings.LineCrossTransferEnabled)
+                            {
+                                <td>
+                                    <select name="Lines[@i].TargetWarehouseCode" class="quick-target-warehouse" aria-label="第 @l.LineNo 行目的倉庫">
+                                        <option value="">（同倉）</option>
+                                        @foreach (var w in Model.WarehouseOptions)
+                                        {
+                                            <option value="@w.Code" selected="@(w.Code == form.TargetWarehouseCode)">@w.Code @w.Name</option>
+                                        }
+                                    </select>
+                                </td>
+                            }
+                            <td>
+                                <input type="text" name="Lines[@i].TargetLocationCode" value="@form.TargetLocationCode" class="quick-target" autocomplete="off" required
+                                       maxlength="200" placeholder="點選或輸入目的儲位" aria-label="第 @l.LineNo 行目的儲位" />
+                            </td>
+                        }
+                        <td>
+                            @if (l.TrackingMode == Warehouse.Domain.Items.TrackingMode.Lot)
+                            {
+                                <input type="text" name="Lines[@i].LotNo" value="@form.LotNo" class="quick-lot" data-item-id="@l.ItemId" autocomplete="off" required
+                                       maxlength="50" placeholder="批號" aria-label="第 @l.LineNo 行批號" />
+                                @if (isInbound && Model.Settings.LineExpiryEnabled)
+                                {
+                                    <input type="date" name="Lines[@i].ExpiryDate" value="@(form.ExpiryDate?.ToString("yyyy-MM-dd"))" aria-label="第 @l.LineNo 行有效期限" />
+                                }
+                            }
+                            else if (l.TrackingMode == Warehouse.Domain.Items.TrackingMode.Serial)
+                            {
+                                <textarea name="Lines[@i].SerialNos" rows="2" class="quick-serials" data-item-id="@l.ItemId" required
+                                          placeholder="序號，一行一個（共 @Display.Qty(l.Quantity) 個）" aria-label="第 @l.LineNo 行序號">@form.SerialNos</textarea>
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions"><button type="submit" id="quick-convert">產生@(Model.TypeName)草稿</button></div>
+</form>
+
+@section Scripts {
+    <script src="~/js/picker.js" asp-append-version="true"></script>
+    <script src="~/js/quick-convert.js" asp-append-version="true"></script>
+}

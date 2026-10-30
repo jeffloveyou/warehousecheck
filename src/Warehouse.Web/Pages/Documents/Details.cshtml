@@ -238,6 +238,15 @@
             <button type="submit" class="secondary" id="document-return">退回修改</button>
         </form>
     }
+    @if (Model.CanCancel && Model.Doc.FromScanCart && Model.Doc.Status == Warehouse.Domain.Inventory.StockDocumentStatus.Draft)
+    {
+        @* 快速進出轉入的草稿：可直接刪除、不留單據（ADR-0026）；要先勾「確定刪除」才送得出去，避免誤按 *@
+        <form method="post" asp-page-handler="DeleteScanCartDraft" id="scan-cart-draft-delete-form">
+            <input type="hidden" name="Version" value="@Model.Version" />
+            <label class="inline-check"><input type="checkbox" required id="scan-cart-draft-delete-confirm" /> 確定刪除（不留單據）</label>
+            <button type="submit" class="danger" id="scan-cart-draft-delete">刪除這張草稿</button>
+        </form>
+    }
     @if (Model.CanCancel)
     {
         <form method="post" asp-page-handler="Cancel">

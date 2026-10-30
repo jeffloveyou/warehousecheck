@@ -583,6 +583,103 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Inventory.ScanCart", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid?>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_scan_carts");
+
+                    b.HasIndex("WarehouseId")
+                        .HasDatabaseName("ix_scan_carts_warehouse_id");
+
+                    b.HasIndex("OwnerId", "UpdatedAt")
+                        .HasDatabaseName("ix_scan_carts_owner_id_updated_at");
+
+                    b.ToTable("scan_carts", (string)null);
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.ScanCartLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CartId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cart_id");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("item_id");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_no");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("location_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("numeric(19,4)")
+                        .HasColumnName("quantity");
+
+                    b.HasKey("Id")
+                        .HasName("pk_scan_cart_lines");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_scan_cart_lines_item_id");
+
+                    b.HasIndex("LocationId")
+                        .HasDatabaseName("ix_scan_cart_lines_location_id");
+
+                    b.HasIndex("CartId", "LineNo")
+                        .IsUnique()
+                        .HasDatabaseName("ix_scan_cart_lines_cart_id_line_no");
+
+                    b.HasIndex("CartId", "ItemId", "LocationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_scan_cart_lines_key");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CartId", "ItemId", "LocationId"), false);
+
+                    b.ToTable("scan_cart_lines", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_scan_cart_lines_quantity", "quantity > 0");
+                        });
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockBalance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -697,6 +794,11 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("external_no");
+
+                    b.Property<bool>("FromScanCart")
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("from_scan_cart");
 
                     b.Property<string>("Note")
                         .HasMaxLength(500)
@@ -3002,6 +3104,45 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_item_serials_inventory_lots_lot_id");
                 });
 
+            modelBuilder.Entity("Warehouse.Domain.Inventory.ScanCart", b =>
+                {
+                    b.HasOne("Warehouse.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_scan_carts_users_owner_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.WarehouseSite", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_scan_carts_warehouses_warehouse_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.ScanCartLine", b =>
+                {
+                    b.HasOne("Warehouse.Domain.Inventory.ScanCart", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("CartId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_scan_cart_lines_scan_carts_cart_id");
+
+                    b.HasOne("Warehouse.Domain.Items.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_scan_cart_lines_items_item_id");
+
+                    b.HasOne("Warehouse.Domain.Warehousing.Location", null)
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_scan_cart_lines_locations_location_id");
+                });
+
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockBalance", b =>
                 {
                     b.HasOne("Warehouse.Domain.Items.Item", null)
@@ -3392,6 +3533,11 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_stocktake_locations_stocktakes_stocktake_id");
+                });
+
+            modelBuilder.Entity("Warehouse.Domain.Inventory.ScanCart", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Warehouse.Domain.Inventory.StockDocument", b =>

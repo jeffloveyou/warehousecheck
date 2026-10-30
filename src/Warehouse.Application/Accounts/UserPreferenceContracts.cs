@@ -29,10 +29,16 @@ public static partial class UserPreferenceKeys
     /// <summary>建立預留的相機數量方式：manual／pack／each。</summary>
     public const string ReservationQtyMode = "reservation.qtyMode";
 
+    /// <summary>快速進出上次選的進倉用途（ID）。</summary>
+    public const string QuickLastPurposeIn = "quick.lastPurpose.in";
+
+    /// <summary>快速進出上次選的出倉用途（ID）。</summary>
+    public const string QuickLastPurposeOut = "quick.lastPurpose.out";
+
     public const int KeyMaxLength = 64;
     public const int ValueMaxLength = 500;
 
-    public static readonly IReadOnlyList<string> All = [ScanAddMode, ScanHiddenFields, ScanMute, ItemAutoApprove, DocumentsLastWarehouse, StocktakeQtyMode, ReservationQtyMode];
+    public static readonly IReadOnlyList<string> All = [ScanAddMode, ScanHiddenFields, ScanMute, ItemAutoApprove, DocumentsLastWarehouse, StocktakeQtyMode, ReservationQtyMode, QuickLastPurposeIn, QuickLastPurposeOut];
 
     /// <summary>鍵在白名單內且值符合該鍵的格式。</summary>
     public static bool IsValid(string key, string value) => key switch
@@ -40,7 +46,7 @@ public static partial class UserPreferenceKeys
         ScanAddMode => value is "manual" or "auto" or "each",
         ScanHiddenFields => value.Length <= ValueMaxLength && FieldListPattern().IsMatch(value),
         ScanMute or ItemAutoApprove => value is "0" or "1",
-        DocumentsLastWarehouse => Guid.TryParse(value, out _),
+        DocumentsLastWarehouse or QuickLastPurposeIn or QuickLastPurposeOut => Guid.TryParse(value, out _),
         StocktakeQtyMode or ReservationQtyMode => value is "manual" or "pack" or "each",
         _ => false,
     };
