@@ -3,6 +3,15 @@
 @inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @inject Warehouse.Application.Accounts.IUserPreferenceService Preferences
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject Microsoft.AspNetCore.Mvc.ViewFeatures.IFileVersionProvider FileVersions
+@functions {
+    private string CameraVersion(string path)
+    {
+        var versioned = FileVersions.AddFileVersionToPath(Context.Request.PathBase, path);
+        var at = versioned.IndexOf("?v=", StringComparison.Ordinal);
+        return at < 0 ? string.Empty : versioned[(at + 3)..];
+    }
+}
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -15,6 +24,9 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="倉庫管理" />
+    @* 相機掃碼模組按下按鈕才 import()：這裡只放檔案版本（?v= 的值），換版後不會用到瀏覽器快取裡的舊檔（scan-input.js、camera-scan.js 讀取） *@
+    <meta name="wh-camera-scan-v" content="@CameraVersion("/js/camera-scan.js")" />
+    <meta name="wh-camera-decoder-v" content="@CameraVersion("/js/camera-decoder.js")" />
     <title>@ViewData["Title"] - 倉庫管理系統</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>

@@ -49,6 +49,10 @@ public partial class StocktakePagesTests
         var counter = await LoginAsync(factory, Roles.Operator);
         var page = await counter.GetStringAsync(url);
         Assert.DoesNotContain(">37<", page); // 盲盤：作業員畫面沒有帳面量
+        // 實盤輸入欄有相機按鈕：儲位限本盤點單的倉庫，批號／序號填原文（只填值，不自動記錄）
+        Assert.Contains($"data-camera-field=\"location\" data-camera-warehouse=\"{w}\"", page);
+        Assert.Equal(2, Regex.Matches(page, "data-camera-field=\"raw\"").Count);
+        Assert.Contains("/js/camera-field.js", page);
         var count = await counter.PostFormAsync(url, url + "?handler=Count", new Dictionary<string, string>
         {
             ["Count.LocationCode"] = "A-01", ["Count.ItemCode"] = item, ["Count.Quantity"] = "35",

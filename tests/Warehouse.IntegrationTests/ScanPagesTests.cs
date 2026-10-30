@@ -38,6 +38,8 @@ public partial class ScanPagesTests
         Assert.Contains("id=\"scan-input\"", home);
         Assert.Contains("id=\"nav-scan\"", home);
         Assert.DoesNotContain("camera-scan.js", home);
+        Assert.DoesNotContain("camera-decoder.js", home);
+        Assert.Matches("<meta name=\"wh-camera-scan-v\" content=\"[^\"]+\"", home); // 只放版本，按下相機才 import()
 
         var item = await op.GetStringAsync("/Scan?code=" + Uri.EscapeDataString("WH:ITEM:" + itemCode.ToLowerInvariant() + "\r\n"));
         Assert.Contains("data-kind=\"Item\"", item);
@@ -109,6 +111,50 @@ public partial class ScanPagesTests
         var reservations = await manager.GetStringAsync("/Reservations");
         Assert.Contains("data-scan-field", reservations);
         Assert.Contains("/js/scan-field.js", reservations);
+    }
+
+    // T-CAM-01：各作業頁的單欄相機入口（data-camera-field）與本機解碼器（同源、固定版本、application/wasm）
+    [Fact]
+    public async Task 相機入口_各頁欄位有相機_解碼器為本機靜態檔()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var manager = await LoginAsync(factory, Roles.WarehouseManager);
+        var (_, _, itemCode) = await SeedAsync(factory);
+        Guid itemId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            itemId = await scope.ServiceProvider.GetRequiredService<WarehouseDbContext>().Items.Where(i => i.ItemCode == itemCode).Select(i => i.Id).SingleAsync(Ct);
+        }
+
+        var pages = new (WebSession Who, string Url, string[] Expected)[]
+        {
+            (manager, "/Reservations", ["data-camera-field=\"item\""]),
+            (op, "/Search", ["data-camera-field=\"item-search\""]),
+            (op, "/Stock", ["data-camera-field=\"location\" data-camera-warehouse=\"stock-warehouse\"", "data-camera-field=\"item\" data-camera-allow-pack data-camera-allow-inactive"]),
+            (op, "/Items/Create", ["data-camera-field=\"raw\""]),
+            (op, "/Items/Details/" + itemId, ["data-camera-field=\"raw\" data-camera-kind-select=\"index-kind\"", "id=\"index-kind\""]),
+            (op, "/Scan?code=48" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999), ["id=\"RegisterItemCode\"", "data-camera-field=\"item\""]),
+        };
+        foreach (var (who, url, expected) in pages)
+        {
+            var html = await who.GetStringAsync(url);
+            foreach (var e in expected)
+            {
+                Assert.True(html.Contains(e, StringComparison.Ordinal), $"{url} 應含 {e}");
+            }
+            Assert.True(html.Contains("/js/camera-field.js", StringComparison.Ordinal), url + " 應載入 camera-field.js");
+            Assert.DoesNotContain("camera-scan.js", html);
+        }
+
+        // 解碼器與 WASM 從本機提供；.wasm 的 MIME 要對，瀏覽器才能串流編譯
+        var wasm = await op.Client.GetAsync("/lib/zxing-wasm/zxing_reader.wasm?v=3.1.6", Ct);
+        Assert.Equal(HttpStatusCode.OK, wasm.StatusCode);
+        Assert.Equal("application/wasm", wasm.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(HttpStatusCode.OK, (await op.Client.GetAsync("/lib/zxing-wasm/zxing-reader.js?v=3.1.6", Ct)).StatusCode);
+        var decoder = await op.GetStringAsync("/js/camera-decoder.js");
+        Assert.Contains("ZXING_VERSION = '3.1.6'", decoder);
+        Assert.DoesNotContain("jsdelivr", decoder);
     }
 
     // T-M5-03-18（PR 3 審查 M1）：沒有前綴的儲位碼在查料頁顯示為儲位，不能登錄成原廠條碼（竄改網址也不行）

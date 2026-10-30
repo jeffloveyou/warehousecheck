@@ -92,7 +92,7 @@
                     <p class="muted">輸入（或掃描物料 QR）這個條碼所屬物料的正式料號。登錯會讓之後掃碼對到錯的物料，請先核對包裝與料號。</p>
                     <div class="form-grid">
                         <label for="RegisterItemCode">正式料號 <span class="required-mark">*</span></label>
-                        <input type="text" id="RegisterItemCode" name="RegisterItemCode" required maxlength="200" autocomplete="off" placeholder="例 EL-000125" />
+                        <input type="text" id="RegisterItemCode" name="RegisterItemCode" required maxlength="200" autocomplete="off" placeholder="例 EL-000125" data-camera-field="item" />
                         <label for="RegisterPackQuantity">包裝數量</label>
                         <input type="number" id="RegisterPackQuantity" name="RegisterPackQuantity" min="0" step="any" placeholder="一個包裝幾個基本單位，空白＝1" />
                     </div>
@@ -148,5 +148,7 @@
 </div>
 @section Scripts {
     <script src="~/js/scan-input.js" asp-append-version="true"></script>
+    <script src="~/js/scan-field.js" asp-append-version="true"></script>
+    <script src="~/js/camera-field.js" asp-append-version="true"></script>
     <script src="~/js/scan-page.js" asp-append-version="true"></script>
 }

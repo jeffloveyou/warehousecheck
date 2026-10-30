@@ -4,17 +4,76 @@
 //  - 物料（單件）：欄位換成正式料號、顯示品名，焦點移到下一個欄位。外箱條碼不換（數量是基本單位），提示改掃單件或輸入料號。
 //  - 其他：顯示原因，欄位保留原文讓人修改；不猜物料、不送出表單（同一個值再按 Tab 就放行，Shift+Tab 一律放行）。
 // 已解析過的值再按 Enter 才照常送出表單。需要先載入 scan-input.js（提示音）；不載入相機程式。
+// 解析邏輯另外以 window.WhScanField.resolveItem 提供給單欄相機（camera-field.js），鍵盤與相機走同一套規則；
+// 結果一律顯示在輸入欄正下方的 .scan-field-info（infoFor）。
 (function () {
   'use strict';
 
   var feedback = window.WhScan ? window.WhScan.feedback : function () { };
   var clean = window.WhScan ? window.WhScan.clean : function (v) { return String(v || '').trim(); };
 
-  document.querySelectorAll('input[data-scan-field]').forEach(function (input) {
+  // 輸入欄正下方的訊息列（沒有就建立）；相機按鈕緊接在輸入欄後面時放在按鈕後面
+  function infoFor(input) {
+    var anchor = input;
+    var next = input.nextElementSibling;
+    if (next && next.classList.contains('camera-field-button')) {
+      anchor = next;
+      next = next.nextElementSibling;
+    }
+    if (next && next.classList.contains('scan-field-info')) return next;
     var info = document.createElement('div');
     info.className = 'muted scan-field-info';
     info.setAttribute('role', 'status');
-    input.insertAdjacentElement('afterend', info);
+    anchor.insertAdjacentElement('afterend', info);
+    return info;
+  }
+
+  function show(input, kind, text) {
+    var info = infoFor(input);
+    info.className = kind + ' scan-field-info';
+    info.textContent = text;
+  }
+
+  // 解析成正式料號並填入。opts.allowPack：外箱條碼也換成料號（查詢用，不涉及數量）；opts.allowInactive：停用物料也可（查詢用）。
+  // 回傳是否成功；失敗時欄位保留原文、訊息說明原因
+  async function resolveItem(input, value, opts) {
+    opts = opts || {};
+    try {
+      var res = await fetch('/api/scan?code=' + encodeURIComponent(value), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
+      var body = res.ok && (res.headers.get('Content-Type') || '').indexOf('json') >= 0 ? await res.json() : null;
+      var item = body && body.kind === 'Item' ? body.item : null;
+      if (item && (item.isActive || opts.allowInactive) && (item.packQuantity === 1 || opts.allowPack)) {
+        input.value = item.itemCode;
+        input.dataset.resolved = item.itemCode;
+        delete input.dataset.failed;
+        show(input, 'ok', item.itemCode + ' ' + item.name + '（單位 ' + item.unitCode + '）'
+          + (item.packQuantity !== 1 ? '　外箱條碼，一次代表 ' + Number(item.packQuantity) + ' ' + item.unitCode : '')
+          + (item.isActive ? '' : '　已停用'));
+        feedback('ok');
+        var next = opts.focusNext !== false && input.getAttribute('data-scan-next') && document.getElementById(input.getAttribute('data-scan-next'));
+        if (next) next.focus();
+        return true;
+      }
+      input.dataset.failed = value;
+      // 外箱條碼不換成料號（與伺服器表單規則一致）：這裡的數量是基本單位，換掉就看不出是「一箱」（M5-03 審查 S2）
+      show(input, 'bad', item && !item.isActive ? '物料 ' + item.itemCode + ' 已停用。'
+        : item ? '這是外箱條碼（一次代表 ' + Number(item.packQuantity) + ' ' + item.unitCode + ' ' + item.itemCode + '），請掃單件條碼或直接輸入料號，數量填基本單位。'
+        : body && body.message ? body.message
+        : body ? '「' + value + '」不是已登錄的料號或原廠條碼，請用搜尋確認。'
+        : res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '查詢失敗（HTTP ' + res.status + '）。');
+      feedback('error');
+      return false;
+    } catch (e) {
+      show(input, 'bad', '網路錯誤，請確認連線後再試。');
+      feedback('error');
+      return false;
+    }
+  }
+
+  window.WhScanField = { infoFor: infoFor, show: show, resolveItem: resolveItem };
+
+  document.querySelectorAll('input[data-scan-field]').forEach(function (input) {
+    infoFor(input);
     var busy = false;
 
     input.addEventListener('input', function () { delete input.dataset.resolved; delete input.dataset.failed; });
@@ -28,32 +87,7 @@
       if (busy) return;
       busy = true;
       try {
-        var res = await fetch('/api/scan?code=' + encodeURIComponent(value), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
-        var body = res.ok && (res.headers.get('Content-Type') || '').indexOf('json') >= 0 ? await res.json() : null;
-        if (body && body.kind === 'Item' && body.item.isActive && body.item.packQuantity === 1) {
-          var item = body.item;
-          input.value = item.itemCode;
-          input.dataset.resolved = item.itemCode;
-          info.className = 'ok scan-field-info';
-          info.textContent = item.itemCode + ' ' + item.name + '（單位 ' + item.unitCode + '）';
-          feedback('ok');
-          var next = input.getAttribute('data-scan-next') && document.getElementById(input.getAttribute('data-scan-next'));
-          if (next) next.focus();
-        } else {
-          info.className = 'bad scan-field-info';
-          input.dataset.failed = value;
-          // 外箱條碼不換成料號（與伺服器表單規則一致）：這裡的數量是基本單位，換掉就看不出是「一箱」（M5-03 審查 S2）
-          info.textContent = body && body.kind === 'Item' && !body.item.isActive ? '物料 ' + body.item.itemCode + ' 已停用。'
-            : body && body.kind === 'Item' ? '這是外箱條碼（一次代表 ' + Number(body.item.packQuantity) + ' ' + body.item.unitCode + ' ' + body.item.itemCode + '），請掃單件條碼或直接輸入料號，數量填基本單位。'
-            : body && body.message ? body.message
-            : body ? '「' + value + '」不是已登錄的料號或原廠條碼，請用搜尋確認。'
-            : res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '查詢失敗（HTTP ' + res.status + '）。';
-          feedback('error');
-        }
-      } catch (e) {
-        info.className = 'bad scan-field-info';
-        info.textContent = '網路錯誤，請確認連線後再試。';
-        feedback('error');
+        await resolveItem(input, value);
       } finally {
         busy = false;
       }

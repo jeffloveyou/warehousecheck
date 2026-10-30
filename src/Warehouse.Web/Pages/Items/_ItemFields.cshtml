@@ -85,7 +85,7 @@
         {
             <div class="filters barcode-row">
                 <input type="text" name="Input.Barcodes[@i].Text" value="@barcodeRows[i].Text" maxlength="@ItemBarcode.TextMaxLength" class="barcode-text"
-                       placeholder="掃描或輸入條碼" aria-label="原廠條碼" autocomplete="off" />
+                       placeholder="掃描或輸入條碼" aria-label="原廠條碼" autocomplete="off" data-camera-field="raw" />
                 <input type="number" name="Input.Barcodes[@i].PackQuantity" value="@barcodeRows[i].PackQuantity" min="0" step="any" class="barcode-pack"
                        placeholder="包裝數量（預設 1）" aria-label="包裝數量" />
             </div>

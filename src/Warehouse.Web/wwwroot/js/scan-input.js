@@ -67,6 +67,28 @@
     return el.tagName === 'INPUT' && ['checkbox', 'radio', 'button', 'submit', 'file'].indexOf(el.type) < 0;
   }
 
+  // 相機模組網址帶檔案版本（_Layout 的 meta），換版後不會用到瀏覽器快取裡的舊檔
+  function cameraModuleUrl() {
+    var meta = document.querySelector('meta[name="wh-camera-scan-v"]');
+    return '/js/camera-scan.js' + (meta && meta.content ? '?v=' + encodeURIComponent(meta.content) : '');
+  }
+
+  // 這台裝置不能開相機的原因；可以時回傳 null（不必先載入相機模組就能判斷）
+  function cameraUnsupportedReason() {
+    if (!window.isSecureContext) return '目前不是安全連線（HTTPS），瀏覽器不允許使用相機。';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return '這個瀏覽器不支援相機，請改用條碼槍。';
+    return null;
+  }
+
+  // 欄位的顯示名稱：<label for>、aria-label 或 placeholder
+  function fieldLabel(id) {
+    var input = id && document.getElementById(id);
+    if (!input) return '';
+    var label = document.querySelector('label[for="' + id + '"]');
+    var text = label ? label.textContent : input.getAttribute('aria-label') || input.getAttribute('placeholder') || '';
+    return text.replace(/[*＊\s]+$/g, '').trim();
+  }
+
   // options：input、onScan(value, source, extra) 回傳 Promise、onReject(message)、
   //          container（焦點在它以外的輸入框也提示）、focusWarning、refocusButton、capsIndicator、muteCheckbox、
   //          cameraButton、cameraBox、cameraVideo、cameraState、cameraStop
@@ -157,21 +179,30 @@
       o.muteCheckbox.addEventListener('change', function () { setMuted(o.muteCheckbox.checked); input.focus(); });
     }
 
-    // 相機：只在安全連線（HTTPS）且瀏覽器支援時顯示按鈕；按下才載入模組
-    var canCamera = window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
-    if (o.cameraButton && canCamera) {
+    // 相機：有 JS 就一律顯示按鈕；不能用（非 HTTPS、瀏覽器不支援）時按下會說明原因。按下才載入模組
+    if (o.cameraButton) {
       o.cameraButton.hidden = false;
       o.cameraButton.addEventListener('click', async function () {
+        var reason = cameraUnsupportedReason();
+        if (reason) {
+          o.onReject(reason + ' 也可以直接在掃碼框輸入。');
+          return;
+        }
         try {
-          camera = camera || await import('/js/camera-scan.js');
+          camera = camera || await import(cameraModuleUrl());
         } catch (e) {
           o.onReject('相機模組載入失敗，請改用手動輸入。');
           return;
         }
-        if (o.cameraBox) o.cameraBox.hidden = false;
+        // 先 start 再顯示：start 會先停掉舊的工作階段（舊的 onStop 會收起畫面）
         camera.start(o.cameraVideo, {
           onDecoder: function () { },
-          onState: function (text) { if (o.cameraState) o.cameraState.textContent = '相機：' + text; },
+          onStop: function () { if (o.cameraBox) o.cameraBox.hidden = true; },
+          onState: function (text) {
+            if (!o.cameraState) return;
+            var label = typeof o.getCameraResultTarget === 'function' ? fieldLabel(o.getCameraResultTarget()) : '';
+            o.cameraState.textContent = '相機：' + text + (label && text.indexOf('掃描中') === 0 ? '（結果放在：' + label + '）' : '');
+          },
             onResult: function (text, ms, format) {
                 var resultTargetId =
                     typeof o.getCameraResultTarget === 'function'
@@ -188,6 +219,7 @@
             o.onReject(message + ' 也可以直接在掃碼框輸入。');
           }
         }, { continuous: true });
+        if (o.cameraBox) o.cameraBox.hidden = false;
       });
       if (o.cameraStop) {
         o.cameraStop.addEventListener('click', function () {
@@ -206,5 +238,8 @@
     };
   }
 
-  window.WhScan = { attach: attach, feedback: feedback, clean: clean, minLength: MIN_LENGTH };
+  window.WhScan = {
+    attach: attach, feedback: feedback, clean: clean, minLength: MIN_LENGTH,
+    cameraModuleUrl: cameraModuleUrl, cameraUnsupportedReason: cameraUnsupportedReason, fieldLabel: fieldLabel
+  };
 })();

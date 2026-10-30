@@ -67,7 +67,7 @@
         <div class="actions"><button type="submit" id="opening-add-line">加入</button></div>
     </form>
     <form method="get" class="filters" id="suggest-form">
-        <input type="text" name="Suggest" value="@Model.Suggest" maxlength="200" placeholder="料號（可掃碼）" aria-label="查建議儲位的料號" data-scan-field autocomplete="off" />
+        <input type="text" name="Suggest" value="@Model.Suggest" maxlength="200" placeholder="料號（可掃碼）" aria-label="查建議儲位的料號" data-scan-field data-camera-field="item" autocomplete="off" />
         <button type="submit" class="secondary" id="suggest-submit">查建議儲位</button>
         @if (Model.Suggestions is { } suggestions)
         {
@@ -125,5 +125,6 @@
         <script src="~/js/picker.js" asp-append-version="true"></script>
         <script src="~/js/doc-scan.js" asp-append-version="true"></script>
         <script src="~/js/scan-field.js" asp-append-version="true"></script>
+        <script src="~/js/camera-field.js" asp-append-version="true"></script>
     }
 }

@@ -1,0 +1,10 @@
+zxing-wasm 3.1.6（npm 發布 2026-10-19）
+來源：https://registry.npmjs.org/zxing-wasm/-/zxing-wasm-3.1.6.tgz（integrity sha512-mU7UNuvl+hOT+nlSOQTMHZ2tM8lRMsbjDIp5IO/+HmBl/FOq77q0OSZPJ3cm42A9c1MKU6Uve67FiGdkhsrT9g==）
+檔案（SHA-256）：
+  zxing-reader.js   ← package/dist/iife/reader/index.js   FFD72D59D54082194F7C086B384DCD930BDEB0C5B39FBB13779694E69BB0D344
+  zxing_reader.wasm ← package/dist/reader/zxing_reader.wasm 5003FB4B88C4FBD1FD518A2FD8C8AD365C519E183A08C03A322DDDFEA3CEA84E
+授權：封裝程式 MIT（LICENSE）；ZXing-C++ 與 ZXingWasm.cpp 為 Apache-2.0（LICENSE-zxing-cpp-Apache-2.0.txt，取自 https://github.com/zxing-cpp/zxing-cpp）。
+      Zint（BSD-3-Clause）只用於產生條碼的 writer，本專案只放 reader，不含 Zint。
+用途：瀏覽器沒有內建 BarcodeDetector（或不支援一維碼）時，解碼 QR 與一維條碼；只在按下「相機」後才載入（camera-decoder.js）。
+      wasm 路徑由 camera-decoder.js 以 prepareZXingModule 的 locateFile 指到 /lib/zxing-wasm/，不使用套件預設的 jsDelivr CDN。
+更新方式：npm pack zxing-wasm@<新版>，換上述兩個檔案並更新本檔版本與雜湊；檔名不帶版本，靠 Service Worker 版本化快取與 asp-append-version 以外的方式（camera-decoder.js 內的 ?v= 參數）換新。

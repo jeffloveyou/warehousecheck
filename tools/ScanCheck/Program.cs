@@ -86,9 +86,9 @@ await using var browser = await pw.Chromium.LaunchAsync(new() { ExecutablePath =
 var consoleErrors = new List<string>();
 var requests = new List<string>();
 
-async Task<IPage> LoginAsync(int width)
+async Task<IPage> LoginAsync(int width, IBrowser? on = null)
 {
-    var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = width, Height = 900 }, IgnoreHTTPSErrors = true });
+    var context = await (on ?? browser).NewContextAsync(new() { ViewportSize = new() { Width = width, Height = 900 }, IgnoreHTTPSErrors = true, Permissions = on is null ? null : ["camera"] });
     var page = await context.NewPageAsync();
     page.Console += (_, m) => { if (m.Type == "error") consoleErrors.Add($"{page.Url}: {m.Text}"); };
     page.PageError += (_, e) => consoleErrors.Add($"{page.Url}: {e}");
@@ -290,7 +290,7 @@ Check(await page.IsVisibleAsync("#scan-register-form"), "掃碼查料：未登�
 await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "3-scan-lookup.png"), FullPage = true });
 
 // 9. 不載入相機程式（T-PERF-05）
-Check(!requests.Any(r => r.Contains("camera-scan.js") || r.Contains("jsQR")), "鍵盤掃碼全程沒有載入相機程式");
+Check(!requests.Any(r => r.Contains("camera-scan.js") || r.Contains("camera-decoder.js") || r.Contains("zxing") || r.Contains("jsQR")), "鍵盤掃碼全程沒有載入相機程式");
 
 // 10. 手機寬 390：不可水平捲動
 var mobile = await LoginAsync(390);
@@ -330,6 +330,179 @@ var cachedUrls = await pwa.EvaluateAsync<string[]>("async () => { await fetch('/
 Check(cachedUrls.All(u => u is "/offline.html" or "/js/offline.js" || u.StartsWith("/icons/", StringComparison.Ordinal) || Regex.IsMatch(u, @"^/(css|js|lib)/[^?]+\?v=")),
     "快取裡只有離線頁、圖示與帶版本參數的靜態檔（沒有版本參數的 camera-scan.js 不快取）：" + string.Join(",", cachedUrls));
 await pwaContext.CloseAsync();
+
+// 12. 相機（docs/04 §6.2）：Chromium 109 假鏡頭（--use-file-for-fake-video-capture）播放 tools/DecodeCheck/barcodes 的測試條碼。
+// 檢查：各頁「相機」按鈕填入按下的那一欄、結果顯示在輸入欄下方（相機畫面在結果下面）、按下前不載入相機程式、多碼不填值。
+const string Ean = "4712345678900"; // barcodes/ean13.png
+string eanItem;
+Guid eanItemId;
+Guid mainWarehouseId;
+await using (var db = Db())
+{
+    // 測試庫重複執行：已有人登錄這個條碼就沿用那個物料
+    eanItemId = await db.ItemBarcodes.Where(b => b.Text == Ean && b.IsActive).Select(b => b.ItemId).FirstOrDefaultAsync();
+    if (eanItemId == Guid.Empty)
+    {
+        eanItemId = await db.Items.Where(i => i.ItemCode == itemCodes[0]).Select(i => i.Id).SingleAsync();
+        await new ItemIndexService(db, TimeProvider.System).AddAsync(eanItemId, ItemIndexKind.Barcode, Ean, new Actor(Guid.NewGuid(), "腳本物料管理員", IsItemManager: true), default);
+    }
+    eanItem = await db.Items.Where(i => i.Id == eanItemId).Select(i => i.ItemCode!).SingleAsync();
+    // barcodes/qr-location.png 是 WH:LOC:MAIN:A-01-02
+    mainWarehouseId = await db.Warehouses.Where(w => w.Code == "MAIN").Select(w => w.Id).FirstOrDefaultAsync();
+    var manager = new Actor(Guid.NewGuid(), "腳本主管", false, IsWarehouseManager: true);
+    var warehouses = new WarehouseService(db, TimeProvider.System);
+    if (mainWarehouseId == Guid.Empty)
+    {
+        mainWarehouseId = await warehouses.CreateWarehouseAsync(new WarehouseInput("MAIN", "主倉"), manager, default);
+    }
+    if (!await db.Locations.AnyAsync(l => l.WarehouseId == mainWarehouseId && l.Code == "A-01-02"))
+    {
+        await warehouses.CreateLocationAsync(mainWarehouseId, new LocationInput("A-01-02", new LocationDetails(null, null, null, null, null, null, null, null, false, false)), manager, default);
+    }
+}
+
+// 假鏡頭的畫面：測試條碼放在 1280×720 白底中央（兩張就左右並排，同 tools/DecodeCheck），存成單張 JPEG 的 .mjpeg
+async Task<string> FrameAsync(string name, params string[] files)
+{
+    var sources = files.Select(f => "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(Path.Combine(root, "tools", "DecodeCheck", "barcodes", f)))).ToArray();
+    var jpeg = await page.EvaluateAsync<string>("""
+        async (srcs) => {
+          const imgs = await Promise.all(srcs.map(s => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = s; })));
+          const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
+          const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 1280, 720);
+          imgs.forEach((img, i) => {
+            const w = 1280 * (imgs.length > 1 ? 0.4 : 0.45), h = w * img.height / img.width;
+            const cx = imgs.length > 1 ? (i === 0 ? 346 : 934) : 640;
+            x.drawImage(img, cx - w / 2, 360 - h / 2, w, h);
+          });
+          return c.toDataURL('image/jpeg', 0.92).split(',')[1];
+        }
+        """, sources);
+    var file = Path.Combine(shots, name + ".mjpeg");
+    await File.WriteAllBytesAsync(file, Convert.FromBase64String(jpeg));
+    return file;
+}
+
+var cameraBrowsers = new List<IBrowser>();
+async Task<IPage> CameraPageAsync(string frame)
+{
+    var cameraBrowser = await pw.Chromium.LaunchAsync(new()
+    {
+        ExecutablePath = chrome,
+        Headless = true,
+        Args = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--use-file-for-fake-video-capture=" + frame],
+    });
+    cameraBrowsers.Add(cameraBrowser);
+    return await LoginAsync(1280, cameraBrowser);
+}
+
+async Task<bool> WaitForAsync(IPage p, string script, int ms = 15000)
+{
+    try { await p.WaitForFunctionAsync(script, null, new() { Timeout = ms }); return true; }
+    catch (TimeoutException) { return false; }
+}
+
+// 結果在輸入欄下方：欄位 → 相機按鈕 → 訊息列 → 相機畫面（同一個 .camera-field 裡）
+const string FieldOrder = """
+    (id) => {
+      const input = document.getElementById(id);
+      const button = input.nextElementSibling, info = button && button.nextElementSibling, box = info && info.nextElementSibling;
+      return !!button && button.classList.contains('camera-field-button') && !!info && info.classList.contains('scan-field-info')
+        && (!box || box.classList.contains('camera-field-box')) && input.parentElement.classList.contains('camera-field');
+    }
+    """;
+
+var eanFrame = await FrameAsync("frame-ean13", "ean13.png");
+var cam = await CameraPageAsync(eanFrame);
+var camRequests = new List<string>();
+cam.Request += (_, r) => camRequests.Add(r.Url);
+
+// 12a. 建立預留（單欄 item）：按相機前不載入相機程式；掃到後填正式料號，結果在輸入欄下方
+await cam.GotoAsync(baseUrl + "/Reservations");
+Check(await cam.IsVisibleAsync("#Create_ItemCode + .camera-field-button"), "預留：料號欄旁有「相機」按鈕");
+Check(!camRequests.Any(r => r.Contains("camera-scan.js") || r.Contains("camera-decoder.js") || r.Contains("zxing")), "預留：按相機前沒有載入相機程式與解碼器");
+await cam.ClickAsync("#Create_ItemCode + .camera-field-button");
+Check(await WaitForAsync(cam, $"() => document.getElementById('Create_ItemCode').value === '{eanItem}'"), $"預留：相機掃 EAN-13 填入正式料號 {eanItem}（目前 {await cam.InputValueAsync("#Create_ItemCode")}）");
+Check(await cam.EvaluateAsync<bool>(FieldOrder, "Create_ItemCode"), "預留：結果訊息在輸入欄正下方，相機畫面在訊息下面");
+Check((await cam.InnerTextAsync("#Create_ItemCode ~ .scan-field-info")).Contains(eanItem), "預留：輸入欄下方顯示物料名稱");
+Check(await cam.EvaluateAsync<bool>("() => document.querySelector('.camera-field-box').hidden && document.body.dataset.trackState === 'ended'"), "預留：讀到一次就關相機並釋放鏡頭");
+Check(camRequests.Any(r => r.Contains("/lib/zxing-wasm/zxing_reader.wasm")), "Chromium 109 沒有內建一維碼解碼：改用本機 zxing-wasm（沒有走 CDN）");
+Check(!camRequests.Any(r => r.Contains("jsdelivr") || r.Contains("unpkg")), "沒有任何 CDN 請求");
+
+// 12b. 進倉單連續掃碼面板（使用者既有修正）：點了物料欄再開相機，狀態訊息放在物料欄下方
+await cam.GotoAsync(baseUrl + "/Documents/Details/" + docId);
+await cam.ClickAsync("#scan-clear");
+await cam.FocusAsync("#scan-item");
+await cam.ClickAsync("#scan-camera");
+Check(await WaitForAsync(cam, $"() => document.getElementById('scan-item').value === '{eanItem}'"), "面板：相機連續掃碼帶入物料");
+Check(await cam.EvaluateAsync<bool>("() => document.getElementById('scan-status').previousElementSibling === document.getElementById('scan-item')"), "面板：掃碼結果訊息在物料欄下方（不是相機畫面下方）");
+Check((await cam.InnerTextAsync("#scan-camera-state")).Contains("結果放在：物料"), "面板：相機狀態列顯示結果放在哪一欄");
+await cam.ClickAsync("#scan-camera-stop");
+Check(await cam.EvaluateAsync<bool>("() => document.getElementById('scan-camera-box').hidden && document.body.dataset.trackState === 'ended'"), "面板：停止相機釋放鏡頭");
+await cam.ClickAsync("#scan-clear");
+
+// 12c. 搜尋：物料碼換成正式料號再搜尋
+await cam.GotoAsync(baseUrl + "/Search");
+await cam.ClickAsync("input[name='Q'] + .camera-field-button");
+Check(await WaitForAsync(cam, $"() => location.search.indexOf('Q={eanItem}') >= 0"), "搜尋：相機掃到物料條碼，以正式料號搜尋");
+
+// 12d. 庫存查詢料號欄、物料明細新增索引（原文、類型自動改為原廠條碼）
+await cam.GotoAsync(baseUrl + "/Stock");
+await cam.ClickAsync("input[name='ItemCode'] + .camera-field-button");
+Check(await WaitForAsync(cam, $"() => document.querySelector(\"input[name='ItemCode']\").value === '{eanItem}'"), "庫存查詢：料號欄填入正式料號");
+await cam.GotoAsync(baseUrl + "/Items/Details/" + eanItemId);
+if (await cam.IsVisibleAsync("input[name='IndexText']"))
+{
+    await cam.SelectOptionAsync("#index-kind", "Keyword");
+    await cam.ClickAsync("input[name='IndexText'] + .camera-field-button");
+    Check(await WaitForAsync(cam, $"() => document.querySelector(\"input[name='IndexText']\").value === '{Ean}'"), "物料明細：新增索引填入原始條碼（不換成料號）");
+    Check(await cam.InputValueAsync("#index-kind") == "Barcode", "物料明細：索引類型自動改為原廠條碼");
+}
+else
+{
+    Check(false, "物料明細：作業員看得到新增索引表單");
+}
+
+// 12e. 物料提出：原廠條碼列可掃；「再加一個條碼」新增的列也有相機、掃到填在新的那一列
+await cam.GotoAsync(baseUrl + "/Items/Create");
+await cam.ClickAsync(".barcode-row .camera-field-button");
+Check(await WaitForAsync(cam, $"() => document.querySelector('.barcode-row .barcode-text').value === '{Ean}'"), "物料提出：第 1 列原廠條碼填入原文");
+await cam.ClickAsync("#add-barcode-row");
+Check(await cam.EvaluateAsync<bool>("() => { const r = document.querySelectorAll('.barcode-row')[1]; return !!r.querySelector('.camera-field-button') && r.querySelector('.scan-field-info').textContent === '' && !r.querySelector('.camera-field-box'); }"),
+    "物料提出：新增的列有相機按鈕，沒有帶到上一列的訊息與相機畫面");
+await cam.ClickAsync(".barcode-row:nth-child(2) .camera-field-button");
+Check(await WaitForAsync(cam, $"() => document.querySelectorAll('.barcode-row')[1].querySelector('.barcode-text').value === '{Ean}'"), "物料提出：第 2 列掃到的碼填在第 2 列");
+
+// 12f. 儲位 QR：庫存查詢的儲位欄填儲位碼、倉庫選單改成該儲位的倉庫
+var locFrame = await FrameAsync("frame-location", "qr-location.png");
+var camLoc = await CameraPageAsync(locFrame);
+await camLoc.GotoAsync(baseUrl + "/Stock");
+await camLoc.ClickAsync("input[name='LocationCode'] + .camera-field-button");
+Check(await WaitForAsync(camLoc, "() => document.querySelector(\"input[name='LocationCode']\").value === 'A-01-02'"), "庫存查詢：相機掃儲位 QR 填入儲位碼");
+Check(await camLoc.InputValueAsync("#stock-warehouse") == mainWarehouseId.ToString(), "庫存查詢：倉庫選單改成儲位 QR 的倉庫");
+
+// 12g. 多個條碼同時入鏡：不填值，提示只對準一個
+var multiFrame = await FrameAsync("frame-multi", "ean13.png", "code39.png");
+var camMulti = await CameraPageAsync(multiFrame);
+await camMulti.GotoAsync(baseUrl + "/Reservations");
+await camMulti.ClickAsync("#Create_ItemCode + .camera-field-button");
+Check(await WaitForAsync(camMulti, "() => (document.querySelector('.camera-field-box span') || {}).textContent.indexOf('多個條碼') >= 0", 8000), "多碼入鏡：提示只對準一個條碼");
+Check(await camMulti.InputValueAsync("#Create_ItemCode") == "", "多碼入鏡：沒有填入任何值");
+await camMulti.ScreenshotAsync(new() { Path = Path.Combine(shots, "4-camera-field.png"), FullPage = true });
+await camMulti.ClickAsync(".camera-field-box button");
+Check(await camMulti.EvaluateAsync<bool>("() => document.body.dataset.trackState === 'ended'"), "多碼入鏡：停止相機釋放鏡頭");
+
+// 12h. 手機寬 390：有相機按鈕的頁面不可水平捲動
+var camMobile = await LoginAsync(390, cameraBrowsers[0]);
+foreach (var url in new[] { "/Search", "/Stock", "/Items/Create", "/Reservations" })
+{
+    await camMobile.GotoAsync(baseUrl + url);
+    Check(!await camMobile.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動（相機按鈕）：" + url);
+}
+foreach (var b in cameraBrowsers)
+{
+    await b.CloseAsync();
+}
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
