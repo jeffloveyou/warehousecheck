@@ -80,6 +80,7 @@
 <fieldset class="panel" id="item-barcodes" data-max-rows="@ItemSubmitOptions.MaxBarcodes">
     <legend>新增原廠條碼（選填）</legend>
     <p class="muted">用條碼槍掃包裝上的條碼，之後進出倉直接掃它就會帶出這個物料。只收英數字。外箱條碼請填包裝數量（一箱幾個基本單位），單件留空即可。核准前掃到會被拒絕，核准後才能使用。</p>
+    <div data-camera-bar></div>
     <div id="barcode-rows">
         @for (var i = 0; i < barcodeRows.Count; i++)
         {

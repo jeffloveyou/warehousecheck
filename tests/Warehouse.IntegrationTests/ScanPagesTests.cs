@@ -113,7 +113,7 @@ public partial class ScanPagesTests
         Assert.Contains("/js/scan-field.js", reservations);
     }
 
-    // T-CAM-01：各作業頁的單欄相機入口（data-camera-field）與本機解碼器（同源、固定版本、application/wasm）
+    // T-CAM-01：各作業頁的表單相機欄位（data-camera-field、數量方式）與本機解碼器（同源、固定版本、application/wasm）
     [Fact]
     public async Task 相機入口_各頁欄位有相機_解碼器為本機靜態檔()
     {
@@ -129,10 +129,10 @@ public partial class ScanPagesTests
 
         var pages = new (WebSession Who, string Url, string[] Expected)[]
         {
-            (manager, "/Reservations", ["data-camera-field=\"item\""]),
+            (manager, "/Reservations", ["data-camera-field=\"item\" data-camera-qty=\"Create_Quantity\"", "data-camera-qty-mode=\"reservation.qtyMode\"", "data-camera-bar"]),
             (op, "/Search", ["data-camera-field=\"item-search\""]),
             (op, "/Stock", ["data-camera-field=\"location\" data-camera-warehouse=\"stock-warehouse\"", "data-camera-field=\"item\" data-camera-allow-pack data-camera-allow-inactive"]),
-            (op, "/Items/Create", ["data-camera-field=\"raw\""]),
+            (op, "/Items/Create", ["data-camera-field=\"raw\"", "data-camera-bar"]),
             (op, "/Items/Details/" + itemId, ["data-camera-field=\"raw\" data-camera-kind-select=\"index-kind\"", "id=\"index-kind\""]),
             (op, "/Scan?code=48" + Random.Shared.NextInt64(10_000_000_000, 99_999_999_999), ["id=\"RegisterItemCode\"", "data-camera-field=\"item\""]),
         };

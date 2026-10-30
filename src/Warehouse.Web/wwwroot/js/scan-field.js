@@ -12,19 +12,14 @@
   var feedback = window.WhScan ? window.WhScan.feedback : function () { };
   var clean = window.WhScan ? window.WhScan.clean : function (v) { return String(v || '').trim(); };
 
-  // 輸入欄正下方的訊息列（沒有就建立）；相機按鈕緊接在輸入欄後面時放在按鈕後面
+  // 輸入欄正下方的訊息列（沒有就建立）
   function infoFor(input) {
-    var anchor = input;
     var next = input.nextElementSibling;
-    if (next && next.classList.contains('camera-field-button')) {
-      anchor = next;
-      next = next.nextElementSibling;
-    }
     if (next && next.classList.contains('scan-field-info')) return next;
     var info = document.createElement('div');
     info.className = 'muted scan-field-info';
     info.setAttribute('role', 'status');
-    anchor.insertAdjacentElement('afterend', info);
+    input.insertAdjacentElement('afterend', info);
     return info;
   }
 

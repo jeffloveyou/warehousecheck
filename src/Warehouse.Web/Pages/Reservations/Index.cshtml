@@ -39,10 +39,18 @@
 {
     <form method="post" asp-page-handler="Create" class="panel" id="reservation-create-form">
         <h2>建立預留</h2>
+        <div data-camera-bar></div>
+        <label class="camera-qty-mode">相機數量方式
+            <select id="reservation-qty-mode" data-camera-qty-mode="reservation.qtyMode">
+                <option value="manual">手動：掃完料號後自己輸入數量</option>
+                <option value="pack">帶入包裝量：單件 1、外箱帶包裝數量</option>
+                <option value="each">逐件累加：同一物料每掃一次加一個包裝量</option>
+            </select>
+        </label>
         <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
         <div class="form-grid">
             <label for="Create_ItemCode">料號 <span class="required-mark">*</span></label>
-            <input type="text" id="Create_ItemCode" name="Create.ItemCode" value="@Model.Create.ItemCode" required maxlength="200" placeholder="輸入或掃描料號、物料 QR、單件條碼" autocomplete="off" data-scan-field data-scan-next="Create_WarehouseId" data-camera-field="item" />
+            <input type="text" id="Create_ItemCode" name="Create.ItemCode" value="@Model.Create.ItemCode" required maxlength="200" placeholder="輸入或掃描料號、物料 QR、單件條碼" autocomplete="off" data-scan-field data-scan-next="Create_WarehouseId" data-camera-field="item" data-camera-qty="Create_Quantity" />
             <label for="Create_WarehouseId">倉庫 <span class="required-mark">*</span></label>
             <select id="Create_WarehouseId" name="Create.WarehouseId" required>
                 <option value="">選擇倉庫</option>

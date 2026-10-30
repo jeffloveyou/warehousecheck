@@ -125,17 +125,18 @@ input[type=file] { max-width: 100%; }
 @media (min-width: 601px) { .nav-toggle { display: none; } }
 #nav-scan { font-weight: bold; }
 .scan-field-info { font-size: 13px; margin-top: 2px; }
-/* 單欄相機（camera-field.js）：輸入欄＋「相機」同一列，結果訊息與相機畫面各佔一整列（順序：欄位 → 結果 → 畫面） */
+/* 表單相機（camera-field.js）：每張表單一列「相機掃碼」＋相機畫面；結果訊息在當前欄正下方 */
 .camera-field { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
 .camera-field > input { flex: 1 1 10em; min-width: 0; width: auto; }
-.camera-field > .scan-field-info, .camera-field > .camera-field-box { flex: 0 0 100%; }
+.camera-field > .scan-field-info { flex: 0 0 100%; }
 .camera-field > .scan-field-info:empty { display: none; }
-.camera-field-button { min-height: 32px; padding: 4px 10px; }
-.camera-field-box { margin-top: 4px; }
+.camera-field-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 8px; flex: 0 0 100%; }
+.camera-field-bar .camera-field-open { min-height: 36px; }
+.camera-field-bar .camera-field-box { flex: 0 0 100%; }
 .camera-field-box[hidden] { display: none; }
+.camera-qty-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 8px; }
+.camera-qty-mode select { max-width: 100%; }
 .scan-field-info.warn { color: #7a5900; }
-/* 相機畫面打開時欄位變高：表單格線左邊的標籤對齊欄位上緣（:has 自 Chrome 105 支援） */
-.form-grid label:has(+ .camera-field) { align-self: start; padding-top: 8px; }
 @media (max-width: 600px) {
     nav { gap: 10px 16px; }
     nav a, .nav-toggle-label { min-height: 32px; display: inline-flex; align-items: center; }

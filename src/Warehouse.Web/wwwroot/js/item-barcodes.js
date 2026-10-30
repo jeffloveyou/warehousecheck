@@ -24,8 +24,7 @@
     var row = all[all.length - 1].cloneNode(true);
     row.querySelector('.barcode-text').value = '';
     row.querySelector('.barcode-pack').value = '';
-    // 相機按鈕（camera-field.js）跟著複製；上一列的掃碼訊息、相機畫面不要帶過來
-    row.querySelectorAll('.camera-field-box').forEach(function (box) { box.remove(); });
+    // 上一列的掃碼訊息不要帶過來（camera-field.js）
     row.querySelectorAll('.scan-field-info').forEach(function (info) { info.className = 'muted scan-field-info'; info.textContent = ''; });
     rows.appendChild(row);
     renumber();
@@ -53,4 +52,6 @@
   });
 
   renumber();
+  // 相機連掃（camera-field.js）：掃完最後一列時新增一列；達上限回傳 null
+  window.WhItemBarcodes = { addRow: addRow };
 })();
