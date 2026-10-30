@@ -218,6 +218,31 @@ public class DetailsModel(
             return "已取消。";
         }, cancellationToken);
 
+    /// <summary>快速進出轉入的草稿：直接刪除、不留單據（ADR-0026；稽核紀錄保留），回快速進出。</summary>
+    public async Task<IActionResult> OnPostDeleteScanCartDraftAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
+        {
+            return Forbid();
+        }
+        try
+        {
+            await documents.DeleteScanCartDraftAsync(id, Version, User.ToActor(), cancellationToken);
+            TempData["Message"] = "已刪除草稿。";
+            return RedirectToPage("/Quick/Index");
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            Error = ex.Message;
+        }
+        if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))
+        {
+            return NotFound();
+        }
+        IdempotencyKey = Guid.NewGuid().ToString();
+        return Page();
+    }
+
     public Task<IActionResult> OnPostReverseAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {

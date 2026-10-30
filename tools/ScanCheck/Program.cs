@@ -194,13 +194,14 @@ Check(await page.InputValueAsync("#scan-item") == itemCodes[0], "數量欄收到
 var afterQtyScan = await LinesAsync(docId, "A-01");
 Check(!afterQtyScan.Values.Any(q => q > 1000), "沒有把條碼數字當成數量加入");
 await page.ClickAsync("#scan-clear");
-// 數量欄收到 3 碼英數條碼（例 B12）：不是純數字，當成掃碼處理，不會變成數量 12（PR 2 審查 M3）
+// 數量欄收到 3 碼英數條碼（例 Q12）：不是純數字，當成掃碼處理，不會變成數量 12（PR 2 審查 M3）。
+// 用 Q 開頭：測試庫的物料名稱含 GUID（只有 0-9a-f），用 B12 會被搜尋到而變成「列出候選」
 await ScanAsync(page, "WH:ITEM:" + itemCodes[3]);
 await WaitIdleAsync(page);
-await ScanAsync(page, "B12");
+await ScanAsync(page, "Q12");
 await WaitIdleAsync(page);
 Check(!(await LinesAsync(docId, "A-01")).ContainsKey(itemCodes[3]), "數量欄收到英數短碼時不會加入明細");
-Check((await page.InnerTextAsync("#scan-status")).Contains("B12"), "英數短碼被當成掃碼並提示");
+Check((await page.InnerTextAsync("#scan-status")).Contains("Q12"), "英數短碼被當成掃碼並提示");
 await page.ClickAsync("#scan-clear");
 
 // 5. 逐件累加：A-02 連掃 8 種物料共 50 筆（Enter）、再 50 筆（Tab），不等處理完；結果每種物料的數量＝掃的次數
@@ -628,6 +629,108 @@ foreach (var url in new[] { "/Search", "/Stock", "/Items/Create", "/Reservations
 foreach (var b in cameraBrowsers)
 {
     await b.CloseAsync();
+}
+
+// 13. 快速進出（ADR-0026）：條碼槍掃進購物車（先掃儲位、自動加包裝量、手動輸入數量）→ 換裝置也看得到 → 選進倉補儲位 → 草稿確認過帳；
+//     另一台購物車轉成草稿後刪除（不留單據）。結果訊息在掃碼框正下方。
+await page.GotoAsync(baseUrl + "/Quick");
+await page.FillAsync("#quick-create-form input[name='Note']", "實測" + suffix);
+await page.ClickAsync("#quick-create");
+await page.WaitForSelectorAsync("#quick-cart");
+var quickCartUrl = page.Url;
+Check(quickCartUrl.Contains("/Quick/Cart/"), "快速進出：新購物車後進入掃碼畫面");
+await page.SelectOptionAsync("#quick-add-mode", "auto");
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
+await WaitIdleAsync(page);
+for (var n = 0; n < 3; n++)
+{
+    await ScanAsync(page, "WH:ITEM:" + itemCodes[5]);
+}
+await WaitIdleAsync(page);
+await page.ClickAsync("#quick-location-clear");
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[6]);
+await WaitIdleAsync(page);
+Check(await page.EvaluateAsync<bool>("() => document.getElementById('scan-status').previousElementSibling.classList.contains('scan-bar')"), "快速進出：結果訊息在掃碼框正下方");
+await page.SelectOptionAsync("#quick-add-mode", "manual");
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[7]);
+await WaitIdleAsync(page);
+Check(await page.IsVisibleAsync("#quick-qty") && await page.EvaluateAsync<string>("() => document.activeElement.id") == "quick-qty", "快速進出（手動）：掃到物料後跳到數量欄");
+await page.FillAsync("#quick-qty", "5");
+await page.PressAsync("#quick-qty", "Enter");
+await page.WaitForTimeoutAsync(800);
+var quickRows = await page.EvalOnSelectorAllAsync<string[]>("#quick-line-table tbody tr", "rows => rows.map(r => Array.from(r.cells).slice(1, 5).map(c => c.textContent.trim()).join('|'))");
+Check(quickRows.Length == 3
+      && quickRows.Any(r => r.StartsWith(itemCodes[5] + "|", StringComparison.Ordinal) && r.Contains("|A-01|") && r.Contains("|3 PCS"))
+      && quickRows.Any(r => r.StartsWith(itemCodes[6] + "|", StringComparison.Ordinal) && r.Contains("（未指定）") && r.Contains("|1 PCS"))
+      && quickRows.Any(r => r.StartsWith(itemCodes[7] + "|", StringComparison.Ordinal) && r.Contains("|5 PCS")),
+    "快速進出：同料同儲位合併 3、清除儲位後不指定、手動數量 5（" + string.Join(" / ", quickRows) + "）");
+// 登入逾時（清掉 Cookie）後再掃：不能顯示「已加入」、不能有成功音效，明細不變（審查 1）
+var quickContext = page.Context;
+var savedCookies = await quickContext.CookiesAsync();
+await quickContext.ClearCookiesAsync();
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
+await WaitIdleAsync(page);
+var expiredStatus = await page.InnerTextAsync("#scan-status");
+Check(!expiredStatus.Contains("已加入") && (await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]) && !(await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[8]),
+    "快速進出：登入逾時時不顯示已加入（" + expiredStatus + "）");
+Check(expiredStatus.Contains("登入已逾時"), "快速進出：登入逾時有明確提示");
+consoleErrors.RemoveAll(e => e.Contains("/Quick/Cart/", StringComparison.Ordinal) && e.Contains("status of 401", StringComparison.Ordinal)); // 刻意清 Cookie 造成的 401
+await quickContext.AddCookiesAsync(savedCookies.Select(c => new Cookie { Name = c.Name, Value = c.Value, Domain = c.Domain, Path = c.Path, Expires = c.Expires, HttpOnly = c.HttpOnly, Secure = c.Secure, SameSite = c.SameSite }));
+var otherDevice = await LoginAsync(390);
+await otherDevice.GotoAsync(quickCartUrl);
+Check((await otherDevice.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]), "快速進出：換裝置登入，購物車內容還在");
+Check(!await otherDevice.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：購物車");
+
+await page.ClickAsync("#quick-inbound");
+await page.WaitForSelectorAsync("#quick-convert-form");
+Check(await page.InputValueAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location") == "A-01", "快速進出：補齊畫面帶入掃碼時的儲位");
+await page.SelectOptionAsync("#quick-purpose", SeedData.Purposes.First(p => p.Code == "PURCHASE" && p.Direction == Warehouse.Domain.Inventory.PurposeDirection.In).Id.ToString());
+await page.FocusAsync("#quick-convert-lines tbody tr:nth-child(2) input.quick-location");
+await page.Keyboard.TypeAsync("A-0");
+await page.WaitForSelectorAsync("#quick-convert-lines tbody tr:nth-child(2) .picker-list li");
+Check((await page.InnerTextAsync("#quick-convert-lines tbody tr:nth-child(2) .picker-list")).Contains("A-01"), "快速進出：儲位選單可點選");
+await page.FillAsync("#quick-convert-lines tbody tr:nth-child(2) input.quick-location", "A-02");
+await page.FillAsync("#quick-convert-lines tbody tr:nth-child(3) input.quick-location", "A-02");
+await page.ClickAsync("h1");
+await page.ClickAsync("#quick-convert");
+await page.WaitForSelectorAsync("#document-lines");
+var quickDocId = Guid.Parse(page.Url.Split('/').Last().Split('?')[0]);
+Check((await page.InnerTextAsync("#document-lines")).Contains(itemCodes[6]), "快速進出：產生進倉草稿，到單據頁");
+await page.ClickAsync("#document-confirm");
+await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+await using (var db = Db())
+{
+    Check(await db.StockDocuments.Where(d => d.Id == quickDocId).Select(d => d.Status).SingleAsync() == Warehouse.Domain.Inventory.StockDocumentStatus.Posted
+          && !await db.ScanCarts.AnyAsync(c => c.Note == "實測" + suffix),
+        "快速進出：確認過帳；購物車轉單後已刪除");
+}
+
+await page.GotoAsync(baseUrl + "/Quick");
+await page.ClickAsync("#quick-create");
+await page.WaitForSelectorAsync("#quick-cart");
+await page.SelectOptionAsync("#quick-add-mode", "auto");
+await page.FocusAsync("#scan-input");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
+await WaitIdleAsync(page);
+await page.ClickAsync("#quick-outbound");
+await page.WaitForSelectorAsync("#quick-convert-form");
+await page.SelectOptionAsync("#quick-warehouse", warehouseId.ToString());
+await page.FillAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location", "A-02");
+await page.ClickAsync("h1");
+await page.ClickAsync("#quick-convert");
+await page.WaitForSelectorAsync("#scan-cart-draft-delete");
+var draftId = Guid.Parse(page.Url.Split('/').Last().Split('?')[0]);
+await page.CheckAsync("#scan-cart-draft-delete-confirm");
+await page.ClickAsync("#scan-cart-draft-delete");
+await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+await using (var db = Db())
+{
+    Check(page.Url.EndsWith("/Quick", StringComparison.Ordinal) && !await db.StockDocuments.AnyAsync(d => d.Id == draftId),
+        "快速進出：購物車轉入的出倉草稿可刪除（不留單據），回快速進出");
 }
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));

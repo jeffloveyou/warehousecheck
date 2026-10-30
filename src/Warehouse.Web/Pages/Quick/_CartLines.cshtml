@@ -1,0 +1,39 @@
+@model Warehouse.Application.Inventory.ScanCartDetails
+@* 購物車明細（Cart 頁與掃碼加入後重繪共用）。每行一個小表單：改數量、儲位（儲位 QR 或已鎖定倉庫的儲位碼；空白＝選動作時再補）、刪除。 *@
+<div id="quick-lines" data-quick-lines data-line-count="@Model.Lines.Count">
+    <h2>購物車內容（@Model.Lines.Count 行@(Model.WarehouseCode is null ? "" : "，倉庫 " + Model.WarehouseCode)）</h2>
+    @if (Model.Lines.Count == 0)
+    {
+        <p class="muted">還沒有內容：掃物料（可先掃儲位 QR，之後的物料就記在那個儲位）。</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table id="quick-line-table">
+                <thead><tr><th>#</th><th>料號</th><th>品名</th><th>儲位</th><th>數量</th><th>修改</th></tr></thead>
+                <tbody>
+                    @foreach (var l in Model.Lines)
+                    {
+                        <tr data-line-id="@l.Id">
+                            <td>@l.LineNo</td>
+                            <td>@l.ItemCode</td>
+                            <td>@l.ItemName<span class="muted">@(l.Specification is null ? "" : "　" + l.Specification)@(l.ItemActive ? "" : "（已停用）")</span></td>
+                            <td>@(l.LocationCode ?? "（未指定）")</td>
+                            <td class="num">@Display.Qty(l.Quantity) @l.UnitCode</td>
+                            <td>
+                                <form method="post" asp-page="/Quick/Cart" asp-route-id="@Model.Id" asp-page-handler="UpdateLine" class="inline quick-line-form">
+                                    <input type="hidden" name="lineId" value="@l.Id" />
+                                    <input type="text" name="quantity" value="@Display.Qty(l.Quantity)" inputmode="decimal" aria-label="第 @l.LineNo 行數量" style="width: 6em" />
+                                    <input type="text" name="locationCode" value="@(l.LocationCode is null || Model.WarehouseCode is null ? "" : "WH:LOC:" + Model.WarehouseCode + ":" + l.LocationCode)"
+                                           placeholder="儲位 QR" aria-label="第 @l.LineNo 行儲位" style="width: 10em" autocomplete="off" />
+                                    <button type="submit" class="secondary">更新</button>
+                                    <button type="submit" class="secondary" asp-page="/Quick/Cart" asp-route-id="@Model.Id" asp-page-handler="RemoveLine">刪除</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

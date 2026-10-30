@@ -60,6 +60,7 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
         builder.Property(d => d.ApprovedByName).HasMaxLength(100);
         builder.Property(d => d.ReturnComment).HasMaxLength(StockDocument.NoteMaxLength);
         builder.Property(d => d.ExternalNo).HasMaxLength(StockDocument.ExternalNoMaxLength);
+        builder.Property(d => d.FromScanCart).HasDefaultValue(false).ValueGeneratedNever();
         builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
         builder.HasIndex(d => d.DocNo).IsUnique();
         builder.HasIndex(d => new { d.DocType, d.Status, d.CreatedAt });

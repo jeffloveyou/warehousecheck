@@ -25,7 +25,7 @@ public sealed record DocumentDetails(
     Guid? ReversalOfDocumentId, string? ReversalOfDocNo,
     Guid CreatedById, string CreatedByName, DateTimeOffset CreatedAt, DateTimeOffset? SubmittedAt,
     string? ApprovedByName, DateTimeOffset? PostedAt, string? ReturnComment, uint Version,
-    IReadOnlyList<DocumentLineRow> Lines);
+    IReadOnlyList<DocumentLineRow> Lines, bool FromScanCart = false);
 
 /// <summary>
 /// 新增明細：儲位碼、料號以文字輸入（掃碼或手輸，大小寫、全形會正規化）。
@@ -88,4 +88,13 @@ public interface IStockDocumentService
 
     /// <summary>為已過帳單建立沖銷單（方向相反的草稿）；一張單只能有一張未取消的沖銷單。</summary>
     Task<Guid> CreateReversalAsync(Guid id, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 快速進出：把自己的購物車整批轉成一張草稿單（ADR-0026）。同一個交易：建單、逐行套用與 <see cref="AddLineAsync"/> 相同的規則、刪除購物車；
+    /// 任一行不合規則就整批不轉（購物車保留）。<see cref="ScanCartConvertInput.RequestId"/> 是新單據 ID，重送回傳同一張。
+    /// </summary>
+    Task<Guid> CreateFromScanCartAsync(Guid cartId, ScanCartConvertInput input, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>刪除購物車轉入的草稿（不留單據；稽核紀錄保留）。只限草稿、建立者或倉庫主管、沒有附件與預留紀錄。</summary>
+    Task DeleteScanCartDraftAsync(Guid id, uint expectedVersion, Actor actor, CancellationToken cancellationToken);
 }

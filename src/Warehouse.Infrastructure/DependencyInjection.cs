@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<Warehouse.Application.Exports.IExportService, Warehouse.Infrastructure.Exports.ExportService>();
         services.AddScoped<Warehouse.Application.Imports.IImportService, Warehouse.Infrastructure.Imports.ImportService>();
         services.AddScoped<IStockDocumentService, StockDocumentService>();
+        services.AddScoped<IScanCartService, ScanCartService>();
         services.AddScoped<IDocumentMasterDataService, DocumentMasterDataService>();
         services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
         services.AddSingleton<IPostingFailureLog, PostingFailureLog>();

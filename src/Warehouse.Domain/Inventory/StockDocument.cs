@@ -152,6 +152,19 @@ public sealed class StockDocument
     /// <summary>這張單是哪一張已過帳單的沖銷單。</summary>
     public Guid? ReversalOfDocumentId { get; private set; }
 
+    /// <summary>由快速進出購物車轉成的草稿（ADR-0026）：只有這種草稿可以「刪除、不留單據」。</summary>
+    public bool FromScanCart { get; private set; }
+
+    /// <summary>標記為購物車轉成的單；只在建立時（草稿、還沒有明細以外的狀態變化）呼叫。</summary>
+    public void MarkFromScanCart()
+    {
+        if (Status != StockDocumentStatus.Draft)
+        {
+            throw new DomainRuleException("只有草稿可以標記為購物車轉入。");
+        }
+        FromScanCart = true;
+    }
+
     public const int ExternalNoMaxLength = 50;
 
     public IReadOnlyList<StockDocumentLine> Lines => _lines;
