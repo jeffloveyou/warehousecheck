@@ -34,7 +34,10 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
     [BindProperty]
     public bool AutoApprove { get; set; }
 
-    public bool CanAutoApprove => Kind == ImportKind.Items && User.ToActor().IsItemManager;
+    /// <summary>物料審核（M12）：關閉時匯入即啟用，不顯示「自動核准」勾選。</summary>
+    public bool ItemApprovalEnabled { get; private set; } = true;
+
+    public bool CanAutoApprove => Kind == ImportKind.Items && User.ToActor().IsItemManager && ItemApprovalEnabled;
 
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
 
@@ -118,6 +121,7 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
         Allowed = (await authorization.AuthorizeAsync(User, PolicyOf(Kind))).Succeeded;
+        ItemApprovalEnabled = (await HttpContext.RequestServices.GetRequiredService<Warehouse.Application.Settings.ISettingsService>().GetAsync(cancellationToken)).ItemApprovalEnabled;
         if (Kind == ImportKind.Locations)
         {
             Warehouses = await warehouses.ListWarehousesAsync(cancellationToken);

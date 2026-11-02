@@ -17,7 +17,8 @@ namespace Warehouse.Web.Pages.Items;
 ///    勾選狀態記在帳號的常用設定（M8-06）。
 /// </summary>
 public class CreateModel(
-    IItemWorkflowService workflow, IMasterDataService masterData, Warehouse.Application.Accounts.IUserPreferenceService preferences) : PageModel
+    IItemWorkflowService workflow, IMasterDataService masterData, Warehouse.Application.Accounts.IUserPreferenceService preferences,
+    Warehouse.Application.Settings.ISettingsService settings) : PageModel
 {
 
     [BindProperty]
@@ -40,11 +41,15 @@ public class CreateModel(
 
     public IReadOnlyList<DuplicateCandidate> Candidates { get; private set; } = [];
 
-    public bool CanAutoApprove => User.IsInRole(Roles.ItemManager);
+    /// <summary>物料審核（M12）：關閉時提出即啟用，不顯示「自動核准」勾選（疑似重複的仍留給物料管理員）。</summary>
+    public bool ApprovalEnabled { get; private set; } = true;
+
+    public bool CanAutoApprove => ApprovalEnabled && User.IsInRole(Roles.ItemManager);
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         RequestId = Guid.NewGuid();
+        ApprovalEnabled = (await settings.GetAsync(cancellationToken)).ItemApprovalEnabled;
         // 記住物料管理員上次「自動核准」的選擇（跟著帳號，M8-06；只是畫面預設，權限由服務檢查）
         AutoApprove = CanAutoApprove && (await preferences.GetAllAsync(User.ToActor().Id, cancellationToken))
             .GetValueOrDefault(Warehouse.Application.Accounts.UserPreferenceKeys.ItemAutoApprove) == "1";
@@ -54,6 +59,7 @@ public class CreateModel(
     public async Task<IActionResult> OnPostAsync(CancellationToken cancellationToken)
     {
         Options = await ItemFormOptions.LoadAsync(masterData, Input, false, cancellationToken);
+        ApprovalEnabled = (await settings.GetAsync(cancellationToken)).ItemApprovalEnabled;
         AutoApprove &= CanAutoApprove;
         if (CanAutoApprove)
         {
@@ -79,8 +85,10 @@ public class CreateModel(
             var options = new ItemSubmitOptions(Input.ToBarcodeDrafts(), AutoApprove, ConfirmSubmit ? AcknowledgedIds : []);
             var result = await workflow.SubmitAsync(RequestId, Input.ToDraft(), options, User.ToActor(), cancellationToken);
             TempData["Message"] = result.ItemCode is { } code
-                ? $"已提出並核准，正式料號 {code}（申請單號 {result.RequestNo}）。"
-                : $"已提出，申請單號 {result.RequestNo}，等待物料管理員核准。";
+                ? (ApprovalEnabled ? $"已提出並核准，正式料號 {code}（申請單號 {result.RequestNo}）。" : $"已建立，正式料號 {code}（申請單號 {result.RequestNo}）。")
+                : ApprovalEnabled
+                    ? $"已提出，申請單號 {result.RequestNo}，等待物料管理員核准。"
+                    : $"已提出，申請單號 {result.RequestNo}；因為疑似與既有物料重複，交由物料管理員確認後才啟用。";
             return RedirectToPage("/Items/Details", new { id = result.ItemId });
         }
         catch (DuplicateCandidatesUnconfirmedException ex)

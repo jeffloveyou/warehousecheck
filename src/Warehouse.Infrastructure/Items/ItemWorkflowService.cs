@@ -113,24 +113,41 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         {
             return previous;
         }
+        // 物料審核關閉（M12，ADR-0027）：提出即啟用；疑似重複的維持待核准（物料管理員已確認的候選除外）
+        var approvalDisabled = !options.AutoApprove && !await SettingItemApprovalEnabledAsync(cancellationToken);
 
         // 提出、條碼、自動核准在同一個交易：任何一步失敗整筆不建立（下面的服務方法都加入這個交易）。
         // 匯入（D-31）時加入匯入的外層交易，失敗由外層回到該列的 savepoint
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         try
         {
-            if (options.AutoApprove)
+            if (options.AutoApprove || approvalDisabled)
             {
                 await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+                // 排隊期間管理員可能重新開啟審核：取鎖後再讀一次，以這時的設定為準（M12 審查建議-2）
+                approvalDisabled = approvalDisabled && !await SettingItemApprovalEnabledAsync(cancellationToken);
             }
             var result = await SubmitAsync(requestId, draft, actor, cancellationToken);
             await AddBarcodesAsync(result.ItemId, barcodes, actor, cancellationToken);
-            if (options.AutoApprove)
+            var approve = options.AutoApprove;
+            // 只有物料管理員的「已確認候選」算數：作業員確認過的疑似重複仍留給物料管理員判斷
+            var acknowledged = options.AutoApprove || actor.IsItemManager ? options.AcknowledgedCandidateIds : [];
+            var item = approve || approvalDisabled
+                ? await db.Items.SingleAsync(i => i.Id == result.ItemId, cancellationToken)
+                : null;
+            if (approvalDisabled)
             {
-                var item = await db.Items.SingleAsync(i => i.Id == result.ItemId, cancellationToken);
+                // 排隊後才查重複（先提交的自動核准物料在這裡看得到）；與核准檢查用同一個不截斷的條件
+                var ids = acknowledged.ToList();
+                approve = !await CandidateQuery(item!.NormalizedName, item.NormalizedPartNo, item.Id)
+                    .AnyAsync(i => !ids.Contains(i.Id), cancellationToken);
+            }
+            if (approve)
+            {
                 var now = clock.GetUtcNow();
                 var (review, itemCode) = await ApproveItemAsync(
-                    item, options.AcknowledgedCandidateIds, "提出時自動核准", actor, now, cancellationToken);
+                    item!, acknowledged, options.AutoApprove ? "提出時自動核准" : "物料審核已關閉，提出即啟用", actor, now, cancellationToken,
+                    requireManager: options.AutoApprove);
                 db.ItemReviews.Add(review);
                 await db.SaveChangesAsync(cancellationToken);
                 result = result with { ItemCode = itemCode };
@@ -334,9 +351,13 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
     /// <summary>核准的共同步驟（手動核准與提出時自動核准）：在呼叫端的交易內執行，回傳審核紀錄與正式料號。</summary>
     private async Task<(ItemReview Review, string ItemCode)> ApproveItemAsync(
         Item item, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment, Actor actor, DateTimeOffset now,
-        CancellationToken cancellationToken, string? requestedItemCode = null)
+        CancellationToken cancellationToken, string? requestedItemCode = null, bool requireManager = true)
     {
-        RequireManager(actor);
+        // 物料審核關閉時提出即啟用：不要求物料管理員（只由 SubmitAsync 傳 false）
+        if (requireManager)
+        {
+            RequireManager(actor);
+        }
         if (item.Status != ItemStatus.PendingApproval)
         {
             throw new DomainRuleException("只有待核准的物料可以核准。");
@@ -527,6 +548,10 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
     private Task<bool> SettingAllowsChangeWithActivityAsync(CancellationToken cancellationToken) =>
         db.SystemSettings.AsNoTracking().AnyAsync(
             s => s.Key == SettingKeys.AllowItemUnitTrackingChangeWithActivity && s.Value == "true", cancellationToken);
+
+    /// <summary>設定鍵 <see cref="SettingKeys.ItemApprovalEnabled"/>（預設開啟，只有存成 false 才算關閉；M12）。</summary>
+    private async Task<bool> SettingItemApprovalEnabledAsync(CancellationToken cancellationToken) =>
+        !await db.SystemSettings.AsNoTracking().AnyAsync(s => s.Key == SettingKeys.ItemApprovalEnabled && s.Value == "false", cancellationToken);
 
     /// <summary>設定鍵 <see cref="SettingKeys.AllowItemCodeChange"/>（預設關閉，D-32）。</summary>
     private Task<bool> SettingAllowsItemCodeChangeAsync(CancellationToken cancellationToken) =>

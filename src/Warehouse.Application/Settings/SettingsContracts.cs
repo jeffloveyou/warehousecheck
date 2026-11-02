@@ -12,6 +12,21 @@ public sealed record SystemSettings(
     bool LocationAttributesEnabled,
     bool LocationImagesEnabled)
 {
+    /// <summary>
+    /// 物料建檔是否需要物料管理員核准（M12，ADR-0027；預設 true）。關閉時提出即啟用；
+    /// 疑似重複的物料仍維持待核准（物料管理員已確認候選者除外）。
+    /// </summary>
+    public bool ItemApprovalEnabled { get; init; } = true;
+
+    /// <summary>期初單是否需要倉庫主管核准（M12；預設 true）。關閉時有編輯權限的人確認即過帳。</summary>
+    public bool OpeningApprovalEnabled { get; init; } = true;
+
+    /// <summary>盤點差異是否需要倉庫主管核准（M12；預設 true）。關閉時有盤點權限的人確認即產生調整單並過帳。</summary>
+    public bool StocktakeApprovalEnabled { get; init; } = true;
+
+    /// <summary>實際套用的盲盤：盤點不審核時沒有主管把關差異，確認前要看得到帳面量，所以不套用盲盤。</summary>
+    public bool EffectiveBlindCount => StocktakeBlindCount && StocktakeApprovalEnabled;
+
     /// <summary>進出倉單是否需要審核（預設 false：確認即過帳，FR-08）。開啟時出倉單送審即預留（D-26）。</summary>
     public bool DocumentApprovalEnabled { get; init; }
 
@@ -138,6 +153,9 @@ public static class SettingKeys
     public const string LocationAttributesEnabled = "location.attributes.enabled";
     public const string LocationImagesEnabled = "location.images.enabled";
 
+    public const string ItemApprovalEnabled = "items.approval_enabled";
+    public const string OpeningApprovalEnabled = "stock.opening.approval_enabled";
+    public const string StocktakeApprovalEnabled = "stock.stocktake.approval_enabled";
     public const string DocumentApprovalEnabled = "stock.documents.approval_enabled";
     public const string AllowSelfApproveDocuments = "stock.documents.allow_self_approval";
     public const string DocumentPurposeEnabled = "stock.documents.field.purpose.enabled";

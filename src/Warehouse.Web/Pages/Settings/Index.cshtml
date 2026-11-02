@@ -19,6 +19,9 @@
     <input type="hidden" name="Original.LocationNotesEnabled" value="@Model.Original.LocationNotesEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LocationAttributesEnabled" value="@Model.Original.LocationAttributesEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LocationImagesEnabled" value="@Model.Original.LocationImagesEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.ItemApprovalEnabled" value="@Model.Original.ItemApprovalEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.OpeningApprovalEnabled" value="@Model.Original.OpeningApprovalEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.StocktakeApprovalEnabled" value="@Model.Original.StocktakeApprovalEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.DocumentApprovalEnabled" value="@Model.Original.DocumentApprovalEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.AllowSelfApproveDocuments" value="@Model.Original.AllowSelfApproveDocuments.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.DocumentPurposeEnabled" value="@Model.Original.DocumentPurposeEnabled.ToString().ToLowerInvariant()" />
@@ -45,6 +48,24 @@
     <input type="hidden" name="Original.RetentionProcessedCommandsDays" value="@Model.Original.RetentionProcessedCommandsDays" />
     <input type="hidden" name="Original.RetentionPostingFailuresDays" value="@Model.Original.RetentionPostingFailuresDays" />
     <input type="hidden" name="Original.RetentionImportBatchesDays" value="@Model.Original.RetentionImportBatchesDays" />
+    <h2>使用模式</h2>
+    <p id="usage-mode">目前：<strong>@(Model.CurrentMode is { } mode ? Warehouse.Application.Settings.UsageModes.Label(mode) : "自訂")</strong></p>
+    @if (Model.ModeApplied is { } applied)
+    {
+        <div class="message info" id="mode-applied">已把「@applied」填入下方各項，<strong>還沒儲存</strong>；確認後請按最下方「儲存」。</div>
+    }
+    <p class="actions">
+        @foreach (var m in Warehouse.Application.Settings.UsageModes.All)
+        {
+            <button type="submit" class="secondary" formnovalidate asp-page-handler="Mode" asp-route-mode="@m" id="mode-@m.ToString().ToLowerInvariant()">套用「@Warehouse.Application.Settings.UsageModes.Label(m)」</button>
+        }
+    </p>
+    <ul class="muted">
+        <li><strong>簡易（小公司）</strong>：物料、期初、盤點、進出倉單都不審核，按確認就生效；不盲盤。適合一兩個人管倉庫。</li>
+        <li><strong>標準</strong>（系統預設）：物料、期初、盤點由主管核准；進出倉單確認即過帳；不可自己核准自己的單；盲盤。</li>
+        <li><strong>嚴格</strong>：連進出倉單也要主管核准（出倉送審時先預留）；其餘同標準。</li>
+    </ul>
+    <p class="muted">模式只是一次設好下方 8 項審核相關設定的捷徑（物料／期初／盤點／進出倉單是否審核、三種自核、盲盤），其他設定不動；之後仍可逐項調整，畫面會顯示「自訂」。<strong>已送審的單不受影響</strong>，仍由主管核准。</p>
     <h2>登入</h2>
     <div class="form-grid">
         <label for="Form_RememberMeDays">「記住我」保持登入（天，0＝不提供）</label>
@@ -53,16 +74,22 @@
     </div>
     <p class="muted">預設 14 天。登入時勾選「記住我」，關掉瀏覽器也不必重新登入；每次使用會自動延長，連續這麼多天沒用才要重新登入。帳號停用、改角色、重設密碼後最慢 5 分鐘失效。<strong>公用電腦不要勾選</strong>，用完請按「登出」。改天數只影響之後的登入。</p>
     <h2>物料</h2>
+    <p><label><input type="checkbox" name="Form.ItemApprovalEnabled" value="true" checked="@Model.Form.ItemApprovalEnabled" id="setting-item-approval" /> 物料建檔需要物料管理員核准</label></p>
+    <p class="muted">預設開啟。關閉時提出即啟用並取得正式料號；<strong>疑似與既有物料重複的仍維持待核准</strong>，由物料管理員確認（物料管理員提出時已確認的候選除外）。已在待核准的物料不受影響。</p>
     <p><label><input type="checkbox" name="Form.AllowItemUnitTrackingChangeWithActivity" value="true" checked="@Model.Form.AllowItemUnitTrackingChangeWithActivity" id="setting-item-unit-change" /> 已有異動紀錄的物料，也可以修改基本單位、追蹤模式</label></p>
     <p class="muted">預設關閉：物料一旦進出過庫存，基本單位與追蹤模式就鎖住（ADR-0023）。開啟後由物料管理員在修改畫面勾選確認並填寫原因才能改，<strong>舊紀錄的數量不會換算</strong>（例如原本 10 個，改成「箱」後會顯示 10 箱）。即使開啟，有未完成單據、有效預留、進行中盤點時仍不能改；改追蹤模式時結存必須全部為 0。</p>
     <p><label><input type="checkbox" name="Form.AllowItemCodeChange" value="true" checked="@Model.Form.AllowItemCodeChange" id="setting-item-code-change" /> 已核准的物料，也可以變更正式料號</label></p>
     <p class="muted">預設關閉（ADR-0025）。開啟後由物料管理員在物料明細頁「變更料號」填寫新料號與原因，前綴必須是該物料分類（含上層分類）的料號前綴；分類本身仍不能改。單據、庫存都以物料內部識別碼關聯，不受影響。舊料號預設保留為歷史料號：仍可搜尋、掃碼找到這個物料，也不會給其他物料使用；選擇「釋出」後才可以給其他物料。</p>
     <h2>期初建帳</h2>
+    <p><label><input type="checkbox" name="Form.OpeningApprovalEnabled" value="true" checked="@Model.Form.OpeningApprovalEnabled" id="setting-opening-approval" /> 期初單需要倉庫主管核准</label></p>
+    <p class="muted">預設開啟。關閉時建立者或倉庫主管在期初單按「確認過帳」就入帳。已送出、待核准的期初單仍由倉庫主管核准。</p>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveOpening" value="true" checked="@Model.Form.AllowSelfApproveOpening" /> 允許建立者核准自己的期初單</label></p>
     <p class="muted">預設不允許（ADR-0003 D-07）。不論哪一種，都會記錄建立者、核准者與時間。</p>
     <h2>盤點</h2>
+    <p><label><input type="checkbox" name="Form.StocktakeApprovalEnabled" value="true" checked="@Model.Form.StocktakeApprovalEnabled" id="setting-stocktake-approval" /> 盤點差異需要倉庫主管核准</label></p>
+    <p class="muted">預設開啟。關閉時有盤點權限的人按「確認盤點」，有差異就直接產生調整單並過帳。已送審的盤點單仍由倉庫主管核准。</p>
     <p><label><input type="checkbox" name="Form.StocktakeBlindCount" value="true" checked="@Model.Form.StocktakeBlindCount" /> 盲盤：輸入實盤量時不顯示帳面量</label></p>
-    <p class="muted">預設開啟。只影響盤點畫面、盤點表與盤點匯出：作業員盤點中看不到帳面量，倉庫主管與送審後才看得到；庫存查詢頁本來就顯示結存，不受這個設定影響。</p>
+    <p class="muted">預設開啟。只影響盤點畫面、盤點表與盤點匯出：作業員盤點中看不到帳面量，倉庫主管與送審後才看得到；庫存查詢頁本來就顯示結存，不受這個設定影響。<strong>盤點不需審核時不套用盲盤</strong>（沒有主管把關差異，確認前要看得到帳面量）。</p>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveStocktake" value="true" checked="@Model.Form.AllowSelfApproveStocktake" /> 允許盤點單的建立者或送審者自己核准盤差</label></p>
     <p class="muted">預設不允許（D-07）。不論哪一種，都會記錄建立者、送審者、核准者與時間。</p>
     <h2>倉位註記</h2>

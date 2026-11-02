@@ -26,6 +26,10 @@
     {
         <p><label><input type="checkbox" name="AutoApprove" value="true" checked="@Model.AutoApprove" id="auto-approve" /> 送出後自動核准（立即發出正式料號）</label></p>
     }
+    else if (!Model.ApprovalEnabled)
+    {
+        <p class="muted" id="item-approval-disabled">物料審核已關閉：提出後直接啟用並發出正式料號；疑似與既有物料重複的，會交由物料管理員確認後才啟用。</p>
+    }
     <div class="actions">
         <button type="submit" id="item-create-submit">提出</button>
         <a href="/Items">取消</a>

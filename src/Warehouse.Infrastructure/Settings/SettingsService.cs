@@ -83,6 +83,9 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             Flag(SettingKeys.LocationAttributesEnabled, Defaults.LocationAttributesEnabled),
             Flag(SettingKeys.LocationImagesEnabled, Defaults.LocationImagesEnabled))
         {
+            ItemApprovalEnabled = Flag(SettingKeys.ItemApprovalEnabled, Defaults.ItemApprovalEnabled),
+            OpeningApprovalEnabled = Flag(SettingKeys.OpeningApprovalEnabled, Defaults.OpeningApprovalEnabled),
+            StocktakeApprovalEnabled = Flag(SettingKeys.StocktakeApprovalEnabled, Defaults.StocktakeApprovalEnabled),
             DocumentApprovalEnabled = Flag(SettingKeys.DocumentApprovalEnabled, Defaults.DocumentApprovalEnabled),
             AllowSelfApproveDocuments = Flag(SettingKeys.AllowSelfApproveDocuments, Defaults.AllowSelfApproveDocuments),
             DocumentPurposeEnabled = Flag(SettingKeys.DocumentPurposeEnabled, Defaults.DocumentPurposeEnabled),
@@ -164,6 +167,9 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.LocationNotesEnabled, original.LocationNotesEnabled, updated.LocationNotesEnabled, current.LocationNotesEnabled),
         (SettingKeys.LocationAttributesEnabled, original.LocationAttributesEnabled, updated.LocationAttributesEnabled, current.LocationAttributesEnabled),
         (SettingKeys.LocationImagesEnabled, original.LocationImagesEnabled, updated.LocationImagesEnabled, current.LocationImagesEnabled),
+        (SettingKeys.ItemApprovalEnabled, original.ItemApprovalEnabled, updated.ItemApprovalEnabled, current.ItemApprovalEnabled),
+        (SettingKeys.OpeningApprovalEnabled, original.OpeningApprovalEnabled, updated.OpeningApprovalEnabled, current.OpeningApprovalEnabled),
+        (SettingKeys.StocktakeApprovalEnabled, original.StocktakeApprovalEnabled, updated.StocktakeApprovalEnabled, current.StocktakeApprovalEnabled),
         (SettingKeys.DocumentApprovalEnabled, original.DocumentApprovalEnabled, updated.DocumentApprovalEnabled, current.DocumentApprovalEnabled),
         (SettingKeys.AllowSelfApproveDocuments, original.AllowSelfApproveDocuments, updated.AllowSelfApproveDocuments, current.AllowSelfApproveDocuments),
         (SettingKeys.DocumentPurposeEnabled, original.DocumentPurposeEnabled, updated.DocumentPurposeEnabled, current.DocumentPurposeEnabled),

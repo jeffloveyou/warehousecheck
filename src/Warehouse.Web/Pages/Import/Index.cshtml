@@ -74,6 +74,10 @@ else
         {
             <p><label><input type="checkbox" name="AutoApprove" value="true" checked="@Model.AutoApprove" id="import-auto-approve" /> 匯入後自動核准（立即發出正式料號；疑似重複的列維持待核准）</label></p>
         }
+        else if (Model.Kind == Warehouse.Application.Imports.ImportKind.Items && !Model.ItemApprovalEnabled)
+        {
+            <p class="muted" id="import-approval-disabled">物料審核已關閉：匯入的物料直接啟用；疑似重複的列維持待核准，由物料管理員確認。</p>
+        }
         <div class="actions"><button type="submit" id="import-upload">上傳並試算</button></div>
     </form>
 }

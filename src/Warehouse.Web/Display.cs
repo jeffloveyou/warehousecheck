@@ -129,6 +129,7 @@ public static class Display
         "document.approve" => "核准",
         "reservation.create" => "建立預留",
         "stocktake.approve" => "核准盤點",
+        "stocktake.confirm" => "確認盤點",
         _ => command,
     };
 
