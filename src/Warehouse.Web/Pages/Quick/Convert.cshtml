@@ -16,7 +16,7 @@
     <div class="message error" id="page-error">@Model.Error</div>
 }
 <form method="post" asp-route-id="@c.Id" class="panel" id="quick-convert-form"
-      data-locations-url="@Model.LocationsUrl" data-lots-url="@(isInbound ? "" : Model.LotsUrl)" data-type="@Model.Type">
+      data-locations-url="@Model.LocationsUrl" data-lots-url="@(isInbound ? "" : Model.LotsUrl)">
     <input type="hidden" name="Type" value="@Model.Type" />
     <input type="hidden" name="RequestId" value="@Model.RequestId" />
     <div class="form-grid">

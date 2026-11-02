@@ -20,7 +20,7 @@ const FORMAT_PREFIXES = [
   ['qrcode', 'qr_code'], ['microqr', 'qr_code'], ['ean13', 'ean_13'], ['ean8', 'ean_8'], ['upca', 'upc_a'], ['upce', 'upc_e'],
   ['code128', 'code_128'], ['code39', 'code_39'], ['code93', 'code_93'], ['itf', 'itf'], ['codabar', 'codabar'], ['datamatrix', 'data_matrix']
 ];
-export function normalizeFormat(name) {
+function normalizeFormat(name) {
   const key = String(name || '').toLowerCase().replace(/[-_\/ ]/g, '');
   for (let i = 0; i < FORMAT_PREFIXES.length; i++) {
     if (key.indexOf(FORMAT_PREFIXES[i][0]) === 0) return FORMAT_PREFIXES[i][1];

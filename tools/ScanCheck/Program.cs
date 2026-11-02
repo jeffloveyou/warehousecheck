@@ -64,9 +64,7 @@ await using (var db = Db())
     async Task<(Guid Id, string Code)> NewItemAsync(string name, TrackingMode tracking)
     {
         var item = await workflow.SubmitAsync(Guid.NewGuid(), new ItemDraft(name + " " + suffix, SeedData.Categories.Single(c => c.Code == "EL").Id,
-            SeedData.Units.Single(u => u.Code == "PCS").Id, tracking, null, null, null), itemManager, default);
-        var version = await db.Items.Where(i => i.Id == item.ItemId).Select(i => EF.Property<uint>(i, "Version")).SingleAsync();
-        await workflow.ApproveAsync(item.ItemId, version, [], null, itemManager, default);
+            SeedData.Units.Single(u => u.Code == "PCS").Id, tracking, null, null, null), new ItemSubmitOptions([], AutoApprove: true, []), itemManager, default);
         return (item.ItemId, await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync());
     }
     var ids = new List<Guid>();
@@ -535,7 +533,6 @@ Check(await WaitForAsync(camBlank, "() => document.body.dataset.trackState === '
 // 解碼本身由 12a～12e 與 tools/DecodeCheck 驗證。
 const string StubModule = """
     let h = null, running = false;
-    export function unsupportedReason() { return null; }
     export async function start(video, handlers, options) {
       if (h && h !== handlers && h.onStop) { const o = h; h = null; o.onStop(); }
       h = handlers; running = true; window.__stubContinuous = !!(options && options.continuous);

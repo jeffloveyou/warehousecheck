@@ -11,14 +11,6 @@ public class DatabaseStatus(WarehouseDbContext db) : IDatabaseStatus
     public Task<bool> CanConnectAsync(CancellationToken cancellationToken)
         => db.Database.CanConnectAsync(cancellationToken);
 
-    public async Task<string?> GetServerVersionAsync(CancellationToken cancellationToken)
-    {
-        // 無參數的 FormattableString；SqlQuery<string> 要求結果欄位名稱為 Value
-        return await db.Database
-            .SqlQuery<string>($"SELECT current_setting('server_version') AS \"Value\"")
-            .SingleAsync(cancellationToken);
-    }
-
     public async Task<DatabaseDetails> GetDetailsAsync(CancellationToken cancellationToken)
     {
         // 欄位別名用 snake_case（DbContext 採命名慣例）；pg_stat_archiver、pg_database_size(current_database()) 一般帳號（非擁有者的網站帳號）也能讀

@@ -97,15 +97,4 @@ public sealed class LocationImage
     public string? DeactivatedByName { get; private set; }
 
     public DateTimeOffset? DeactivatedAt { get; private set; }
-
-    public void Deactivate(string actorName, DateTimeOffset now)
-    {
-        if (!IsActive)
-        {
-            throw new DomainRuleException("這張圖片已經停用。");
-        }
-        IsActive = false;
-        DeactivatedByName = actorName;
-        DeactivatedAt = now.ToUniversalTime();
-    }
 }

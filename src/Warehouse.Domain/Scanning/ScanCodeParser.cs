@@ -30,7 +30,6 @@ public sealed record ScanCode(ScanCodeKind Kind, string Raw, string? WarehouseCo
 /// </summary>
 public static partial class ScanCodeParser
 {
-    public const string LocationPrefix = "WH:LOC:";
     public const string ItemPrefix = "WH:ITEM:";
 
     public static ScanCode Parse(string? raw)

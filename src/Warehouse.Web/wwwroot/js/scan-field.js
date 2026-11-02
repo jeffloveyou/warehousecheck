@@ -4,7 +4,7 @@
 //  - 物料（單件）：欄位換成正式料號、顯示品名，焦點移到下一個欄位。外箱條碼不換（數量是基本單位），提示改掃單件或輸入料號。
 //  - 其他：顯示原因，欄位保留原文讓人修改；不猜物料、不送出表單（同一個值再按 Tab 就放行，Shift+Tab 一律放行）。
 // 已解析過的值再按 Enter 才照常送出表單。需要先載入 scan-input.js（提示音）；不載入相機程式。
-// 解析邏輯另外以 window.WhScanField.resolveItem 提供給單欄相機（camera-field.js），鍵盤與相機走同一套規則；
+// 單欄相機（camera-field.js）共用 window.WhScanField 的 infoFor、show 顯示結果；
 // 結果一律顯示在輸入欄正下方的 .scan-field-info（infoFor）。
 (function () {
   'use strict';
@@ -68,7 +68,7 @@
     }
   }
 
-  window.WhScanField = { infoFor: infoFor, show: show, resolveItem: resolveItem };
+  window.WhScanField = { infoFor: infoFor, show: show };
 
   document.querySelectorAll('input[data-scan-field]').forEach(function (input) {
     infoFor(input);

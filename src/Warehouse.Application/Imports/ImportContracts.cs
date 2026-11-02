@@ -56,11 +56,6 @@ public interface IImportService
     /// <summary>試算有效時間：超過後必須重新上傳（資料可能已變動）。</summary>
     static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
 
-    /// <summary>上傳並試算（不自動核准），見另一個多載。</summary>
-    Task<Guid> UploadAsync(
-        ImportKind kind, Guid? targetId, string fileName, Stream content, Actor actor, CancellationToken cancellationToken) =>
-        UploadAsync(kind, targetId, fileName, content, autoApprove: false, actor, cancellationToken);
-
     /// <summary>
     /// 上傳並試算，回傳批次 ID。<paramref name="targetId"/>：儲位＝倉庫 ID；期初單明細＝期初單 ID；其他為 null。
     /// <paramref name="autoApprove"/>（D-31，只限物料管理員匯入物料，否則丟 <c>import.forbidden</c>）：

@@ -71,7 +71,7 @@ function describeError(error) {
 }
 
 // 這台裝置能不能開相機；不能時回傳原因（給按鈕顯示），可以時回傳 null
-export function unsupportedReason() {
+function unsupportedReason() {
   if (!window.isSecureContext) return describeError({ name: 'SecurityError' });
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return '這個瀏覽器不支援相機，請改用條碼槍或手動輸入。';
   return null;

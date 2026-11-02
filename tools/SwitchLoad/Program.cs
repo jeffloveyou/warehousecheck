@@ -54,9 +54,7 @@ if (mode == "prepare")
             var workflow = new ItemWorkflowService(db, TimeProvider.System);
             var item = await workflow.SubmitAsync(Guid.NewGuid(), new ItemDraft("切換測試物料 " + suffix,
                 SeedData.Categories.Single(c => c.Code == "CS").Id, SeedData.Units.Single(u => u.Code == "PCS").Id, TrackingMode.None, null, null, null),
-                itemManager, default);
-            var version = await db.Items.Where(i => i.Id == item.ItemId).Select(i => EF.Property<uint>(i, "Version")).SingleAsync();
-            await workflow.ApproveAsync(item.ItemId, version, [], null, itemManager, default);
+                new ItemSubmitOptions([], AutoApprove: true, []), itemManager, default);
             itemCode = await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync();
         }
         var purchase = SeedData.Purposes.Single(x => x.Code == "PURCHASE").Id;
