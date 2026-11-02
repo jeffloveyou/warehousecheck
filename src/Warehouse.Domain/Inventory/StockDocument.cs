@@ -184,8 +184,8 @@ public sealed class StockDocument
     /// 進出倉、移庫單加一行明細（只限草稿）。數量必須大於 0；
     /// 移庫必須指定目的儲位且不可與來源相同；依預留出庫（<paramref name="reservationId"/>）只限出倉單；
     /// 有效期限只在進倉時有意義（建立新批號）。追蹤模式規則同期初（批號必填、序號每行 1）。
-    /// <paramref name="mergeIfSame"/>（M5 掃碼「逐件累加」）：已有完全相同的行（儲位、目的、物料、批號、有效期限、預留，且沒有序號）時，
-    /// 把數量加到那一行並回傳它；否則照常新增。只影響草稿，不影響庫存。
+    /// <paramref name="mergeIfSame"/>（M5 掃碼「逐件累加」）：已有相同的行（儲位、目的、物料、批號相同，且沒有序號）時，
+    /// 把數量加到那一行並回傳它；有效期限、預留沿用那一行，這次填的不同值不採用（使用者 2026-11-02 決定）。否則照常新增。只影響草稿，不影響庫存。
     /// </summary>
     public StockDocumentLine AddMovementLine(
         Guid lineId, Guid itemId, TrackingMode trackingMode, int decimalPlaces, Guid locationId, Guid? targetLocationId,
@@ -229,13 +229,12 @@ public sealed class StockDocument
         line.SetMovement(targetLocationId, reservationId);
         if (_lines.FirstOrDefault(l => l.SameKey(line)) is { } existing)
         {
-            if (mergeIfSame && line.SerialNo is null && existing.ReservationId == line.ReservationId
-                && existing.ExpiryDate == line.ExpiryDate)
+            if (mergeIfSame && line.SerialNo is null)
             {
                 existing.IncreaseQuantity(line.Quantity, decimalPlaces);
                 return existing;
             }
-            throw new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細，請刪除後重新加入正確數量。");
+            throw existing.DuplicateError();
         }
         if (_lines.Count >= MaxLines)
         {
@@ -292,12 +291,12 @@ public sealed class StockDocument
         }
         if (_lines.FirstOrDefault(l => l.SameKey(line)) is { } existing)
         {
-            if (mergeIfSame && line.SerialNo is null && line.Quantity > 0 && existing.ExpiryDate == line.ExpiryDate)
+            if (mergeIfSame && line.SerialNo is null && line.Quantity > 0)
             {
                 existing.IncreaseQuantity(line.Quantity, decimalPlaces);
                 return existing;
             }
-            throw new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細，請刪除後重新加入正確數量。");
+            throw existing.DuplicateError();
         }
         if (_lines.Count >= MaxLines)
         {
@@ -600,6 +599,12 @@ public sealed class StockDocumentLine
         return new StockDocumentLine { Id = id, DocumentId = documentId, LineNo = lineNo, LocationId = locationId, Quantity = 0 };
     }
 
+
+    /// <summary>相同的行無法累加時的錯誤：序號重複講清楚是哪一行；其他（不累加的呼叫端，例如 API）維持原訊息。</summary>
+    internal DomainRuleException DuplicateError() =>
+        SerialNo is { } serial
+            ? new DomainRuleException($"序號 {serial} 已在第 {LineNo} 行，同一序號不能加兩次。")
+            : new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細，請刪除後重新加入正確數量。");
 
     internal bool SameKey(StockDocumentLine other) =>
         other.LocationId == LocationId && other.TargetLocationId == TargetLocationId && other.ItemId == ItemId

@@ -45,6 +45,7 @@
   var lastLot = null;       // 同一物料連續掃時沿用批號 { itemId, lot }
   var busy = false;
   var confirmLarge = false; // 數量偏大時要再按一次 Enter
+  var uncertainKey = null;  // 上一筆「不確定是否已加入」的明細鍵：同一行再送要先確認（相同的行會累加，避免加兩次）
 
   // ---- 偏好跟著帳號（prefs.js，M8-06）；沒有 prefs.js 時退回這台裝置的 localStorage ----
   var LOCAL_KEYS = { 'scan.addMode': 'wh.scan.addMode', 'scan.hiddenFields': 'wh.scan.hiddenFields' };
@@ -509,7 +510,7 @@
     }
   }
 
-  function payload(merge) {
+  function payload() {
     var targetWarehouse = el.targetWarehouse && !el.targetWarehouse.hidden && el.targetWarehouse.value !== warehouseCode
       ? el.targetWarehouse.value : null;
     return {
@@ -522,8 +523,14 @@
       expiryDate: el.expiry && !el.expiry.hidden && el.expiry.value ? el.expiry.value : null,
       reservationId: el.reservation && !el.reservation.hidden && el.reservation.value ? el.reservation.value : null,
       quantity: Number(el.quantity.value),
-      merge: merge
+      merge: true // 相同的行一律累加（使用者 2026-11-02：像買菜一樣，掃到或輸入相同的就加數量）
     };
+  }
+
+  // 明細的累加鍵（同伺服器 SameKey：儲位、目的、物料、批號、序號；大小寫不分）
+  function lineKey(data) {
+    return [data.locationCode, data.targetLocationCode, data.itemCode, data.lotNo, data.serialNo]
+      .map(function (v) { return (v || '').toUpperCase(); }).join('|');
   }
 
   // 用重繪的明細表換掉舊的。加明細不會改變單據版本（只寫明細表），所以不動頁面上的 Version；
@@ -556,37 +563,44 @@
   // 否則排在後面、內容相同的那一筆會再送一次（等於自動重送，M8-03 審查 1）
   var inflight = Promise.resolve();
   var epoch = 0;
-  function submit(merge) {
+  function submit(each) {
     var mine = epoch;
-    var run = inflight.then(function () { return mine === epoch ? submitNow(merge) : undefined; });
+    var run = inflight.then(function () { return mine === epoch ? submitNow(each) : undefined; });
     inflight = run.catch(function () { });
     return run;
   }
 
-  async function submitNow(merge) {
+  async function submitNow(each) {
     var s = step();
     if (s !== 'quantity') {
       fail('還沒完成：' + LABELS[s]);
       focusScan();
       return;
     }
-    var data = payload(merge);
-    if (merge) data.quantity = pending;
+    var data = payload();
+    if (each) data.quantity = pending;
     if (!(data.quantity > 0)) {
-      if (!merge) {
+      if (!each) {
         fail('數量必須大於 0。');
         focusQuantity();
       }
       return;
     }
-    if (!merge && !/^\d+(\.\d+)?$/.test(el.quantity.value.trim())) {
+    if (!each && !/^\d+(\.\d+)?$/.test(el.quantity.value.trim())) {
       fail('數量請輸入數字（例 3 或 2.5）。');
       focusQuantity();
       return;
     }
-    if (!merge && !confirmLarge && data.quantity > 1000 * Math.max(1, item ? item.packQuantity : 1)) {
+    if (!each && !confirmLarge && data.quantity > 1000 * Math.max(1, item ? item.packQuantity : 1)) {
       confirmLarge = true;
       status('數量 ' + fmt(data.quantity) + ' 偏大，請確認後再按一次 Enter（掃錯欄位時請修改）。', 'warn');
+      focusQuantity();
+      return;
+    }
+    var key = lineKey(data);
+    if (!each && uncertainKey !== null && uncertainKey === key) {
+      uncertainKey = null;
+      status('上一筆同樣的明細不確定是否已加入；相同的明細會累加，可能變成加兩次。請先核對明細表，確定要再加 ' + fmt(data.quantity) + ' 就再按一次 Enter。', 'warn');
       focusQuantity();
       return;
     }
@@ -597,7 +611,7 @@
     confirmLarge = false;
     busy = true;
     el.add.disabled = true;
-    if (merge) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
+    if (each) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
     try {
       var res = await fetch(addUrl, {
         method: 'POST',
@@ -611,29 +625,47 @@
       });
       var type = res.headers.get('Content-Type') || '';
       if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
-        ok('已加入：' + data.itemCode + ' × ' + fmt(data.quantity) + (merge ? '（累加）' : '') + '，儲位 ' + data.locationCode);
-        log(data.itemCode, '加入 ' + fmt(data.quantity), true);
+        // 相同的行會累加（標頭 X-Line-*，ScanLineHeaders.cs）：講清楚加到第幾行、現在共幾個；
+        // 有效期限、預留沿用該行時用警告色提醒這次填的值沒採用
+        var lineNo = res.headers.get('X-Line-No');
+        var lineQty = res.headers.get('X-Line-Quantity');
+        var ignored = (res.headers.get('X-Line-Ignored') || '').split(',').filter(Boolean)
+          .map(function (k) { return k === 'expiry' ? '有效期限' : '預留'; });
+        if (res.headers.get('X-Line-Merged') === '1' && lineNo && lineQty) {
+          var text = '已累加：' + data.itemCode + ' + ' + fmt(data.quantity) + '，第 ' + lineNo + ' 行現在共 ' + fmt(lineQty);
+          if (ignored.length) {
+            status(text + '。這次填的' + ignored.join('、') + '與該行不同，已沿用該行的值。', 'warn');
+          } else {
+            ok(text);
+          }
+          log(data.itemCode, '累加 ' + fmt(data.quantity) + '，共 ' + fmt(lineQty), true);
+        } else {
+          ok('已加入：' + data.itemCode + ' × ' + fmt(data.quantity) + '，儲位 ' + data.locationCode);
+          log(data.itemCode, '加入 ' + fmt(data.quantity), true);
+        }
         afterSubmit();
       } else if (res.status === 400 && type.indexOf('json') >= 0) {
         // 400＝規則錯誤（伺服器在寫入前拒絕），這一筆沒有加入
         epoch++;
         fail((await res.json()).message || '加入失敗');
         log(data.itemCode, '加入失敗', false);
-        if (merge) pending = 0;
+        if (each) pending = 0;
       } else {
         // 其他錯誤（逾時登入、500 等）不能確定是否已寫入：重新讀取明細表讓人核對，不自動重送（PR 2 審查 S2）
         epoch++;
         fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
           : '不確定這一行是否已加入（HTTP ' + res.status + '），已重新讀取明細表，請核對後再繼續。');
         log(data.itemCode, '不確定是否已加入', false);
-        if (merge) pending = 0;
+        uncertainKey = key;
+        if (each) pending = 0;
         await reloadLines();
       }
     } catch (e) {
       epoch++;
       fail('網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
       log(data.itemCode, '不確定是否已加入', false);
-      if (merge) pending = 0;
+      uncertainKey = key;
+      if (each) pending = 0;
       await reloadLines();
     } finally {
       busy = false;
@@ -665,6 +697,7 @@
   }
 
   function clearLine() {
+    uncertainKey = null;
     item = null;
     lastItemQuery = null;
     pending = 0;
@@ -836,10 +869,76 @@
     el[k].addEventListener('change', showNext);
   });
 
+  // 明細表的「刪除」「刪除勾選的明細」：改用 fetch 送出、換掉明細表，不重新整理頁面，輸入區的內容不受影響（使用者 2026-11-02）。
+  // 用事件委派：明細表重繪後不必重綁。勾選刪除的確認視窗在 documents.js（按取消時 defaultPrevented，這裡就不送）。
+  // 與加入明細排同一個佇列，一次只送一筆；不看 epoch（加入失敗不應讓排隊中的刪除消失）
+  var removeUrl = panel.getAttribute('data-remove-url');
+  var removing = 0; // 刪除送出中：離開頁面、PWA 換版重載前要知道
+  document.addEventListener('submit', function (ev) {
+    var form = ev.target;
+    if (ev.defaultPrevented || !removeUrl || !form.closest || !form.closest('[data-scan-lines]')) return;
+    if (!/[?&]handler=RemoveLines?(&|$)/.test(form.getAttribute('action') || '')) return;
+    ev.preventDefault();
+    var data = new FormData(form); // 包含用 form 屬性掛到勾選表單的勾選框
+    var ids = data.getAll('lineIds').concat(data.getAll('lineId'));
+    if (!ids.length) return;
+    var buttons = form.querySelectorAll('button');
+    buttons.forEach(function (b) { b.disabled = true; });
+    var run = inflight.then(function () { return removeNow(ids); });
+    inflight = run.catch(function () { });
+    run.then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+  });
+
+  async function removeNow(ids) {
+    removing++;
+    try {
+      await removeCore(ids);
+    } finally {
+      removing--;
+    }
+  }
+
+  async function removeCore(ids) {
+    if (!navigator.onLine) {
+      fail('目前離線，無法刪除；恢復連線後再按一次。');
+      return;
+    }
+    try {
+      var res = await fetch(removeUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/html, application/json',
+          'RequestVerificationToken': tokenInput ? tokenInput.value : ''
+        },
+        body: JSON.stringify({ lineIds: ids })
+      });
+      var type = res.headers.get('Content-Type') || '';
+      if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+        ok('已刪除 ' + ids.length + ' 行明細。');
+        log('明細', '刪除 ' + ids.length + ' 行', true);
+      } else if (res.status === 400 && type.indexOf('json') >= 0) {
+        fail((await res.json()).message || '刪除失敗');
+        log('明細', '刪除失敗', false);
+        await reloadLines(); // 例如別人已刪掉那一行：換成最新的明細表
+      } else {
+        fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
+          : '不確定是否已刪除（HTTP ' + res.status + '），已重新讀取明細表，請核對。');
+        await reloadLines();
+      }
+    } catch (e) {
+      fail('網路中斷：不確定是否已刪除，已重新讀取明細表，請核對。');
+      await reloadLines();
+    }
+    showNext();
+    focusScan();
+  }
+
   // 頁面要離開時，面板上還有未加入的物料就提醒（PWA 更新提示也會呼叫）
-  window.WhScanDirty = function () { return scanner.pending() > 0 || busy || !!el.item.value.trim(); };
+  window.WhScanDirty = function () { return scanner.pending() > 0 || busy || removing > 0 || !!el.item.value.trim(); };
   // 自動化實測（tools/ScanCheck）用：佇列是否還在處理
-  window.WhScanBusy = function () { return scanner.pending() > 0 || busy; };
+  window.WhScanBusy = function () { return scanner.pending() > 0 || busy || removing > 0; };
 
   // 初始化都成功後才收起沒有 JS 時的傳統表單（中途出錯時頁面仍有可用的輸入方式；同一頁只保留一套輸入）
   var fallback = document.querySelector('[data-entry-fallback]');

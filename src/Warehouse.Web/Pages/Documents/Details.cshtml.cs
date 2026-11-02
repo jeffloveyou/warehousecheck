@@ -163,9 +163,17 @@ public class DetailsModel(
                 doc.DocType == StockDocumentType.Inbound ? Line.ExpiryDate : null,
                 isTransfer ? Line.TargetWarehouseCode : null,
                 isTransfer ? Line.TargetLocationCode : null,
-                reservationId);
-            await documents.AddLineAsync(id, input, actor, cancellationToken);
-            return "已新增明細。";
+                reservationId,
+                MergeIfSame: true); // 相同的行累加數量（使用者 2026-11-02 決定，與掃碼面板一致）
+            var lineId = await documents.AddLineAsync(id, input, actor, cancellationToken);
+            if (!doc.Lines.Any(l => l.Id == lineId)
+                || (await documents.GetAsync(id, cancellationToken))?.Lines.FirstOrDefault(l => l.Id == lineId) is not { } line)
+            {
+                return "已新增明細。";
+            }
+            var ignored = IgnoredFields(doc.DocType, input.ExpiryDate, input.ReservationId, line);
+            return $"已累加到第 {line.LineNo} 行，現在共 {Display.Qty(line.Quantity)}。"
+                + (ignored.Count > 0 ? $"這次填的{string.Join("、", ignored.Select(f => f == "expiry" ? "有效期限" : "預留"))}與該行不同，已沿用該行的值。" : "");
         }, cancellationToken);
 
     /// <summary>明細表勾選多行一次刪除（M8-03）。</summary>
@@ -284,6 +292,7 @@ public class DetailsModel(
         Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
         Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!)
     {
+        RemoveUrl = Url.Page("/Documents/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Documents/Details", "ItemSearch", new { id = Doc.Id }),
         LocationsUrl = Url.Page("/Documents/Details", "Locations", new { id = Doc.Id }),
         LotsUrl = Doc.DocType == StockDocumentType.Inbound ? null : Url.Page("/Documents/Details", "Lots", new { id = Doc.Id }),
@@ -396,9 +405,10 @@ public class DetailsModel(
             return StatusCode(StatusCodes.Status403Forbidden);
         }
         Guid lineId;
+        DocumentDetails doc;
         try
         {
-            var doc = await documents.GetAsync(id, cancellationToken)
+            doc = await documents.GetAsync(id, cancellationToken)
                 ?? throw new NotFoundException("document.not_found", "找不到單據。");
             var isTransfer = doc.DocType == StockDocumentType.Transfer;
             lineId = await documents.AddLineAsync(id, new DocumentLineInput(
@@ -426,7 +436,65 @@ public class DetailsModel(
         var actor = User.ToActor();
         CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
         Response.Headers["X-Line-Id"] = lineId.ToString();
+        if (current.Lines.FirstOrDefault(l => l.Id == lineId) is { } line)
+        {
+            ScanLineHeaders.Set(Response, line.LineNo, line.Quantity, doc.Lines.Any(l => l.Id == lineId),
+                IgnoredFields(doc.DocType, request.ExpiryDate, request.ReservationId, line));
+        }
         return Partial("_DocumentLines", this);
+    }
+
+    /// <summary>
+    /// 累加時有效期限、預留沿用該行（使用者 2026-11-02）：這次填了不同值的欄位（expiry、reservation），畫面據此提醒。
+    /// 預留連「沒選」也算不同：數量會算進該行的預留。
+    /// </summary>
+    private static List<string> IgnoredFields(StockDocumentType type, DateOnly? expiry, Guid? reservationId, DocumentLineRow line)
+    {
+        var ignored = new List<string>();
+        if (type == StockDocumentType.Inbound && expiry is not null && expiry != line.ExpiryDate)
+        {
+            ignored.Add("expiry");
+        }
+        if (type == StockDocumentType.Outbound && reservationId != line.ReservationId)
+        {
+            ignored.Add("reservation");
+        }
+        return ignored;
+    }
+
+    /// <summary>
+    /// 明細表的「刪除」「刪除勾選的明細」（POST JSON）：成功回傳重繪的明細表，不重新整理頁面，掃碼面板的輸入不受影響（使用者 2026-11-02）。
+    /// 規則錯誤回 400 JSON；沒有 JS 時仍走 <see cref="OnPostRemoveLineAsync"/>／<see cref="OnPostRemoveLinesAsync"/>。
+    /// </summary>
+    public async Task<IActionResult> OnPostScanRemoveLinesAsync(Guid id, [FromBody] ScanRemoveRequest request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            await documents.RemoveLinesAsync(id, request?.LineIds ?? [], User.ToActor(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
+        }
+        if (await documents.GetAsync(id, cancellationToken) is not { } current)
+        {
+            return NotFound();
+        }
+        Doc = current;
+        Version = current.Version;
+        var actor = User.ToActor();
+        CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        return Partial("_DocumentLines", this);
+    }
+
+    /// <summary>明細表送出的刪除（JSON）。</summary>
+    public sealed class ScanRemoveRequest
+    {
+        public List<Guid>? LineIds { get; set; }
     }
 
     /// <summary>掃碼面板送出的明細（JSON）。</summary>

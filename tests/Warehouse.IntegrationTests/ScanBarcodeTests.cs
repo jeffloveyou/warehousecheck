@@ -319,9 +319,9 @@ public class ScanBarcodeTests
         await Docs(s => s.AddLineAsync(inbound, new DocumentLineInput("P-01", itemCode, 12), Operator, Ct));
     }
 
-    // T-M5-03-06：逐件累加只合併完全相同的草稿行（批號、有效期限都相同）；序號物料每個序號一行
+    // T-M5-03-06：相同的草稿行（儲位、物料、批號）累加，有效期限沿用該行（2026-11-02 起）；序號物料每個序號一行
     [Fact]
-    public async Task 逐件累加_只合併完全相同的行_序號不合併_期初也適用()
+    public async Task 相同的行累加_效期沿用該行_序號不合併_期初也適用()
     {
         var (w1, _) = await WarehouseAsync("M-01", "M-02");
         var (_, lotCode) = await ActiveItemAsync(TrackingMode.Lot);
@@ -334,15 +334,16 @@ public class ScanBarcodeTests
         Assert.Equal(first, await Docs(s => s.AddLineAsync(doc, Lot("M-01", "L1", 3), Operator, Ct)));
         await Docs(s => s.AddLineAsync(doc, Lot("M-02", "L1", 1), Operator, Ct));
         await Docs(s => s.AddLineAsync(doc, Lot("M-01", "L2", 1), Operator, Ct));
-        await Assert.ThrowsAsync<DomainRuleException>(() =>
-            Docs(s => s.AddLineAsync(doc, Lot("M-01", "L1", 1, new DateOnly(2027, 1, 1)), Operator, Ct)));
+        // 有效期限不同也累加，沿用該行的效期（使用者 2026-11-02 決定）
+        Assert.Equal(first, await Docs(s => s.AddLineAsync(doc, Lot("M-01", "L1", 1, new DateOnly(2027, 1, 1)), Operator, Ct)));
         await Docs(s => s.AddLineAsync(doc, new DocumentLineInput("M-01", serialCode, 1, SerialNo: "s1", MergeIfSame: true), Operator, Ct));
-        await Assert.ThrowsAsync<DomainRuleException>(() =>
+        var serialEx = await Assert.ThrowsAsync<DomainRuleException>(() =>
             Docs(s => s.AddLineAsync(doc, new DocumentLineInput("M-01", serialCode, 1, SerialNo: "S1", MergeIfSame: true), Operator, Ct)));
+        Assert.Contains("序號 S1 已在第", serialEx.Message);
 
         var lines = (await Docs(s => s.GetAsync(doc, Ct)))!.Lines;
         Assert.Equal(4, lines.Count);
-        Assert.Equal(5m, lines.Single(l => l.Id == first).Quantity);
+        Assert.Equal((6m, (DateOnly?)null), (lines.Single(l => l.Id == first).Quantity, lines.Single(l => l.Id == first).ExpiryDate));
 
         var opening = await Opening(s => s.CreateAsync(w1, null, Operator, Ct));
         await Opening(s => s.AddLineAsync(opening, new OpeningLineInput("M-01", lotCode, "L1", null, null, 4, MergeIfSame: true), Operator, Ct));
