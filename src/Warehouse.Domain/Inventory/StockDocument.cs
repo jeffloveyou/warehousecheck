@@ -609,7 +609,7 @@ public sealed class StockDocumentLine
     internal DomainRuleException DuplicateError() =>
         SerialNo is { } serial
             ? new DomainRuleException($"序號 {serial} 已在第 {LineNo} 行，同一序號不能加兩次。")
-            : new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細，請刪除後重新加入正確數量。");
+            : new DomainRuleException("這張單已經有相同儲位、物料、批號／序號、預留的明細，請刪除後重新加入正確數量。");
 
     /// <summary>明細鍵（同資料庫 ux_stock_document_lines_key）：儲位、目的、物料、批號、序號、預留。</summary>
     internal bool SameKey(StockDocumentLine other) =>

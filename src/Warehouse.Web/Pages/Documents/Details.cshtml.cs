@@ -173,7 +173,7 @@ public class DetailsModel(
             }
             var ignored = IgnoredFields(doc.DocType, input.ExpiryDate, line);
             return $"已累加到第 {line.LineNo} 行，現在共 {Display.Qty(line.Quantity)}。"
-                + (ignored.Count > 0 ? $"這次填的{string.Join("、", ignored.Select(f => f == "expiry" ? "有效期限" : "預留"))}與該行不同，已沿用該行的值。" : "");
+                + (ignored.Count > 0 ? "這次填的有效期限與該行不同，已沿用該行的值。" : "");
         }, cancellationToken);
 
     /// <summary>明細表勾選多行一次刪除（M8-03）。</summary>

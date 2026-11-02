@@ -113,6 +113,12 @@ public class PostingHardeningTests
         await ConfirmAsync(doc);
         Assert.Equal(1m, await BalanceAsync(item, w, "A-01"));
         Assert.Equal(1m, await AvailableAsync(item, w));
+
+        // 沖銷（審查必修）：沖銷單沒有預留，三行併成一行；過帳後結存回到 10
+        var reversal = await Docs(s => s.CreateReversalAsync(doc, Operator, Ct));
+        Assert.Equal(9m, Assert.Single((await Docs(s => s.GetAsync(reversal, Ct)))!.Lines).Quantity);
+        await ConfirmAsync(reversal);
+        Assert.Equal(10m, await BalanceAsync(item, w, "A-01"));
     }
 
     // T-M4-06-03：回滾：移庫目的儲位在過帳前被停用 → 整張失敗；沒有異動、沒有冪等紀錄、沒有新批號

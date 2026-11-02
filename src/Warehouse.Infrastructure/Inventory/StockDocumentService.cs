@@ -186,8 +186,8 @@ public sealed class StockDocumentService(
             {
                 LineId = lineId, LineQuantity = line.Quantity, Location = source.Code, Target = target?.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
                 input.ReservationId,
-                // 累加時效期、預留沿用該行（2026-11-02）：記下該行實際的值，查帳時才不會把這次填的值當成已採用
-                input.ExpiryDate, LineExpiryDate = line.ExpiryDate, LineReservationId = line.ReservationId,
+                // 累加時效期沿用該行（2026-11-02）：記下該行實際的效期，查帳時才不會把這次填的值當成已採用
+                input.ExpiryDate, LineExpiryDate = line.ExpiryDate,
             });
         });
         return lineId;
@@ -568,8 +568,9 @@ public sealed class StockDocumentService(
             var (location, target) = type == StockDocumentType.Transfer
                 ? (line.TargetLocationId!.Value, (Guid?)line.LocationId)
                 : (line.LocationId, null);
+            // 原單「預留不同分兩行」（2026-11-02）在沖銷單沒有預留，會變成同一個明細鍵：累加成一行
             reversal.AddMovementLine(Guid.NewGuid(), item.Id, item.TrackingMode, item.DecimalPlaces, location, target,
-                line.LotNo, line.SerialNo, null, line.Quantity, null);
+                line.LotNo, line.SerialNo, null, line.Quantity, null, mergeIfSame: true);
         }
         db.StockDocuments.Add(reversal);
         AuditLog.Add(db, actor, now, "document.reversal_create", "stock_document", reversal.Id.ToString(), null,
@@ -894,7 +895,7 @@ public sealed class StockDocumentService(
         {
             throw pg.ConstraintName switch
             {
-                "ux_stock_document_lines_key" => new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細。"),
+                "ux_stock_document_lines_key" => new DomainRuleException("這張單已經有相同儲位、物料、批號／序號、預留的明細。"),
                 "ux_stock_documents_reversal" => new ConflictException("document.reversal_exists", "這張單已經有沖銷單（未取消）。"),
                 "pk_processed_commands" => new ConflictException("idempotency.key_reused", "這個請求識別碼已被使用。"),
                 "pk_stock_documents" => new ConflictException("document.request_id_conflict", "這個請求識別碼已被使用，請重新整理頁面。"),
