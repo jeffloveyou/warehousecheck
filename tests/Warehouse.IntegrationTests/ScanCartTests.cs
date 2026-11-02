@@ -153,6 +153,19 @@ public class ScanCartTests
         var t = (await Docs(x => x.GetAsync(transfer, Ct)))!;
         Assert.Null(t.PurposeId);
         Assert.Equal(("A-01", "A-02"), (t.Lines.Single().LocationCode, t.Lines.Single().TargetLocationCode));
+
+        // T-LINE-04：兩行轉成同一儲位、物料、批號但效期不同 → 整批不轉（轉單沒有畫面提示，不沿用效期）；效期相同照常累加成一行
+        var lot = await ItemCodeAsync(TrackingMode.Lot);
+        var cart3 = await Carts(x => x.CreateAsync(null, me, Ct));
+        var e1 = await Carts(x => x.AddAsync(cart3, new ScanCartAddInput(lot, $"WH:LOC:{c}:A-01", 1m), me, Ct));
+        var e2 = await Carts(x => x.AddAsync(cart3, new ScanCartAddInput(lot, null, 2m), me, Ct));
+        Assert.NotEqual(e1, e2);
+        ScanCartConvertInput Expiry(DateOnly second) => new(StockDocumentType.Inbound, w, PurchaseIn,
+            [new ScanCartConvertLine(e1, "A-01", LotNo: "L1", ExpiryDate: new DateOnly(2027, 1, 1)),
+             new ScanCartConvertLine(e2, "A-01", LotNo: "L1", ExpiryDate: second)], Guid.NewGuid());
+        Assert.Contains("有效期限不同", await MessageAsync(() => Docs(x => x.CreateFromScanCartAsync(cart3, Expiry(new DateOnly(2028, 1, 1)), me, Ct))));
+        var sameExpiry = await Docs(x => x.CreateFromScanCartAsync(cart3, Expiry(new DateOnly(2027, 1, 1)), me, Ct));
+        Assert.Equal(3m, Assert.Single((await Docs(x => x.GetAsync(sameExpiry, Ct)))!.Lines).Quantity);
     }
 
     // T-QC-04：刪除購物車轉入的草稿（不留單據、稽核保留）；一般草稿與已過帳不能刪；別人不能刪

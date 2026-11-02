@@ -59,8 +59,15 @@ public partial class DocumentPagesTests
             {
                 ["Line.LocationCode"] = "a-01", ["Line.ItemCode"] = itemCode.ToLowerInvariant(), ["Line.Quantity"] = "7",
             })).StatusCode);
+            // T-LINE-01：一般表單加入相同的行也累加，訊息說明加到第幾行（使用者 2026-11-02）
+            Assert.Equal(HttpStatusCode.Redirect, (await op.PostFormAsync(docUrl, docUrl + "?handler=AddLine", new Dictionary<string, string>
+            {
+                ["Line.LocationCode"] = "A-01", ["Line.ItemCode"] = itemCode, ["Line.Quantity"] = "3",
+            })).StatusCode);
             var html = await op.GetStringAsync(docUrl);
             Assert.Contains(itemCode, html);
+            Assert.Contains("已累加到第 1 行，現在共 10", html);
+            Assert.Contains("明細（1 行）", html);
             Assert.DoesNotContain("handler=Approve", html);
             var version = VersionPattern().Match(html).Groups[1].Value;
             var key = KeyPattern().Match(html).Groups[1].Value;
@@ -153,6 +160,9 @@ public partial class DocumentPagesTests
         var merged = await second.Content.ReadAsStringAsync(Ct);
         Assert.Contains("明細（1 行）", merged);
         Assert.Contains(">5<", merged);
+        Assert.True(second.Headers.TryGetValues("X-Line-Merged", out var mergedFlag) && mergedFlag.Single() == "1");
+        Assert.Equal("5", second.Headers.GetValues("X-Line-Quantity").Single());
+        Assert.False(second.Headers.Contains("X-Line-Ignored"));
         var duplicate = await AddAsync(op, line with { merge = false }, token);
         Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
         Assert.Contains("相同儲位", (await duplicate.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("message").GetString());
@@ -162,6 +172,26 @@ public partial class DocumentPagesTests
         Assert.DoesNotContain("id=\"scan-panel\"", viewerHtml);
         var viewerToken = WebUtility.HtmlDecode(TokenPattern().Match(viewerHtml).Groups[1].Value);
         Assert.Equal(HttpStatusCode.Forbidden, (await AddAsync(viewer, line, viewerToken)).StatusCode);
+
+        // T-LINE-02：明細表的刪除（JSON）：回傳重繪的明細表，頁面不重新整理
+        async Task<HttpResponseMessage> RemoveAsync(WebSession who, string? antiforgery, params string[] ids)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, docUrl + "?handler=ScanRemoveLines") { Content = JsonContent.Create(new { lineIds = ids }) };
+            if (antiforgery is not null)
+            {
+                request.Headers.Add("RequestVerificationToken", antiforgery);
+            }
+            return await who.Client.SendAsync(request, Ct);
+        }
+        Assert.Contains("data-remove-url=", await op.GetStringAsync(docUrl));
+        var lineId = second.Headers.GetValues("X-Line-Id").Single();
+        Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, null, lineId)).StatusCode);   // 沒有 antiforgery
+        Assert.Equal(HttpStatusCode.Forbidden, (await RemoveAsync(viewer, viewerToken, lineId)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, token)).StatusCode);   // 沒有勾選
+        var removed = await RemoveAsync(op, token, lineId);
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        Assert.Contains("明細（0 行）", await removed.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.OK, (await AddAsync(op, line with { quantity = 5m }, token)).StatusCode);
 
         // 過帳後不能再加
         var page = await op.GetStringAsync(docUrl);

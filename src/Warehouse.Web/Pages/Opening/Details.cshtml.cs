@@ -89,9 +89,19 @@ public class DetailsModel(
             // 勾「確認為空」時只送儲位：其他欄位即使有殘留的輸入也不送（服務會拒絕空儲位帶數量或批號）
             var input = Line.EmptyLocation
                 ? new OpeningLineInput(Line.LocationCode, null, null, null, null, 0)
-                : new OpeningLineInput(Line.LocationCode, Line.ItemCode, Line.LotNo, Line.SerialNo, Line.ExpiryDate, Line.Quantity);
-            await openings.AddLineAsync(id, input, actor, cancellationToken);
-            return Line.EmptyLocation ? $"已將儲位 {Line.LocationCode.Trim()} 標記為空。" : "已新增明細。";
+                : new OpeningLineInput(Line.LocationCode, Line.ItemCode, Line.LotNo, Line.SerialNo, Line.ExpiryDate, Line.Quantity, MergeIfSame: true);
+            var (lineId, merged) = await openings.AddLineAsync(id, input, actor, cancellationToken);
+            if (Line.EmptyLocation)
+            {
+                return $"已將儲位 {Line.LocationCode.Trim()} 標記為空。";
+            }
+            if (!merged || (await openings.GetAsync(id, cancellationToken))?.Lines.FirstOrDefault(l => l.Id == lineId) is not { } line)
+            {
+                return "已新增明細。";
+            }
+            // 相同的行累加（使用者 2026-11-02），效期沿用該行
+            return $"已累加到第 {line.LineNo} 行，現在共 {Display.Qty(line.Quantity)}。"
+                + (Line.ExpiryDate is not null && Line.ExpiryDate != line.ExpiryDate ? "這次填的有效期限與該行不同，已沿用該行的值。" : "");
         }, cancellationToken);
 
     /// <summary>連續掃碼面板（M5-03）：期初的步驟同進倉（物料 → 批號／序號 → 儲位 → 數量）。</summary>
@@ -100,6 +110,7 @@ public class DetailsModel(
         Url.Page("/Opening/Details", "ScanResolve", new { id = Doc.Id })!,
         Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!)
     {
+        RemoveUrl = Url.Page("/Opening/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Opening/Details", "ItemSearch", new { id = Doc.Id }),
         LocationsUrl = Url.Page("/Opening/Details", "Locations", new { id = Doc.Id }),
         WarehouseCode = Doc.WarehouseCode,
@@ -152,13 +163,15 @@ public class DetailsModel(
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
+        Guid lineId;
+        bool merged;
         try
         {
             if (string.IsNullOrWhiteSpace(request.ItemCode))
             {
                 throw new DomainRuleException("請先掃描物料。");
             }
-            await openings.AddLineAsync(id, new OpeningLineInput(
+            (lineId, merged) = await openings.AddLineAsync(id, new OpeningLineInput(
                 request.LocationCode ?? string.Empty, request.ItemCode, request.LotNo, request.SerialNo, request.ExpiryDate,
                 request.Quantity, request.Merge), User.ToActor(), cancellationToken);
         }
@@ -175,7 +188,53 @@ public class DetailsModel(
         Version = current.Version;
         var actor = User.ToActor();
         CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        if (current.Lines.FirstOrDefault(l => l.Id == lineId) is { } line)
+        {
+            // 累加時有效期限沿用該行：這次填了不同的日期就告訴畫面
+            string[] ignored = request.ExpiryDate is not null && request.ExpiryDate != line.ExpiryDate ? ["expiry"] : [];
+            ScanLineHeaders.Set(Response, line.LineNo, line.Quantity, merged, ignored);
+        }
         return Partial("_OpeningLines", this);
+    }
+
+    /// <summary>
+    /// 明細表的「刪除」（POST JSON）：成功回傳重繪的明細表，不重新整理頁面，掃碼面板的輸入不受影響（使用者 2026-11-02）。
+    /// 規則錯誤回 400 JSON；沒有 JS 時仍走 <see cref="OnPostRemoveLineAsync"/>。
+    /// </summary>
+    public async Task<IActionResult> OnPostScanRemoveLinesAsync(Guid id, [FromBody] ScanRemoveRequest request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        try
+        {
+            // 期初明細表只有單行刪除，一次只會送一行
+            if (request?.LineIds is not [var lineId])
+            {
+                throw new DomainRuleException("請指定一行要刪除的明細。");
+            }
+            await openings.RemoveLineAsync(id, lineId, User.ToActor(), cancellationToken);
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status400BadRequest };
+        }
+        if (await openings.GetAsync(id, cancellationToken) is not { } current)
+        {
+            return NotFound();
+        }
+        Doc = current;
+        Version = current.Version;
+        var actor = User.ToActor();
+        CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        return Partial("_OpeningLines", this);
+    }
+
+    /// <summary>明細表送出的刪除（JSON）。</summary>
+    public sealed class ScanRemoveRequest
+    {
+        public List<Guid>? LineIds { get; set; }
     }
 
     /// <summary>掃碼面板送出的期初明細（JSON）。</summary>

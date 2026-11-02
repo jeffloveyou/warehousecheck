@@ -84,6 +84,40 @@ public class PostingHardeningTests
         Assert.Equal(10m, await BalanceAsync(item, w, "A-01"));
     }
 
+    // T-LINE-03：相同的行累加時沿用該行的預留（使用者 2026-11-02）：超出預留的部分照樣檢查可用量，不會吃掉別人的預留
+    [Fact]
+    public async Task 累加到有預留的行_超出預留的部分仍檢查可用量()
+    {
+        var (w, item) = await StockedAsync(10m, "A-01");
+        Guid mine, others;
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var reservations = new StockReservationService(db, new InventoryPostingService(db), TimeProvider.System);
+            mine = await reservations.CreateAsync(new ReservationInput(item, w, 3m, null, null), "key-" + Guid.NewGuid(), Operator, Ct);
+            others = await reservations.CreateAsync(new ReservationInput(item, w, 6m, null, null), "key-" + Guid.NewGuid(), Operator, Ct);
+        }
+        var doc = await Docs(s => s.CreateAsync(StockDocumentType.Outbound, w, new StockDocumentHeader(ProductionOut, null, null, null), Operator, Ct));
+        var line = await Docs(s => s.AddLineAsync(doc, new DocumentLineInput("A-01", item, 3m, ReservationId: mine, MergeIfSame: true), Operator, Ct));
+        // 這次沒選預留：累加到同一行，沿用該行的預留
+        Assert.Equal(line, await Docs(s => s.AddLineAsync(doc, new DocumentLineInput("A-01", item, 2m, MergeIfSame: true), Operator, Ct)));
+        var merged = Assert.Single((await Docs(s => s.GetAsync(doc, Ct)))!.Lines);
+        Assert.Equal((5m, (Guid?)mine), (merged.Quantity, merged.ReservationId));
+
+        // 預留 3 沖銷後還要 2，但未預留的可用量只有 1（10 − 3 − 6）→ 不足，別人的預留不受影響
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => ConfirmAsync(doc));
+        Assert.Equal("stock.insufficient", ex.ErrorCode);
+        Assert.Equal(10m, await BalanceAsync(item, w, "A-01"));
+
+        // 釋放別人的預留後可以過帳：沖銷自己的 3，另外 2 用一般可用量
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            await new StockReservationService(db, new InventoryPostingService(db), TimeProvider.System).CancelAsync(others, Operator, Ct);
+        }
+        await ConfirmAsync(doc);
+        Assert.Equal(5m, await BalanceAsync(item, w, "A-01"));
+        Assert.Equal(5m, await AvailableAsync(item, w));
+    }
+
     // T-M4-06-03：回滾：移庫目的儲位在過帳前被停用 → 整張失敗；沒有異動、沒有冪等紀錄、沒有新批號
     [Fact]
     public async Task 中途失敗_整筆回滾不留痕()

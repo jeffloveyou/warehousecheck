@@ -104,8 +104,10 @@ public sealed class OpeningService(
         return doc.Id;
     }
 
-    public Task AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken) =>
-        MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
+    public async Task<(Guid LineId, bool Merged)> AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        (Guid LineId, bool Merged) result = default;
+        await MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
             // 全公司的明細欄位開關（M8-03）：關閉有效期限時有值就拒絕（畫面、API 一致）
             if (input.ExpiryDate is not null && !(await settings.GetAsync(cancellationToken)).LineExpiryEnabled)
@@ -123,6 +125,7 @@ public sealed class OpeningService(
                     throw new DomainRuleException("沒有料號表示這個儲位確認為空，數量要填 0、批號序號與有效期限要空白；有庫存請填料號。");
                 }
                 doc.AddEmptyLocation(lineId, location.Id);
+                result = (lineId, false);
                 return ("opening.line_add", new { Location = location.Code, Empty = true });
             }
 
@@ -143,12 +146,16 @@ public sealed class OpeningService(
             }
             var line = doc.AddLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, location.Id,
                 input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.MergeIfSame);
+            result = (line.Id, line.Id != lineId);
             // 逐件累加併入既有行時稽核記為 line_merge，並記合併後數量（與進出倉單相同）
             return (line.Id != lineId ? "opening.line_merge" : "opening.line_add", new
             {
                 LineId = line.Id, LineQuantity = line.Quantity, Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
+                input.ExpiryDate, LineExpiryDate = line.ExpiryDate, // 累加時效期沿用該行（2026-11-02）
             });
         });
+        return result;
+    }
 
     public Task RemoveLineAsync(Guid documentId, Guid lineId, Actor actor, CancellationToken cancellationToken) =>
         MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken, (doc, now) =>

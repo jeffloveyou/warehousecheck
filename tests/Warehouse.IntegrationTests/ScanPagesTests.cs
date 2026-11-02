@@ -97,8 +97,14 @@ public partial class ScanPagesTests
             return await who.Client.SendAsync(request, Ct);
         }
         var line = new { locationCode = "s-01", itemCode, quantity = 4m, merge = true };
-        Assert.Equal(HttpStatusCode.OK, (await AddAsync(op, line, token)).StatusCode);
-        var merged = await (await AddAsync(op, line, token)).Content.ReadAsStringAsync(Ct);
+        var added = await AddAsync(op, line, token);
+        Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+        Assert.False(added.Headers.Contains("X-Line-Merged"));
+        // T-LINE-01：相同的行累加，標頭告訴畫面加到第幾行、現在共幾個（效期沿用該行另見 T-M5-03-06）
+        var mergedResponse = await AddAsync(op, line, token);
+        Assert.Equal(("1", "1", "8", (string?)null), (Header(mergedResponse, "X-Line-Merged"), Header(mergedResponse, "X-Line-No"),
+            Header(mergedResponse, "X-Line-Quantity"), Header(mergedResponse, "X-Line-Ignored")));
+        var merged = await mergedResponse.Content.ReadAsStringAsync(Ct);
         Assert.Contains("data-scan-lines", merged);
         Assert.Contains("明細（1 行）", merged);
         Assert.Contains("8 PCS", merged);
@@ -106,6 +112,22 @@ public partial class ScanPagesTests
         Assert.Equal(HttpStatusCode.BadRequest, noItem.StatusCode);
         var adminToken = WebUtility.HtmlDecode(TokenPattern().Match(await admin.GetStringAsync(url)).Groups[1].Value);
         Assert.Equal(HttpStatusCode.Forbidden, (await AddAsync(admin, line, adminToken)).StatusCode);
+
+        // T-LINE-02：刪除不重新整理（JSON）：回傳重繪的明細表；沒有權限 403
+        var page = await op.GetStringAsync(url);
+        Assert.Contains("data-remove-url=", page);
+        var lineId = LineIdPattern().Match(page).Groups[1].Value;
+        async Task<HttpResponseMessage> RemoveAsync(WebSession who, string antiforgery, params string[] ids)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=ScanRemoveLines") { Content = JsonContent.Create(new { lineIds = ids }) };
+            request.Headers.Add("RequestVerificationToken", antiforgery);
+            return await who.Client.SendAsync(request, Ct);
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await RemoveAsync(admin, adminToken, lineId)).StatusCode);
+        var removed = await RemoveAsync(op, token, lineId);
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        Assert.Contains("明細（0 行）", await removed.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, token, lineId)).StatusCode);   // 已刪除
 
         var manager = await LoginAsync(factory, Roles.WarehouseManager);
         var reservations = await manager.GetStringAsync("/Reservations");
@@ -322,4 +344,10 @@ public partial class ScanPagesTests
 
     [GeneratedRegex("name=\"__RequestVerificationToken\" type=\"hidden\" value=\"([^\"]+)\"")]
     private static partial Regex TokenPattern();
+
+    [GeneratedRegex("name=\"lineId\" value=\"([^\"]+)\"")]
+    private static partial Regex LineIdPattern();
+
+    private static string? Header(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues(name, out var values) ? values.Single() : null;
 }

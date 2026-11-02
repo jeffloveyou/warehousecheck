@@ -93,7 +93,8 @@ public interface IOpeningService
 
     Task<Guid> CreateAsync(Guid warehouseId, string? note, Actor actor, CancellationToken cancellationToken);
 
-    Task AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken);
+    /// <summary>加一行期初明細；回傳行 ID，以及是否累加到既有的行（<see cref="OpeningLineInput.MergeIfSame"/>）。</summary>
+    Task<(Guid LineId, bool Merged)> AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken);
 
     Task RemoveLineAsync(Guid documentId, Guid lineId, Actor actor, CancellationToken cancellationToken);
 

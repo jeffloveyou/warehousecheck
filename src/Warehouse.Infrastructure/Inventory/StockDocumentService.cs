@@ -186,6 +186,8 @@ public sealed class StockDocumentService(
             {
                 LineId = lineId, LineQuantity = line.Quantity, Location = source.Code, Target = target?.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
                 input.ReservationId,
+                // 累加時效期、預留沿用該行（2026-11-02）：記下該行實際的值，查帳時才不會把這次填的值當成已採用
+                input.ExpiryDate, LineExpiryDate = line.ExpiryDate, LineReservationId = line.ReservationId,
             });
         });
         return lineId;
@@ -322,10 +324,17 @@ public sealed class StockDocumentService(
                     }
                     foreach (var serial in perLine)
                     {
-                        await AddLineCoreAsync(doc, new DocumentLineInput(
+                        var newId = Guid.NewGuid();
+                        var (line, _, _, _) = await AddLineCoreAsync(doc, new DocumentLineInput(
                             spec.LocationCode, codes[cartLine.ItemId], serial is null ? cartLine.Quantity : 1m,
                             spec.LotNo, serial, spec.ExpiryDate, spec.TargetWarehouseCode, spec.TargetLocationCode, null, MergeIfSame: true),
-                            actor, current, Guid.NewGuid(), cancellationToken);
+                            actor, current, newId, cancellationToken);
+                        // 轉單沒有畫面提示：相同的行效期不同時不沿用（否則新批號默默帶錯效期），整張不轉
+                        if (line.Id != newId && line.ExpiryDate != spec.ExpiryDate)
+                        {
+                            throw new DomainRuleException(
+                                $"和前面的明細是同一儲位、物料、批號，但有效期限不同（{line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}／{spec.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}），請改成相同的效期。");
+                        }
                     }
                 }
                 catch (DomainRuleException ex)
