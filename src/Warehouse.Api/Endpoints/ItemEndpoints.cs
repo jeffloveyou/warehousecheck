@@ -106,7 +106,8 @@ public static class ItemEndpoints
         var draft = new ItemDraft(
             request.Name, request.CategoryId, request.BaseUnitId, request.TrackingMode,
             request.Brand, request.ManufacturerPartNo, request.Specification);
-        var result = await workflow.SubmitAsync(request.RequestId, draft, context.User.ToActor(), cancellationToken);
+        // 走帶選項的版本：物料審核關閉（M12）時提出即啟用，結果帶正式料號
+        var result = await workflow.SubmitAsync(request.RequestId, draft, ItemSubmitOptions.None, context.User.ToActor(), cancellationToken);
         return TypedResults.Created($"/api/items/{result.ItemId}", result);
     }
 

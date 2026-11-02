@@ -41,6 +41,10 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
     [BindProperty]
     public string? IdempotencyKey { get; set; }
 
+    /// <summary>開頁時的計數戳記（審核關閉時確認盤點用，M12）。</summary>
+    [BindProperty]
+    public string? CountStamp { get; set; }
+
     [BindProperty]
     public List<Guid> RecountLines { get; set; } = [];
 
@@ -112,7 +116,7 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
     public Task<IActionResult> OnPostConfirmAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.StocktakeCount, async actor =>
         {
-            var adjustment = await stocktakes.ConfirmAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
+            var adjustment = await stocktakes.ConfirmAsync(id, Version, CountStamp ?? string.Empty, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return adjustment is null ? "已確認盤點，沒有差異（不產生調整單）。" : "已確認盤點，調整單已過帳。";
         }, cancellationToken);
 

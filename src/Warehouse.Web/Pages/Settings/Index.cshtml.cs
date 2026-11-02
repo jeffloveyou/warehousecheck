@@ -25,6 +25,12 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
 
     public string? Error { get; private set; }
 
+    /// <summary>表單目前符合的使用模式（M12）；null＝逐項調整過，畫面顯示「自訂」。</summary>
+    public UsageMode? CurrentMode => UsageModes.Match(Form.ToSettings());
+
+    /// <summary>剛套用到表單、尚未儲存的模式名稱。</summary>
+    public string? ModeApplied { get; private set; }
+
     public sealed class SettingsForm
     {
         public bool AllowSelfApproveOpening { get; set; }
@@ -34,6 +40,12 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         public bool LocationAttributesEnabled { get; set; }
 
         public bool LocationImagesEnabled { get; set; }
+
+        public bool ItemApprovalEnabled { get; set; }
+
+        public bool OpeningApprovalEnabled { get; set; }
+
+        public bool StocktakeApprovalEnabled { get; set; }
 
         public bool DocumentApprovalEnabled { get; set; }
 
@@ -91,6 +103,9 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         public SystemSettings ToSettings() =>
             new(AllowSelfApproveOpening, LocationNotesEnabled, LocationAttributesEnabled, LocationImagesEnabled)
             {
+                ItemApprovalEnabled = ItemApprovalEnabled,
+                OpeningApprovalEnabled = OpeningApprovalEnabled,
+                StocktakeApprovalEnabled = StocktakeApprovalEnabled,
                 DocumentApprovalEnabled = DocumentApprovalEnabled,
                 AllowSelfApproveDocuments = AllowSelfApproveDocuments,
                 DocumentPurposeEnabled = DocumentPurposeEnabled,
@@ -125,6 +140,9 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             LocationNotesEnabled = s.LocationNotesEnabled,
             LocationAttributesEnabled = s.LocationAttributesEnabled,
             LocationImagesEnabled = s.LocationImagesEnabled,
+            ItemApprovalEnabled = s.ItemApprovalEnabled,
+            OpeningApprovalEnabled = s.OpeningApprovalEnabled,
+            StocktakeApprovalEnabled = s.StocktakeApprovalEnabled,
             DocumentApprovalEnabled = s.DocumentApprovalEnabled,
             AllowSelfApproveDocuments = s.AllowSelfApproveDocuments,
             DocumentPurposeEnabled = s.DocumentPurposeEnabled,
@@ -175,6 +193,9 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.LocationNotesEnabled => "倉位自由備註",
         SettingKeys.LocationAttributesEnabled => "倉位結構化屬性",
         SettingKeys.LocationImagesEnabled => "倉位圖片",
+        SettingKeys.ItemApprovalEnabled => "物料建檔需要審核",
+        SettingKeys.OpeningApprovalEnabled => "期初單需要審核",
+        SettingKeys.StocktakeApprovalEnabled => "盤點需要審核",
         SettingKeys.DocumentApprovalEnabled => "單據需要審核",
         SettingKeys.AllowSelfApproveDocuments => "進出倉單允許自核",
         SettingKeys.DocumentPurposeEnabled => "表頭：用途啟用",
@@ -203,6 +224,22 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.RetentionImportBatchesDays => "匯入批次保留天數",
         _ => key,
     };
+
+    /// <summary>
+    /// 套用使用模式（M12）：只把審核相關的 8 項填進表單、不儲存，管理員確認後再按「儲存」。
+    /// Original 保持開頁時的值，儲存時照常做衝突檢查。
+    /// </summary>
+    public async Task<IActionResult> OnPostModeAsync(UsageMode? mode, CancellationToken cancellationToken)
+    {
+        if (mode is not { } m || !Enum.IsDefined(m))
+        {
+            return BadRequest();
+        }
+        Form = SettingsForm.From(UsageModes.Apply(Form.ToSettings(), m));
+        ModeApplied = UsageModes.Label(m);
+        await LoadChangesAsync(cancellationToken);
+        return Page();
+    }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken cancellationToken)
     {

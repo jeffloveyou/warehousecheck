@@ -25,7 +25,11 @@ public sealed record StocktakeDetails(
     string? SubmittedByName, DateTimeOffset? SubmittedAt, string? ApprovedByName, DateTimeOffset? ApprovedAt,
     Guid? AdjustmentDocumentId, string? AdjustmentDocNo, string? RecountComment, IReadOnlyList<string> LocationCodes,
     bool QuantitiesHidden, uint Version, PagedResult<StocktakeLineRow> Lines, int LineCount, int UncountedCount,
-    int? DifferenceCount);
+    int? DifferenceCount)
+{
+    /// <summary>計數戳記（M12）：審核關閉時「確認盤點」帶回，用來確認開頁後沒有人改過實盤量。</summary>
+    public string CountStamp { get; init; } = string.Empty;
+}
 
 /// <summary>明細篩選（伺服器分頁，每頁 <see cref="PageSize"/> 行，預設 <see cref="DefaultPageSize"/>；列印一次取全部，上限為盤點單行數上限）。</summary>
 public sealed record StocktakeLineFilter(
@@ -79,5 +83,7 @@ public interface IStocktakeService
     /// 盤點審核關閉時（M12，ADR-0027）：有盤點權限的人從盤點中直接確認（＝送審＋核准），調整單過帳與 <see cref="ApproveAsync"/> 相同。
     /// 審核開啟時拒絕（請送審）。
     /// </summary>
-    Task<Guid?> ConfirmAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
+    /// <param name="countStamp">開頁時的 <see cref="StocktakeDetails.CountStamp"/>：開頁後有人改了實盤量就拒絕（stocktake.counts_changed）。</param>
+    Task<Guid?> ConfirmAsync(
+        Guid id, uint expectedVersion, string countStamp, string idempotencyKey, Actor actor, CancellationToken cancellationToken);
 }

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Warehouse.Application.Abstractions;
@@ -124,7 +125,10 @@ public sealed class StocktakeService(
             s.Id, s.StocktakeNo, s.WarehouseId, warehouseCode, s.Status, s.AllLocations, s.Note, s.SnapshotAt, s.CreatedById,
             s.CreatedByName, s.CreatedAt, s.SubmittedByName, s.SubmittedAt, s.ApprovedByName, s.ApprovedAt, s.AdjustmentDocumentId,
             adjustmentNo, s.RecountComment, locationCodes, hidden, version,
-            new PagedResult<StocktakeLineRow>(result, page, pageSize, filtered), lineCount, uncounted, hidden ? null : differences);
+            new PagedResult<StocktakeLineRow>(result, page, pageSize, filtered), lineCount, uncounted, hidden ? null : differences)
+        {
+            CountStamp = await CountStampAsync(id, cancellationToken),
+        };
     }
 
     public async Task<Guid> StartAsync(
@@ -364,13 +368,17 @@ public sealed class StocktakeService(
     public Task<Guid?> ApproveAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
         PostAsync(ApproveCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken);
 
-    public Task<Guid?> ConfirmAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
-        PostAsync(ConfirmCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken);
+    public Task<Guid?> ConfirmAsync(
+        Guid id, uint expectedVersion, string countStamp, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
+        PostAsync(ConfirmCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken, countStamp);
 
     /// <summary>核准（<see cref="ApproveCommand"/>）與審核關閉時的直接確認（<see cref="ConfirmCommand"/>）共用：冪等、失敗紀錄、調整單過帳都相同。</summary>
     private async Task<Guid?> PostAsync(
-        string command, Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken)
+        string command, Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken,
+        string? countStamp = null)
     {
+        // 確認的前置檢查（審核開關、計數戳記、還沒盤完）被拒不算過帳失敗，不寫異常紀錄；進入調整單過帳後才記錄
+        var postingStarted = new StrongBox<bool>(command == ApproveCommand);
         var key = DocumentSupport.NormalizeKey(idempotencyKey);
         var requestHash = DocumentSupport.Hash($"{command}|{id}|{expectedVersion}|{actor.Id}");
         if (await DocumentSupport.AlreadyProcessedAsync(db, key, command, requestHash, cancellationToken))
@@ -379,9 +387,9 @@ public sealed class StocktakeService(
         }
         try
         {
-            return await BusyGuardAsync(() => PostCoreAsync(command, id, expectedVersion, key, requestHash, actor, cancellationToken));
+            return await BusyGuardAsync(() => PostCoreAsync(command, id, expectedVersion, countStamp, key, requestHash, actor, postingStarted, cancellationToken));
         }
-        catch (Exception ex) when (failures is not null && ex is AppException or DomainRuleException)
+        catch (Exception ex) when (failures is not null && postingStarted.Value && ex is AppException or DomainRuleException)
         {
             // 被拒絕的核准另外記錄（交易已回滾；獨立連線寫入，M4-05），documentId 欄位存盤點單 ID
             await failures.RecordAsync(command, id, actor, ex, CancellationToken.None);
@@ -390,7 +398,8 @@ public sealed class StocktakeService(
     }
 
     private async Task<Guid?> PostCoreAsync(
-        string command, Guid id, uint expectedVersion, string key, string requestHash, Actor actor, CancellationToken cancellationToken)
+        string command, Guid id, uint expectedVersion, string? countStamp, string key, string requestHash, Actor actor,
+        StrongBox<bool> postingStarted, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
@@ -411,7 +420,14 @@ public sealed class StocktakeService(
                 throw new ConflictException("stocktake.approval_required", "系統已開啟盤點審核，請送審，由倉庫主管核准。");
             }
             RequireCounter(actor);
+            // 計數只鎖表頭 FOR SHARE、不改版本：確認者開頁後別人改了實盤量，版本仍相同。
+            // 沒有主管覆核，所以用計數戳記確認「過帳的就是確認者看到的」（M12 審查必修-1）
+            if (countStamp != await CountStampAsync(id, cancellationToken))
+            {
+                throw new ConcurrencyConflictException("stocktake.counts_changed", "開頁後有人修改了盤點數量，請核對畫面上的差異後再按一次確認。");
+            }
             stocktake.Submit(actor.Id, actor.Name, now);
+            postingStarted.Value = true;
         }
         else
         {
@@ -615,6 +631,25 @@ public sealed class StocktakeService(
         {
             throw new ConcurrencyConflictException("stocktake.busy", "有其他人同時在處理相同的盤點單或儲位，請稍後再試一次。");
         }
+    }
+
+    /// <summary>
+    /// 盤點明細的計數戳記：行數、已盤行數、待重盤行數、最後計數時間。任何人計數、加行、要求重盤都會改變它；
+    /// 審核關閉時「確認盤點」要帶開頁時的戳記（M12）。
+    /// </summary>
+    private async Task<string> CountStampAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var stamp = await db.Set<StocktakeLine>().AsNoTracking().Where(l => l.StocktakeId == id)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Lines = g.Count(),
+                Counted = g.Count(l => l.CountedQuantity != null),
+                Recount = g.Count(l => l.RecountRequested),
+                Last = g.Max(l => l.CountedAt),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        return stamp is null ? "0" : $"{stamp.Lines}:{stamp.Counted}:{stamp.Recount}:{stamp.Last?.UtcTicks}";
     }
 
     private static async Task BusyGuardAsync(Func<Task> action) =>

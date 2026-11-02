@@ -124,6 +124,8 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             if (options.AutoApprove || approvalDisabled)
             {
                 await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+                // 排隊期間管理員可能重新開啟審核：取鎖後再讀一次，以這時的設定為準（M12 審查建議-2）
+                approvalDisabled = approvalDisabled && !await SettingItemApprovalEnabledAsync(cancellationToken);
             }
             var result = await SubmitAsync(requestId, draft, actor, cancellationToken);
             await AddBarcodesAsync(result.ItemId, barcodes, actor, cancellationToken);

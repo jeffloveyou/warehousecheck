@@ -77,6 +77,7 @@
         <form method="post" asp-page-handler="Confirm" asp-route-id="@d.Id" class="inline">
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
+            <input type="hidden" name="CountStamp" value="@d.CountStamp" />
             <button type="submit" id="stocktake-confirm">確認盤點（有差異時調整庫存）</button>
         </form>
         <span class="muted">盤點不需審核：確認後依差異（@d.DifferenceCount 行）直接調整庫存。</span>
