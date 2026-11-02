@@ -95,7 +95,8 @@ public class StockDocumentLineConfiguration : IEntityTypeConfiguration<StockDocu
         builder.Property(l => l.Quantity).HasPrecision(19, 4);
         builder.Property(l => l.IsDecrease).HasDefaultValue(false).ValueGeneratedNever();
         builder.HasIndex(l => new { l.DocumentId, l.LineNo }).IsUnique();
-        builder.HasIndex(l => new { l.DocumentId, l.LocationId, l.TargetLocationId, l.ItemId, l.LotNo, l.SerialNo })
+        // 明細鍵含預留（2026-11-02）：同儲位、同料號但預留不同是不同的行
+        builder.HasIndex(l => new { l.DocumentId, l.LocationId, l.TargetLocationId, l.ItemId, l.LotNo, l.SerialNo, l.ReservationId })
             .IsUnique().AreNullsDistinct(false).HasDatabaseName("ux_stock_document_lines_key");
         builder.HasOne<Item>().WithMany().HasForeignKey(l => l.ItemId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Location>().WithMany().HasForeignKey(l => l.LocationId).OnDelete(DeleteBehavior.Restrict);

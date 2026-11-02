@@ -527,9 +527,9 @@
     };
   }
 
-  // 明細的累加鍵（同伺服器 SameKey：儲位、目的、物料、批號、序號；大小寫不分）
+  // 明細的累加鍵（同伺服器 SameKey：儲位、目的、物料、批號、序號、預留；大小寫不分）
   function lineKey(data) {
-    return [data.locationCode, data.targetLocationCode, data.itemCode, data.lotNo, data.serialNo]
+    return [data.locationCode, data.targetLocationCode, data.itemCode, data.lotNo, data.serialNo, data.reservationId]
       .map(function (v) { return (v || '').toUpperCase(); }).join('|');
   }
 
@@ -626,7 +626,7 @@
       var type = res.headers.get('Content-Type') || '';
       if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
         // 相同的行會累加（標頭 X-Line-*，ScanLineHeaders.cs）：講清楚加到第幾行、現在共幾個；
-        // 有效期限、預留沿用該行時用警告色提醒這次填的值沒採用
+        // 有效期限沿用該行時用警告色提醒這次填的值沒採用（預留不同會是另一行）
         var lineNo = res.headers.get('X-Line-No');
         var lineQty = res.headers.get('X-Line-Quantity');
         var ignored = (res.headers.get('X-Line-Ignored') || '').split(',').filter(Boolean)

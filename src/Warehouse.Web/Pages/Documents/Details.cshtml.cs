@@ -171,9 +171,9 @@ public class DetailsModel(
             {
                 return "已新增明細。";
             }
-            var ignored = IgnoredFields(doc.DocType, input.ExpiryDate, input.ReservationId, line);
+            var ignored = IgnoredFields(doc.DocType, input.ExpiryDate, line);
             return $"已累加到第 {line.LineNo} 行，現在共 {Display.Qty(line.Quantity)}。"
-                + (ignored.Count > 0 ? $"這次填的{string.Join("、", ignored.Select(f => f == "expiry" ? "有效期限" : "預留"))}與該行不同，已沿用該行的值。" : "");
+                + (ignored.Count > 0 ? "這次填的有效期限與該行不同，已沿用該行的值。" : "");
         }, cancellationToken);
 
     /// <summary>明細表勾選多行一次刪除（M8-03）。</summary>
@@ -439,25 +439,21 @@ public class DetailsModel(
         if (current.Lines.FirstOrDefault(l => l.Id == lineId) is { } line)
         {
             ScanLineHeaders.Set(Response, line.LineNo, line.Quantity, doc.Lines.Any(l => l.Id == lineId),
-                IgnoredFields(doc.DocType, request.ExpiryDate, request.ReservationId, line));
+                IgnoredFields(doc.DocType, request.ExpiryDate, line));
         }
         return Partial("_DocumentLines", this);
     }
 
     /// <summary>
-    /// 累加時有效期限、預留沿用該行（使用者 2026-11-02）：這次填了不同值的欄位（expiry、reservation），畫面據此提醒。
-    /// 預留連「沒選」也算不同：數量會算進該行的預留。
+    /// 累加時有效期限沿用該行（使用者 2026-11-02）：這次填了不同值的欄位（expiry），畫面據此提醒。
+    /// 預留不同不會累加（明細鍵含預留，A 就是 A、B 就是 B），所以不用提醒。
     /// </summary>
-    private static List<string> IgnoredFields(StockDocumentType type, DateOnly? expiry, Guid? reservationId, DocumentLineRow line)
+    private static List<string> IgnoredFields(StockDocumentType type, DateOnly? expiry, DocumentLineRow line)
     {
         var ignored = new List<string>();
         if (type == StockDocumentType.Inbound && expiry is not null && expiry != line.ExpiryDate)
         {
             ignored.Add("expiry");
-        }
-        if (type == StockDocumentType.Outbound && reservationId != line.ReservationId)
-        {
-            ignored.Add("reservation");
         }
         return ignored;
     }

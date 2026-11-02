@@ -257,6 +257,58 @@ await WaitIdleAsync(page);
 Check(await page.InputValueAsync("#scan-location") == "A-01", "焦點在頁面空白處時，掃碼內容仍由掃碼框接住");
 await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "1-scan-panel.png"), FullPage = true });
 
+// 8a. 相同的明細累加、刪除不重新整理（2026-11-02，T-LINE-05）
+await page.ClickAsync("#scan-clear");
+await page.SelectOptionAsync("#scan-add-mode", "manual");
+var qtyBefore = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]);
+await ScanAsync(page, "WH:ITEM:" + itemCodes[0].ToLowerInvariant());
+await WaitIdleAsync(page);
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
+await WaitIdleAsync(page);
+await page.FillAsync("#scan-quantity", "2");
+await page.PressAsync("#scan-quantity", "Enter");
+await WaitIdleAsync(page);
+var afterMerge = await LinesAsync(docId, "A-01");
+Check(qtyBefore > 0 && afterMerge.TryGetValue(itemCodes[0], out var mergedQty) && mergedQty == qtyBefore + 2,
+    $"手動模式同物料同儲位再加 2：同一行累加（{qtyBefore} → {afterMerge.GetValueOrDefault(itemCodes[0])}）");
+Check((await page.InnerTextAsync("#scan-status")).Contains("已累加"), "訊息顯示已累加與目前總數（" + await page.InnerTextAsync("#scan-status") + "）");
+
+// 刪除：輸入區先填了物料，刪除後要保留、頁面不重新整理
+await page.EvaluateAsync("() => { window.__noReload = true; }");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[2].ToLowerInvariant());
+await WaitIdleAsync(page);
+var typedItem = await page.InputValueAsync("#scan-item");
+var rowCount = "() => document.querySelectorAll('#document-lines tbody tr').length";
+var rows = await page.EvaluateAsync<int>(rowCount);
+await page.Locator("#document-lines tbody tr").Filter(new() { HasText = "A-01" }).Filter(new() { HasText = itemCodes[0] })
+    .First.Locator("button:has-text('刪除')").ClickAsync();
+await page.WaitForFunctionAsync($"n => document.querySelectorAll('#document-lines tbody tr').length === n", rows - 1);
+await WaitIdleAsync(page);
+Check(await page.EvaluateAsync<bool>("() => window.__noReload === true"), "單行刪除：頁面沒有重新整理");
+Check(typedItem != "" && await page.InputValueAsync("#scan-item") == typedItem, "單行刪除：輸入區的物料欄保留（" + typedItem + "）");
+Check(!(await LinesAsync(docId, "A-01")).Keys.Any(k => k.StartsWith(itemCodes[0])), "單行刪除：資料庫已移除那一行");
+Check((await page.InnerTextAsync("#scan-status")).Contains("已刪除"), "單行刪除：訊息顯示已刪除");
+
+// 勾選刪除：按取消不刪；按確定才刪，同樣不重新整理
+rows = await page.EvaluateAsync<int>(rowCount);
+await page.Locator("input.line-select").First.CheckAsync();
+void Dismiss(object? _, IDialog d) => d.DismissAsync();
+page.Dialog += Dismiss;
+await page.ClickAsync("#lines-remove-selected");
+await page.WaitForTimeoutAsync(800);
+page.Dialog -= Dismiss;
+Check(await page.EvaluateAsync<int>(rowCount) == rows, "勾選刪除按取消：沒有刪除");
+void Accept(object? _, IDialog d) => d.AcceptAsync();
+page.Dialog += Accept;
+await page.ClickAsync("#lines-remove-selected");
+await page.WaitForFunctionAsync($"n => document.querySelectorAll('#document-lines tbody tr').length === n", rows - 1);
+page.Dialog -= Accept;
+await WaitIdleAsync(page);
+Check(await page.EvaluateAsync<bool>("() => window.__noReload === true"), "勾選刪除：頁面沒有重新整理");
+Check(await page.InputValueAsync("#scan-item") == typedItem, "勾選刪除：輸入區的物料欄保留");
+await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "1b-merge-delete.png"), FullPage = true });
+await page.ClickAsync("#scan-clear");
+
 // 8b. 期初單：同一個面板（物料 → 儲位 → 數量）；「查建議儲位」欄 Enter 先解析成正式料號，不直接送出
 await page.GotoAsync(baseUrl + "/Opening");
 await page.SelectOptionAsync("#opening-create-form select[name='WarehouseId']", warehouseId.ToString());

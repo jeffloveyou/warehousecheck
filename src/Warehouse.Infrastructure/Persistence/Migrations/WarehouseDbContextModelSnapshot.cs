@@ -970,11 +970,11 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_stock_document_lines_document_id_line_no");
 
-                    b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo")
+                    b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo", "ReservationId")
                         .IsUnique()
                         .HasDatabaseName("ux_stock_document_lines_key");
 
-                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo"), false);
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("DocumentId", "LocationId", "TargetLocationId", "ItemId", "LotNo", "SerialNo", "ReservationId"), false);
 
                     b.ToTable("stock_document_lines", null, t =>
                         {
