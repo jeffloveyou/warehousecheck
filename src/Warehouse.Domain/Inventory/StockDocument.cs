@@ -184,8 +184,8 @@ public sealed class StockDocument
     /// 進出倉、移庫單加一行明細（只限草稿）。數量必須大於 0；
     /// 移庫必須指定目的儲位且不可與來源相同；依預留出庫（<paramref name="reservationId"/>）只限出倉單；
     /// 有效期限只在進倉時有意義（建立新批號）。追蹤模式規則同期初（批號必填、序號每行 1）。
-    /// <paramref name="mergeIfSame"/>（M5 掃碼「逐件累加」）：已有相同的行（儲位、目的、物料、批號相同，且沒有序號）時，
-    /// 把數量加到那一行並回傳它；有效期限、預留沿用那一行，這次填的不同值不採用（使用者 2026-11-02 決定）。否則照常新增。只影響草稿，不影響庫存。
+    /// <paramref name="mergeIfSame"/>（M5 掃碼「逐件累加」）：已有相同的行（儲位、目的、物料、批號、預留相同，且沒有序號）時，
+    /// 把數量加到那一行並回傳它；有效期限沿用那一行。預留不同是不同的行（使用者 2026-11-02：A 就是 A、B 就是 B）。否則照常新增。只影響草稿，不影響庫存。
     /// </summary>
     public StockDocumentLine AddMovementLine(
         Guid lineId, Guid itemId, TrackingMode trackingMode, int decimalPlaces, Guid locationId, Guid? targetLocationId,
@@ -227,6 +227,11 @@ public sealed class StockDocument
             lineId, Id, _lines.Count == 0 ? 1 : _lines.Max(l => l.LineNo) + 1, itemId, trackingMode, decimalPlaces,
             locationId, lotNo, serialNo, expiryDate, quantity);
         line.SetMovement(targetLocationId, reservationId);
+        // 序號相同的行不能只因預留不同就再加一行（明細鍵含預留，所以另外檢查；規則同原本的明細鍵）
+        if (line.SerialNo is not null && _lines.FirstOrDefault(l => l.SameKeyIgnoringReservation(line)) is { } sameSerial)
+        {
+            throw sameSerial.DuplicateError();
+        }
         if (_lines.FirstOrDefault(l => l.SameKey(line)) is { } existing)
         {
             if (mergeIfSame && line.SerialNo is null)
@@ -606,7 +611,11 @@ public sealed class StockDocumentLine
             ? new DomainRuleException($"序號 {serial} 已在第 {LineNo} 行，同一序號不能加兩次。")
             : new DomainRuleException("這張單已經有相同儲位、物料、批號／序號的明細，請刪除後重新加入正確數量。");
 
+    /// <summary>明細鍵（同資料庫 ux_stock_document_lines_key）：儲位、目的、物料、批號、序號、預留。</summary>
     internal bool SameKey(StockDocumentLine other) =>
+        SameKeyIgnoringReservation(other) && other.ReservationId == ReservationId;
+
+    internal bool SameKeyIgnoringReservation(StockDocumentLine other) =>
         other.LocationId == LocationId && other.TargetLocationId == TargetLocationId && other.ItemId == ItemId
         && other.LotNo == LotNo && other.SerialNo == SerialNo;
 
