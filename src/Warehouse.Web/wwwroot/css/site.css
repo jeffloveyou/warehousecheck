@@ -69,7 +69,6 @@ code { font-family: Consolas, monospace; background: #f3f5f7; padding: 1px 4px; 
 .attachment-grid figure { margin: 0; width: 160px; word-break: break-all; }
 .attachment-grid img { width: 160px; height: auto; border: 1px solid #ccd; border-radius: 3px; }
 .attachment-pdf { display: block; width: 160px; padding: 24px 8px; border: 1px solid #ccd; border-radius: 3px; text-align: center; background: #f3f5f7; }
-.add-line-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 input[type=file] { max-width: 100%; }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
 .tabs a { text-decoration: none; color: #243447; }

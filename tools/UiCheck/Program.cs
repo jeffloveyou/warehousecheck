@@ -59,9 +59,7 @@ await using (var db = new WarehouseDbContext(new DbContextOptionsBuilder<Warehou
     var itemManager = new Actor(Guid.NewGuid(), "腳本物料管理員", IsItemManager: true);
     var workflow = new ItemWorkflowService(db, TimeProvider.System);
     var item = await workflow.SubmitAsync(Guid.NewGuid(), new ItemDraft("畫面實測螺絲 " + suffix, SeedData.Categories.Single(c => c.Code == "EL").Id,
-        SeedData.Units.Single(u => u.Code == "PCS").Id, TrackingMode.None, null, null, null), itemManager, default);
-    var version = await db.Items.Where(i => i.Id == item.ItemId).Select(i => EF.Property<uint>(i, "Version")).SingleAsync();
-    await workflow.ApproveAsync(item.ItemId, version, [], null, itemManager, default);
+        SeedData.Units.Single(u => u.Code == "PCS").Id, TrackingMode.None, null, null, null), new ItemSubmitOptions([], AutoApprove: true, []), itemManager, default);
     itemCode = await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync();
 }
 Console.WriteLine($"資料：倉庫 {warehouseCode}、物料 {itemCode}");

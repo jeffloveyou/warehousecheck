@@ -10,7 +10,7 @@
     <label for="Input_Name">品名 *</label>
     <div>
         <input type="text" id="Input_Name" name="Input.Name" value="@Model.Input.Name" maxlength="@Item.NameMaxLength" required />
-        <span class="field-error" data-valmsg-for="Input.Name">@ViewData.ModelState["Input.Name"]?.Errors.FirstOrDefault()?.ErrorMessage</span>
+        <span class="field-error">@ViewData.ModelState["Input.Name"]?.Errors.FirstOrDefault()?.ErrorMessage</span>
     </div>
 
     <label for="Input_CategoryId">分類 *</label>

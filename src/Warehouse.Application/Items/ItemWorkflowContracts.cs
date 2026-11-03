@@ -80,7 +80,7 @@ public sealed record ItemUpdateOptions(
 /// 核准後的物料能否改基本單位、追蹤模式（修改畫面用來決定鎖住或開放，送出時服務會在交易內再檢查一次）。
 /// <see cref="Blockers"/> 非空時不能改；<see cref="HasActivity"/> 為 true 時要勾選確認並填寫原因。
 /// </summary>
-public sealed record UnitTrackingChangeCheck(bool HasActivity, bool SettingAllows, IReadOnlyList<string> Blockers)
+public sealed record UnitTrackingChangeCheck(bool HasActivity, IReadOnlyList<string> Blockers)
 {
     public bool CanChange => Blockers.Count == 0;
 }
@@ -123,15 +123,11 @@ public interface IItemWorkflowService
         string name, string? manufacturerPartNo, Guid? excludeItemId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// 提出物料：產生申請單號，狀態為待核准，沒有正式料號。
+    /// 提出物料：產生申請單號，狀態為待核准，沒有正式料號；同一個交易內登錄原廠條碼。
+    /// <see cref="ItemSubmitOptions.AutoApprove"/> 時（僅物料管理員）接著核准、發出正式料號；物料審核關閉時（ADR-0027）沒有疑似重複就直接啟用。
+    /// 任何一個條碼衝突或核准檢查失敗，整筆都不建立。
     /// <paramref name="requestId"/> 由畫面開啟表單時產生並成為物料 ID：同一人重送同一個 ID 時回傳第一次的結果（冪等），
     /// 不會產生第二筆申請。
-    /// </summary>
-    Task<SubmitItemResult> SubmitAsync(Guid requestId, ItemDraft draft, Actor actor, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// 提出物料並在同一個交易內登錄原廠條碼；<see cref="ItemSubmitOptions.AutoApprove"/> 時（僅物料管理員）接著核准、發出正式料號。
-    /// 任何一個條碼衝突或核准檢查失敗，整筆都不建立。冪等規則同 <see cref="SubmitAsync(Guid, ItemDraft, Actor, CancellationToken)"/>。
     /// </summary>
     Task<SubmitItemResult> SubmitAsync(
         Guid requestId, ItemDraft draft, ItemSubmitOptions options, Actor actor, CancellationToken cancellationToken);
@@ -140,12 +136,8 @@ public interface IItemWorkflowService
     /// 修改內容（不改狀態）。核准前：提出人或管理員；核准後：僅管理員。
     /// 核准後分類不可改；基本單位、追蹤模式依 <see cref="CheckUnitTrackingChangeAsync"/> 的規則（ADR-0023）。
     /// 核准後的物料改了品名或型號時會檢查重複，規則同 <see cref="ApproveAsync"/>（核准前的物料在核准時才檢查）。
+    /// 同時新增／停用原廠條碼、確認單位或追蹤模式的變更（M8-05）；不改這些時傳 <see cref="ItemUpdateOptions.None"/>。
     /// </summary>
-    Task UpdateAsync(
-        Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
-        Actor actor, CancellationToken cancellationToken);
-
-    /// <summary>修改內容，並同時新增／停用原廠條碼、確認單位或追蹤模式的變更（M8-05）。</summary>
     Task UpdateAsync(
         Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
         ItemUpdateOptions options, Actor actor, CancellationToken cancellationToken);
@@ -164,13 +156,7 @@ public interface IItemWorkflowService
     /// <summary>
     /// 核准並發出正式料號（管理員）。會在交易內重新檢查重複候選；
     /// 有不在 <paramref name="acknowledgedCandidateIds"/> 內的候選時丟 <see cref="DuplicateCandidatesUnconfirmedException"/>。
-    /// </summary>
-    Task<string> ApproveAsync(
-        Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
-        Actor actor, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// 核准並指定正式料號（D-32，ADR-0025）：<paramref name="requestedItemCode"/> 空白時自動發流水號；
+    /// 指定正式料號（D-32，ADR-0025）：<paramref name="requestedItemCode"/> 空白時自動發流水號；
     /// 有填時前綴必須屬於物料分類（含上層），且沒有被其他物料使用或保留，否則丟 <c>ConflictException</c>（item.code_taken）或規則錯誤。
     /// </summary>
     Task<string> ApproveAsync(

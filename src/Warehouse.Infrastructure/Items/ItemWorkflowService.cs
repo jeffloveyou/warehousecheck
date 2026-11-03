@@ -58,7 +58,11 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             .ToList();
     }
 
-    public async Task<SubmitItemResult> SubmitAsync(
+    /// <summary>
+    /// 建立待核准的物料與送審紀錄（不登錄條碼、不看審核開關）。必須在 <see cref="SubmitAsync"/> 開的交易內呼叫：
+    /// 同時重送撞到 pk_items 時，靠它的 catch 回滾並回傳先到的結果（冪等）。
+    /// </summary>
+    private async Task<SubmitItemResult> SubmitPendingAsync(
         Guid requestId, ItemDraft draft, Actor actor, CancellationToken cancellationToken)
     {
         if (requestId == Guid.Empty)
@@ -71,7 +75,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             return previous;
         }
 
-        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         await EnsureCategoryAndUnitUsableAsync(draft.CategoryId, draft.BaseUnitId, cancellationToken);
 
         var now = clock.GetUtcNow();
@@ -83,21 +86,8 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         db.ItemReviews.Add(ItemReview.Record(
             item.Id, ItemReviewAction.Submit, ItemStatus.PendingApproval, ItemStatus.PendingApproval,
             actor.Id, actor.Name, now));
-
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "pk_items" }
-            && transaction.IsOwned)
-        {
-            // 兩個相同請求同時送達：另一個已先寫入，回傳它的結果
-            await transaction.RollbackAsync(cancellationToken);
-            db.ChangeTracker.Clear();
-            return await FindPreviousSubmissionAsync(requestId, actor, cancellationToken)
-                ?? throw new InvalidOperationException("提出請求衝突後找不到既有物料。");
-        }
-        await transaction.CommitAsync(cancellationToken);
+        // 兩個相同請求同時送達時撞到 pk_items，由 SubmitAsync 的 catch 回滾後回傳先到的結果
+        await db.SaveChangesAsync(cancellationToken);
         return new SubmitItemResult(item.Id, requestNo);
     }
 
@@ -127,7 +117,7 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
                 // 排隊期間管理員可能重新開啟審核：取鎖後再讀一次，以這時的設定為準（M12 審查建議-2）
                 approvalDisabled = approvalDisabled && !await SettingItemApprovalEnabledAsync(cancellationToken);
             }
-            var result = await SubmitAsync(requestId, draft, actor, cancellationToken);
+            var result = await SubmitPendingAsync(requestId, draft, actor, cancellationToken);
             await AddBarcodesAsync(result.ItemId, barcodes, actor, cancellationToken);
             var approve = options.AutoApprove;
             // 只有物料管理員的「已確認候選」算數：作業員確認過的疑似重複仍留給物料管理員判斷
@@ -167,11 +157,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             throw;
         }
     }
-
-    public Task UpdateAsync(
-        Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
-        Actor actor, CancellationToken cancellationToken) =>
-        UpdateAsync(itemId, expectedVersion, draft, acknowledgedCandidateIds, ItemUpdateOptions.None, actor, cancellationToken);
 
     public Task UpdateAsync(
         Guid itemId, uint expectedVersion, ItemDraft draft, IReadOnlyCollection<Guid> acknowledgedCandidateIds,
@@ -248,11 +233,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             item.Resubmit(now);
             return ItemReview.Record(item.Id, ItemReviewAction.Resubmit, from, item.Status, actor.Id, actor.Name, now);
         });
-
-    public Task<string> ApproveAsync(
-        Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
-        Actor actor, CancellationToken cancellationToken) =>
-        ApproveAsync(itemId, expectedVersion, acknowledgedCandidateIds, comment, null, actor, cancellationToken);
 
     public async Task<string> ApproveAsync(
         Guid itemId, uint expectedVersion, IReadOnlyCollection<Guid> acknowledgedCandidateIds, string? comment,
@@ -651,7 +631,7 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             .Where(u => u.Id == newBaseUnitId).Select(u => (int?)u.DecimalPlaces).SingleOrDefaultAsync(cancellationToken);
         if (newDecimalPlaces is not { } places)
         {
-            return new UnitTrackingChangeCheck(false, false, ["找不到新的基本單位。"]);
+            return new UnitTrackingChangeCheck(false, ["找不到新的基本單位。"]);
         }
 
         // 1. 不論有沒有異動：既有設定要符合新單位、新追蹤模式
@@ -675,15 +655,14 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
                 OR EXISTS (SELECT 1 FROM inventory_lots WHERE item_id = {id})
                 OR EXISTS (SELECT 1 FROM item_serials WHERE item_id = {id}) AS "Value"
             """).SingleAsync(cancellationToken);
-        var settingAllows = await SettingAllowsChangeWithActivityAsync(cancellationToken);
         if (!hasActivity)
         {
-            return new UnitTrackingChangeCheck(false, settingAllows, blockers);
+            return new UnitTrackingChangeCheck(false, blockers);
         }
-        if (!settingAllows)
+        if (!await SettingAllowsChangeWithActivityAsync(cancellationToken))
         {
             blockers.Insert(0, "此物料已有異動紀錄，系統設定未開放修改（系統管理員可在「系統設定 → 物料」開啟）");
-            return new UnitTrackingChangeCheck(true, false, blockers);
+            return new UnitTrackingChangeCheck(true, blockers);
         }
 
         // 3. 有異動紀錄時的安全底線：還在進行中的作業會用舊的單位或追蹤模式解讀數量
@@ -722,7 +701,7 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         {
             blockers.Add($"現有結存有超過新單位 {places} 位小數的數量");
         }
-        return new UnitTrackingChangeCheck(true, true, blockers);
+        return new UnitTrackingChangeCheck(true, blockers);
     }
 
     /// <summary>重複候選的查詢條件（不含排序、筆數）。兩個比對欄位各自有索引。</summary>

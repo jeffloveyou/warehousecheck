@@ -136,7 +136,6 @@
 
   function showNext() {
     var s = step();
-    panel.setAttribute('data-step', s);
     el.next.textContent = '下一步：' + LABELS[s] + (addMode() === 'each' ? '（逐件累加中）' : addMode() === 'auto' ? '（齊了自動加入）' : '');
   }
 

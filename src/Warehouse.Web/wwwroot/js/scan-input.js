@@ -239,7 +239,7 @@
   }
 
   window.WhScan = {
-    attach: attach, feedback: feedback, clean: clean, minLength: MIN_LENGTH,
-    cameraModuleUrl: cameraModuleUrl, cameraUnsupportedReason: cameraUnsupportedReason, fieldLabel: fieldLabel
+    attach: attach, feedback: feedback, clean: clean,
+    cameraModuleUrl: cameraModuleUrl, cameraUnsupportedReason: cameraUnsupportedReason
   };
 })();

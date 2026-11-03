@@ -8,9 +8,6 @@ public interface IDatabaseStatus
     /// <summary>是否可連線到資料庫。</summary>
     Task<bool> CanConnectAsync(CancellationToken cancellationToken);
 
-    /// <summary>取得資料庫伺服器版本字串；無法取得時為 null。</summary>
-    Task<string?> GetServerVersionAsync(CancellationToken cancellationToken);
-
     /// <summary>系統狀態頁（M7-02，限系統管理員）：資料庫名稱、大小與 WAL 封存狀態。</summary>
     Task<DatabaseDetails> GetDetailsAsync(CancellationToken cancellationToken);
 }
