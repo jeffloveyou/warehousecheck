@@ -30,11 +30,16 @@ public class IndexModel(
     [BindProperty(SupportsGet = true, Name = "p")] // 不能用 "page"：Razor Pages 把它當成頁面名稱
     public int PageNumber { get; set; } = 1;
 
+    [BindProperty(SupportsGet = true, Name = "sp")]
+    public int SummaryPageNumber { get; set; } = 1;
+
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
 
     public PagedResult<BalanceRow>? Balances { get; private set; }
 
     public PagedResult<MovementRow>? Movements { get; private set; }
+
+    public PagedResult<WarehouseStockSummaryRow>? Summary { get; private set; }
 
     public PagedResult<UncountedLocationRow>? Uncounted { get; private set; }
 
@@ -57,15 +62,24 @@ public class IndexModel(
         if (WarehouseId is not null || locationId is not null || itemId is not null)
         {
             Balances = await stock.GetBalancesAsync(WarehouseId, locationId, itemId, PageNumber, cancellationToken);
+            Summary = await stock.GetWarehouseSummaryAsync(WarehouseId, locationId, itemId, SummaryPageNumber, cancellationToken);
         }
-        Movements = await stock.GetMovementsAsync(itemId, locationId, DocumentId, 1, cancellationToken);
+        Movements = await stock.GetMovementsAsync(itemId, locationId, DocumentId, 1, cancellationToken, WarehouseId);
         if (WarehouseId is { } w && locationId is null && itemId is null)
         {
             Uncounted = await stock.GetUncountedLocationsAsync(w, 1, cancellationToken);
         }
     }
 
-    public string PageUrl(int page) => Url.Page("/Stock/Index", new { WarehouseId, LocationCode, ItemCode, DocumentId, p = page })!;
+    public string PageUrl(int page) => Url.Page("/Stock/Index", new
+    {
+        WarehouseId, LocationCode, ItemCode, DocumentId, p = page, sp = SummaryPageNumber
+    })!;
+
+    public string SummaryPageUrl(int page) => Url.Page("/Stock/Index", new
+    {
+        WarehouseId, LocationCode, ItemCode, DocumentId, p = PageNumber, sp = page
+    })!;
 
     /// <summary>匯出結存（M6-03）：條件同畫面（倉庫、儲位碼、料號，至少一項），不分頁。</summary>
     public async Task<IActionResult> OnGetExportAsync(

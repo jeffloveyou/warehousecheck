@@ -593,6 +593,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("DraftJson")
+                        .HasColumnType("text")
+                        .HasColumnName("draft_json");
+
                     b.Property<string>("Note")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
@@ -813,9 +817,23 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("posted_at");
 
+                    b.Property<string>("ProjectReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("project_reference");
+
                     b.Property<Guid?>("PurposeId")
                         .HasColumnType("uuid")
                         .HasColumnName("purpose_id");
+
+                    b.Property<string>("RecipientName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("recipient_name");
+
+                    b.Property<Guid?>("RecipientUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recipient_user_id");
 
                     b.Property<string>("ReturnComment")
                         .HasMaxLength(500)
@@ -856,8 +874,14 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                     b.HasIndex("PartnerId")
                         .HasDatabaseName("ix_stock_documents_partner_id");
 
+                    b.HasIndex("ProjectReference")
+                        .HasDatabaseName("ix_stock_documents_project_reference");
+
                     b.HasIndex("PurposeId")
                         .HasDatabaseName("ix_stock_documents_purpose_id");
+
+                    b.HasIndex("RecipientUserId")
+                        .HasDatabaseName("ix_stock_documents_recipient_user_id");
 
                     b.HasIndex("ReversalOfDocumentId")
                         .IsUnique()
@@ -3185,6 +3209,12 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PurposeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_stock_documents_document_purposes_purpose_id");
+
+                    b.HasOne("Warehouse.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_documents_users_recipient_user_id");
 
                     b.HasOne("Warehouse.Domain.Inventory.StockDocument", null)
                         .WithMany()

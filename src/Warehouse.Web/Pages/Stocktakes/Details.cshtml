@@ -2,6 +2,7 @@
 @model Warehouse.Web.Pages.Stocktakes.DetailsModel
 @using Warehouse.Domain.Inventory
 @{
+    ViewData["MobileCards"] = true;
     var d = Model.Doc;
     ViewData["Title"] = $"盤點 {d.StocktakeNo}";
     ViewData["UsesPrefs"] = true; // 相機數量方式（camera-field.js）
@@ -34,6 +35,7 @@
 
 @if (Model.CanCount)
 {
+    <p id="stocktake-save-status" role="status" data-owner="@Model.ActorId" data-document="@d.Id">每行離開數量欄時背景儲存；空白代表未盤，0 代表實盤為零。</p>
     <form method="post" asp-page-handler="Count" asp-route-id="@d.Id" class="panel" id="stocktake-count-form">
         <h2>輸入實盤量</h2>
         <p class="muted">可直接掃儲位 QR、物料 QR 或原廠條碼（每格 Enter 跳下一格）。帳上沒有的物料會自動新增一行「現場找到」。同一行再輸入會覆蓋（留下紀錄）。</p>
@@ -200,5 +202,6 @@
         <script src="~/js/scan-input.js" asp-append-version="true"></script>
         <script src="~/js/scan-field.js" asp-append-version="true"></script>
         <script src="~/js/camera-field.js" asp-append-version="true"></script>
+        <script src="~/js/stocktake-counts.js" asp-append-version="true"></script>
     }
 }

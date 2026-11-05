@@ -17,7 +17,7 @@
 }
 
 @* 掃碼階段（quick-cart.js）：結果訊息在掃碼框正下方；沒有 JS 時只能用下方每行的表單修改 *@
-<div class="panel scan-panel" id="quick-cart" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })"
+<div class="panel scan-panel" id="quick-cart" data-actor-id="@Model.ActorId" data-cart-id="@c.Id" data-base-url="/Quick/Cart/@c.Id" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })"
      data-lines-url="@Url.Page("/Quick/Cart", "Lines", new { id = c.Id })">
     <div class="scan-bar">
         <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
@@ -25,17 +25,27 @@
         <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
     </div>
     <div class="scan-status" id="scan-status" role="status" aria-live="polite"></div>
+    <ul id="quick-failures" class="quick-failures" aria-label="待處理掃碼紀錄"></ul>
+    <details id="quick-search"><summary>沒有條碼？搜尋物料加入</summary>
+        <label for="quick-search-query">料號、品名或規格</label>
+        <input id="quick-search-query" maxlength="100" autocomplete="off" />
+        <button type="button" id="quick-search-button" class="secondary">搜尋</button>
+        <div id="quick-search-results" role="status"></div>
+    </details>
+    <button type="button" id="quick-undo" class="secondary" disabled>撤銷上一筆加入</button>
     <div class="quick-qty" id="quick-qty-row" hidden>
         <label for="quick-qty">數量</label>
         <input type="text" id="quick-qty" inputmode="decimal" autocomplete="off" maxlength="20" />
         <span class="muted" id="quick-qty-item"></span>
-        <button type="button" id="quick-qty-add">加入</button>
+        <button type="button" id="quick-qty-add">確認這是數量並加入</button>
+        <button type="button" id="quick-qty-scan" class="secondary">把此內容當下一筆掃碼</button>
+        <button type="button" class="secondary" id="quick-qty-cancel">取消這筆</button>
     </div>
     <div class="scan-options">
         <label>加入方式
             <select id="quick-add-mode" aria-label="加入方式">
                 <option value="manual">手動：掃到後輸入數量，按 Enter 加入</option>
-                <option value="auto">自動：每掃一次加一個包裝量（同料同儲位合併）</option>
+                <option value="auto" selected>自動：每掃一次加一個包裝量（同料同儲位合併）</option>
             </select>
         </label>
         <span>目前儲位：<strong id="quick-location">（未指定）</strong> <button type="button" class="link" id="quick-location-clear" hidden>清除</button></span>
@@ -53,8 +63,10 @@
 
 <partial name="_CartLines" model="c" />
 
+<partial name="_Checkout" model="Model" />
+
 <div class="panel" id="quick-actions">
-    <h2>掃完了？整批選動作</h2>
+    <h2>其他作業：轉草稿／移庫</h2>
     <p class="muted">選了之後到下一頁選倉庫、用途，補齊沒有儲位的行，再產生草稿單。</p>
     <form method="get" action="/Quick/Convert/@c.Id" class="actions" id="quick-action-form">
         <button type="submit" name="type" value="Inbound" id="quick-inbound">進倉</button>
@@ -74,7 +86,10 @@
     </form>
 </div>
 
+<script id="quick-initial" type="application/json">@Json.Serialize(c)</script>
+<script id="quick-preferences" type="application/json">@Json.Serialize(Model.Preferences)</script>
 @section Scripts {
+    <script src="~/js/picker.js" asp-append-version="true"></script>
     <script src="~/js/scan-input.js" asp-append-version="true"></script>
     <script src="~/js/quick-cart.js" asp-append-version="true"></script>
 }

@@ -13,6 +13,7 @@
     <link rel="icon" href="data:," />
     <title>儲位標籤</title>
     <link rel="stylesheet" href="~/css/print.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/usability.css" asp-append-version="true" />
 </head>
 <body>
     <div class="print-toolbar">
@@ -45,6 +46,25 @@
             <button type="button" id="print-button" onclick="window.print()">列印（@Model.Labels.Count 個，@sheets.Count 張）</button>
         }
         <a href="/Warehouses/Locations@(Model.WarehouseId is { } id ? "?WarehouseId=" + id : "")">回儲位</a>
+        @if (Model.Error is not null) { <p role="alert">@Model.Error</p> }
+        @if (Model.Result is { Items.Count: > 0 } selection)
+        {
+            <details class="item-label-select"><summary>只補印勾選的儲位（本頁）</summary>
+                <form method="get" class="item-label-select">
+                    <input type="hidden" name="WarehouseId" value="@Model.WarehouseId" />
+                    <input type="hidden" name="q" value="@Model.Keyword" />
+                    <input type="hidden" name="Status" value="@Model.Status" />
+                    <input type="hidden" name="Layout" value="@Model.Layout" />
+                    <input type="hidden" name="p" value="@Model.PageNumber" />
+                    <input type="hidden" name="PrintSelected" value="true" />
+                    @foreach (var location in selection.Items)
+                    {
+                        <label><input type="checkbox" name="SelectedIds" value="@location.Id" checked="@Model.SelectedIds.Contains(location.Id)" /> @location.Code @location.Name</label>
+                    }
+                    <button type="submit">產生勾選儲位標籤</button>
+                </form>
+            </details>
+        }
         @if (Model.Result is { TotalPages: > 1 } r)
         {
             <span class="label-pages">共 @r.TotalCount 個，第 @r.Page／@r.TotalPages 頁（每頁最多 @(Model.PerSheet * Warehouse.Web.Pages.Warehouses.LabelsModel.SheetsPerPage) 個）

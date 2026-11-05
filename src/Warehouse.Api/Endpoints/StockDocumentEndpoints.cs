@@ -41,7 +41,9 @@ public static class StockDocumentEndpoints
         var docs = api.MapGroup("/stock/documents").RequireAuthorization(Policies.StockRead).AddEndpointFilter(JsonOnlyFilter.InvokeAsync);
 
         docs.MapGet("", (IStockDocumentService documents, StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId,
-                int? page, CancellationToken ct) => documents.ListAsync(type, status, warehouseId, page ?? 1, ct));
+                int? page, string? recipient, string? project, string? docNo, string? itemCode, string? creator,
+                DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) => documents.ListAsync(type, status, warehouseId, page ?? 1, ct, recipient, project,
+                    new DocumentListFilter(docNo, itemCode, creator, From: from?.ToUniversalTime(), To: to?.ToUniversalTime())));
 
         docs.MapGet("/{id:guid}", async Task<Results<Ok<DocumentDetails>, NotFound>> (
                 IStockDocumentService documents, Guid id, CancellationToken ct) =>

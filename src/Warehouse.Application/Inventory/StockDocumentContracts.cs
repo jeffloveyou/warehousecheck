@@ -7,7 +7,15 @@ namespace Warehouse.Application.Inventory;
 public sealed record DocumentRow(
     Guid Id, string DocNo, StockDocumentType DocType, StockDocumentStatus Status, string WarehouseCode,
     string? PurposeName, string? PartnerName, string? ExternalNo, int LineCount,
-    string CreatedByName, DateTimeOffset CreatedAt, DateTimeOffset? PostedAt);
+    string CreatedByName, DateTimeOffset CreatedAt, DateTimeOffset? PostedAt,
+    string? RecipientName = null, string? ProjectReference = null);
+
+/// <summary>單據進階查詢；日期為建立時間 UTC 的 [From, To)，操作人篩選建立者而非實際領用人。</summary>
+public sealed record DocumentListFilter(string? DocNo = null, string? ItemCode = null, string? CreatorName = null,
+    Guid? CreatedById = null, DateTimeOffset? From = null, DateTimeOffset? To = null,
+    IReadOnlyCollection<Guid>? AllowedWarehouseIds = null, bool ReturnedOnly = false);
+
+public sealed record DocumentReversalLink(Guid Id, string DocNo, StockDocumentStatus Status);
 
 public sealed record DocumentLineRow(
     Guid Id, int LineNo, Guid LocationId, string LocationCode,
@@ -25,7 +33,9 @@ public sealed record DocumentDetails(
     Guid? ReversalOfDocumentId, string? ReversalOfDocNo,
     Guid CreatedById, string CreatedByName, DateTimeOffset CreatedAt, DateTimeOffset? SubmittedAt,
     string? ApprovedByName, DateTimeOffset? PostedAt, string? ReturnComment, uint Version,
-    IReadOnlyList<DocumentLineRow> Lines, bool FromScanCart = false);
+    IReadOnlyList<DocumentLineRow> Lines, bool FromScanCart = false,
+    Guid? RecipientUserId = null, string? RecipientName = null, string? ProjectReference = null,
+    DocumentReversalLink? RelatedReversal = null);
 
 /// <summary>
 /// 新增明細：儲位碼、料號以文字輸入（掃碼或手輸，大小寫、全形會正規化）。
@@ -51,7 +61,10 @@ public interface IStockDocumentService
 {
     /// <summary>進出倉、移庫單清單（不含期初），新到舊、伺服器分頁。</summary>
     Task<PagedResult<DocumentRow>> ListAsync(
-        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken);
+        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken,
+        string? recipient = null, string? project = null, DocumentListFilter? filter = null);
+
+    Task<ScanCartCheckoutResult> CheckoutScanCartAsync(Guid cartId, ScanCartCheckoutInput input, Actor actor, CancellationToken cancellationToken);
 
     Task<DocumentDetails?> GetAsync(Guid id, CancellationToken cancellationToken);
 

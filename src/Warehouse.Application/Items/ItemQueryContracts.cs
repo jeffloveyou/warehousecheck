@@ -27,6 +27,9 @@ public sealed record ItemListRow(
     string UnitCode,
     DateTimeOffset UpdatedAt);
 
+/// <summary>標籤只列正式啟用的物料；每次最多選 100 個。</summary>
+public sealed record ItemLabelRow(Guid Id, string ItemCode, string Name, string? Specification, string UnitCode);
+
 /// <summary>審核紀錄的一列。</summary>
 public sealed record ItemReviewRow(
     ItemReviewAction Action,
@@ -65,6 +68,8 @@ public sealed record ItemDetails(
 /// <summary>物料查詢（唯讀，AsNoTracking＋投影）。</summary>
 public interface IItemQueryService
 {
+    Task<IReadOnlyList<ItemLabelRow>> LabelsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken);
+
     Task<PagedResult<ItemListRow>> SearchAsync(ItemSearchQuery query, CancellationToken cancellationToken);
 
     /// <summary>找不到時回傳 null。</summary>

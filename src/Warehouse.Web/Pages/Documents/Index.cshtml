@@ -3,10 +3,12 @@
 @using Warehouse.Domain.Inventory
 @using Warehouse.Web.Pages.Documents
 @{
+    ViewData["MobileCards"] = true;
     ViewData["Title"] = "進出倉單";
 }
 <h1>進出倉單</h1>
-<p class="muted">進倉、出倉、移庫都用單據處理：先建立草稿、加明細，再依設定直接確認過帳，或送審後由倉庫主管核准。草稿與待核准都不影響庫存。</p>
+<p class="muted">進倉、出倉、移庫都用單據處理：先建立草稿、加明細，再依設定直接確認過帳，或送審後由倉庫主管核准。草稿與待核准尚未入帳；待核准的出倉單會預留庫存。</p>
+<p><a href="/Documents?Mine=true">我的最近作業</a>　<a href="/Stock/Movements">查已入帳異動</a></p>
 @if (TempData["Message"] is string message)
 {
     <div class="message info" id="page-message">@message</div>
@@ -37,6 +39,15 @@
             <option value="@w.Id" selected="@(w.Id == Model.WarehouseId)">@w.Code @w.Name@(w.IsDeleted ? "（已刪除）" : "")</option>
         }
     </select>
+    <input name="Recipient" value="@Model.Recipient" maxlength="100" placeholder="實際領用人" aria-label="實際領用人" />
+    <input name="Project" value="@Model.Project" maxlength="100" placeholder="專案／工單" aria-label="專案／工單" />
+    <input name="DocNo" value="@Model.DocNo" maxlength="100" placeholder="完整單號" aria-label="單號" />
+    <input name="ItemCode" value="@Model.ItemCode" maxlength="100" placeholder="正式料號" aria-label="物料料號" />
+    <input name="Creator" value="@Model.Creator" maxlength="100" placeholder="操作人（建立者）" aria-label="操作人（建立者）" />
+    <label>建立起日 <input type="date" name="From" value="@(Model.From?.ToString("yyyy-MM-dd"))" min="2000-01-01" max="2100-12-31" /></label>
+    <label>建立迄日 <input type="date" name="To" value="@(Model.To?.ToString("yyyy-MM-dd"))" min="2000-01-01" max="2100-12-31" /></label>
+    <label class="inline-check"><input type="checkbox" name="Mine" value="true" checked="@Model.Mine" /> 只看我建立的單據</label>
+    <label class="inline-check"><input type="checkbox" name="ReturnedOnly" value="true" checked="@Model.ReturnedOnly" /> 只看退回待修正</label>
     <button type="submit">查詢</button>
 </form>
 @if (Model.CanEdit && Model.Options is { } options)
@@ -70,7 +81,7 @@
 <div class="table-wrap">
     <table id="document-list">
         <thead>
-            <tr><th>單號</th><th>類型</th><th>狀態</th><th>倉庫</th><th>用途</th><th>往來對象</th><th>外部單號</th><th>行數</th><th>建立者</th><th>建立時間</th><th>過帳時間</th></tr>
+            <tr><th>單號</th><th>類型</th><th>狀態</th><th>倉庫</th><th>用途</th><th>往來對象</th><th>外部單號</th><th>領用人</th><th>專案／工單</th><th>行數</th><th>建立者</th><th>建立時間</th><th>過帳時間</th></tr>
         </thead>
         <tbody>
             @foreach (var d in Model.Result.Items)
@@ -83,6 +94,8 @@
                     <td>@d.PurposeName</td>
                     <td>@d.PartnerName</td>
                     <td>@d.ExternalNo</td>
+                    <td>@d.RecipientName</td>
+                    <td>@d.ProjectReference</td>
                     <td class="num">@d.LineCount</td>
                     <td>@d.CreatedByName</td>
                     <td>@Display.Time(d.CreatedAt)</td>
@@ -91,7 +104,7 @@
             }
             @if (Model.Result.Items.Count == 0)
             {
-                <tr><td colspan="11" class="muted">沒有符合的單據。</td></tr>
+                <tr><td colspan="13" class="muted">沒有符合的單據。</td></tr>
             }
         </tbody>
     </table>

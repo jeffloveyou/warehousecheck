@@ -118,10 +118,16 @@ public sealed record BalanceRow(
     Guid ItemId, string? ItemCode, string ItemName, string UnitCode, Guid LocationId, string WarehouseCode, string LocationCode,
     string? LotNo, DateOnly? ExpiryDate, string? SerialNo, StockStatus Status, bool LocationAvailable, decimal Quantity);
 
+/// <summary>整個倉庫的物料摘要；儲位結存不扣倉庫層級預留。</summary>
+public sealed record WarehouseStockSummaryRow(
+    Guid ItemId, string? ItemCode, string ItemName, string UnitCode, string WarehouseCode,
+    decimal Balance, decimal EligibleBalance, decimal Reserved, decimal Available);
+
 public sealed record MovementRow(
     DateTimeOffset OccurredAt, string DocNo, StockDocumentType DocType, string? ItemCode, string ItemName,
     string WarehouseCode, string LocationCode, string? LotNo, string? SerialNo, StockStatus Status,
-    decimal QuantityDelta, decimal BalanceAfter, string ActorName, Guid DocumentId = default, bool IsNegative = false);
+    decimal QuantityDelta, decimal BalanceAfter, string ActorName, Guid DocumentId = default, bool IsNegative = false,
+    string? RecipientName = null, string? ProjectReference = null);
 
 /// <summary>
 /// 異動歷史查詢條件（M4-05）。料號、儲位碼、單號精確比對（正規化後）；操作者部分相符；
@@ -129,7 +135,8 @@ public sealed record MovementRow(
 /// </summary>
 public sealed record MovementQuery(
     string? ItemCode = null, Guid? WarehouseId = null, string? LocationCode = null, string? DocNo = null, string? ActorName = null,
-    DateTimeOffset? From = null, DateTimeOffset? To = null, int Page = 1)
+    DateTimeOffset? From = null, DateTimeOffset? To = null, int Page = 1,
+    string? Recipient = null, string? Project = null)
 {
     /// <summary>沒有料號、儲位、單號與起日時，預設只查最近幾天。</summary>
     public const int DefaultDays = 30;
@@ -196,7 +203,10 @@ public interface IStockQueryService
         Guid? warehouseId, Guid? locationId, Guid? itemId, int page, CancellationToken cancellationToken);
 
     Task<PagedResult<MovementRow>> GetMovementsAsync(
-        Guid? itemId, Guid? locationId, Guid? documentId, int page, CancellationToken cancellationToken);
+        Guid? itemId, Guid? locationId, Guid? documentId, int page, CancellationToken cancellationToken, Guid? warehouseId = null);
+
+    Task<PagedResult<WarehouseStockSummaryRow>> GetWarehouseSummaryAsync(
+        Guid? warehouseId, Guid? locationId, Guid? itemId, int page, CancellationToken cancellationToken);
 
     /// <summary>異動歷史（M4-05）：多條件篩選、新到舊、伺服器分頁。</summary>
     Task<PagedResult<MovementRow>> SearchMovementsAsync(MovementQuery query, CancellationToken cancellationToken);

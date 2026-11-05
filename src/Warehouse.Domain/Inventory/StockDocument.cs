@@ -123,6 +123,18 @@ public sealed class StockDocument
 
     public string? Note { get; private set; }
 
+    public Guid? RecipientUserId { get; private set; }
+    public string? RecipientName { get; private set; }
+    public string? ProjectReference { get; private set; }
+
+    public void SetRecipient(Guid? userId, string? name, string? project)
+    {
+        EnsureDraft();
+        RecipientUserId = userId;
+        RecipientName = Rules.Optional(name, 100, "領用人");
+        ProjectReference = Rules.Optional(project, 100, "專案／工單");
+    }
+
     public Guid CreatedById { get; private set; }
 
     public string CreatedByName { get; private set; } = string.Empty;

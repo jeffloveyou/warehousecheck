@@ -1,6 +1,7 @@
 @page
 @model Warehouse.Web.Pages.Stock.IndexModel
 @{
+    ViewData["MobileCards"] = true;
     ViewData["Title"] = "庫存";
 }
 <h1>庫存查詢</h1>
@@ -24,6 +25,27 @@
 }
 @if (Model.Balances is { } balances)
 {
+    @if (Model.Summary is { } summary)
+    {
+        <h2>倉庫物料摘要（共 @summary.TotalCount 筆）</h2>
+        <p class="muted">摘要涵蓋整個倉庫。可出量＝有效儲位的可用狀態結存－未到期預留；下方儲位數量是帳面結存，未扣預留。正式出庫仍會重新檢查。</p>
+        <div class="table-wrap">
+            <table id="stock-summary">
+                <thead><tr><th>倉庫</th><th>料號／品名</th><th>整倉結存</th><th>有效可用結存</th><th>預留</th><th>可出量</th></tr></thead>
+                <tbody>
+                    @foreach (var row in summary.Items)
+                    {
+                        <tr><td>@row.WarehouseCode</td><td>@row.ItemCode @row.ItemName</td><td>@Display.Qty(row.Balance) @row.UnitCode</td><td>@Display.Qty(row.EligibleBalance)</td><td>@Display.Qty(row.Reserved)</td><td>@Display.Qty(row.Available)</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="pager">
+            @if (summary.Page > 1) { <a href="@Model.SummaryPageUrl(summary.Page - 1)">摘要上一頁</a> }
+            <span>摘要第 @summary.Page / @summary.TotalPages 頁</span>
+            @if (summary.Page < summary.TotalPages) { <a href="@Model.SummaryPageUrl(summary.Page + 1)">摘要下一頁</a> }
+        </div>
+    }
     <h2>結存（共 @balances.TotalCount 筆）</h2>
     <div class="table-wrap">
         <table id="balance-list">

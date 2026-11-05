@@ -19,8 +19,173 @@ namespace Warehouse.IntegrationTests;
 
 /// <summary>快速進出購物車（ADR-0026，T-QC-01～）：只看得到自己的、合併、倉庫鎖定、轉單（同一交易、冪等、整批不轉）、刪除購物車草稿。</summary>
 [Collection(MigratedDatabaseCollection.Name)]
-public class ScanCartTests
+public partial class ScanCartTests
 {
+    [Fact]
+    public async Task 加入操作去重_同鍵重送不累加_異內容拒絕_舊版本不能覆蓋()
+    {
+        var me = await UserAsync();
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var input = new ScanCartAddInput(item, null, 2m, Guid.NewGuid());
+        var line = await Carts(s => s.AddAsync(cart, input, me, Ct));
+        var before = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        Assert.Equal(line, await Carts(s => s.AddAsync(cart, input, me, Ct)));
+        Assert.Equal(2m, (await Carts(s => s.GetAsync(cart, me, Ct)))!.Lines.Single().Quantity);
+        Assert.Equal("idempotency.key_reused", await CodeAsync(() => Carts(s => s.AddAsync(cart, input with { Quantity = 3m }, me, Ct))));
+        await Carts(s => s.AddAsync(cart, input with { OperationId = Guid.NewGuid() }, me, Ct));
+        Assert.Equal("scan_cart.concurrency_conflict", await CodeAsync(() => Carts(s => s.UpdateLineAsync(cart, line, 1m, null, me, Ct, before.Version))));
+        Assert.Equal(4m, (await Carts(s => s.GetAsync(cart, me, Ct)))!.Lines.Single().Quantity);
+    }
+
+    [Fact]
+    public async Task 一次結帳_分儲位代領_備註_冪等_同鍵異內容拒絕()
+    {
+        await SetApprovalAsync(false);
+        var me = await UserAsync();
+        var recipient = await UserAsync(allWarehouses: false);
+        var (w, _) = await WarehouseAsync("A-01", "A-02");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(w, ("A-01", item, 4m), me);
+        await InboundAsync(w, ("A-02", item, 6m), me);
+        var cart = await Carts(s => s.CreateAsync("測試備註", me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 10m, Guid.NewGuid()), me, Ct));
+        var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
+            new StockDocumentHeader(ProductionOut, null, null, details.Note),
+            [new(line, "A-01", 4m), new(line, "A-02", 6m)], recipient.Id, "P-001");
+        var result = await Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct));
+        Assert.Equal(StockDocumentStatus.Posted, result.Status);
+        Assert.Equal(result, await Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct)));
+        Assert.Equal("idempotency.key_reused", await CodeAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input with { ProjectReference = "P-002" }, me, Ct))));
+        var doc = (await Docs(s => s.GetAsync(result.DocumentId, Ct)))!;
+        Assert.Equal(recipient.Id, doc.RecipientUserId);
+        Assert.Equal("P-001", doc.ProjectReference);
+        Assert.Equal("測試備註", doc.Note);
+        Assert.Equal(me.Id, doc.CreatedById);
+        Assert.Equal(0m, await BalanceAsync(w, "A-01"));
+        Assert.Equal(0m, await BalanceAsync(w, "A-02"));
+        Assert.Null(await Carts(s => s.GetAsync(cart, me, Ct)));
+    }
+
+    [Fact]
+    public async Task 一次結帳_不足整批回滾_分配不符拒絕_版本過期拒絕()
+    {
+        await SetApprovalAsync(false);
+        var me = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(w, ("A-01", item, 1m), me);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 2m), me, Ct));
+        var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
+            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], me.Id, null);
+        Assert.NotNull(await MessageAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct))));
+        Assert.NotNull(await Carts(s => s.GetAsync(cart, me, Ct)));
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            Assert.False(await db.StockDocuments.AnyAsync(d => d.Id == input.RequestId, Ct));
+            Assert.False(await db.StockMovements.AnyAsync(m => m.DocumentId == input.RequestId, Ct));
+        }
+        Assert.Equal(1m, await BalanceAsync(w, "A-01"));
+        Assert.NotNull(await MessageAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input with { Allocations = [new(line, "A-01", 1m)] }, me, Ct))));
+        await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), me, Ct));
+        Assert.Equal("scan_cart.concurrency_conflict", await CodeAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct))));
+    }
+
+    [Fact]
+    public async Task 一次結帳_同請求併行只過帳一次_搶最後庫存不超領()
+    {
+        await SetApprovalAsync(false);
+        var me = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(w, ("A-01", item, 1m), me);
+        async Task<(Guid Cart, ScanCartCheckoutInput Input)> NewCart()
+        {
+            var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+            var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), me, Ct));
+            var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+            return (cart, new(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
+                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], me.Id, null));
+        }
+        var first = await NewCart();
+        var second = await NewCart();
+        var same = await Task.WhenAll(Docs(s => s.CheckoutScanCartAsync(first.Cart, first.Input, me, Ct)),
+            Docs(s => s.CheckoutScanCartAsync(first.Cart, first.Input, me, Ct)));
+        Assert.Equal(same[0], same[1]);
+        Assert.NotNull(await MessageAsync(() => Docs(s => s.CheckoutScanCartAsync(second.Cart, second.Input, me, Ct))));
+        Assert.NotNull(await Carts(s => s.GetAsync(second.Cart, me, Ct)));
+        Assert.Equal(0m, await BalanceAsync(w, "A-01"));
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        Assert.Single(await db.StockMovements.Where(m => m.DocumentId == first.Input.RequestId).ToListAsync(Ct));
+    }
+
+    [Fact]
+    public async Task 一次結帳_審核送審預留_領用停用拒絕_可用提示扣預留()
+    {
+        await SetApprovalAsync(false);
+        var me = await UserAsync();
+        var other = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(w, ("A-01", item, 5m), me);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 2m), me, Ct));
+        var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
+            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], other.Id, null);
+        await using (var db = MigratedDatabaseFixture.CreateContext())
+        {
+            var u = await db.Users.SingleAsync(u => u.Id == other.Id, Ct); u.IsActive = false; await db.SaveChangesAsync(Ct);
+        }
+        Assert.Contains("停用", await MessageAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct))));
+        await SetApprovalAsync(true);
+        try
+        {
+            var result = await Docs(s => s.CheckoutScanCartAsync(cart, input with { RecipientUserId = me.Id }, me, Ct));
+            Assert.Equal(StockDocumentStatus.Submitted, result.Status);
+            Assert.Equal(5m, await BalanceAsync(w, "A-01"));
+            var next = await Carts(s => s.CreateAsync(null, me, Ct));
+            await Carts(s => s.AddAsync(next, new ScanCartAddInput(item, null, 1m), me, Ct));
+            var stock = await Carts(s => s.StockAsync(next, w, me, Ct));
+            Assert.All(stock, row => Assert.Equal(3m, row.WarehouseAvailable));
+            Assert.All(await Carts(s => s.RecipientsAsync(other.Name, Ct)), user => Assert.NotEqual(other.Id, user.Id));
+        }
+        finally { await SetApprovalAsync(false); }
+    }
+
+    [Fact]
+    public async Task 一次結帳_兩人同時搶最後一件_只有一張成功()
+    {
+        await SetApprovalAsync(false);
+        var first = await UserAsync();
+        var second = await UserAsync();
+        var (w, _) = await WarehouseAsync("A-01");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(w, ("A-01", item, 1m), first);
+        async Task<(Guid Cart, ScanCartCheckoutInput Input)> Prepare(Actor actor)
+        {
+            var cart = await Carts(s => s.CreateAsync(null, actor, Ct));
+            var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), actor, Ct));
+            var c = (await Carts(s => s.GetAsync(cart, actor, Ct)))!;
+            return (cart, new(Guid.NewGuid(), c.Version, StockDocumentType.Outbound, w,
+                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], actor.Id, null));
+        }
+        var a = await Prepare(first);
+        var b = await Prepare(second);
+        async Task<bool> Attempt((Guid Cart, ScanCartCheckoutInput Input) value, Actor actor)
+        {
+            try { await Docs(s => s.CheckoutScanCartAsync(value.Cart, value.Input, actor, Ct)); return true; }
+            catch (Exception ex) when (ex is AppException or DomainRuleException) { return false; }
+        }
+        var results = await Task.WhenAll(Attempt(a, first), Attempt(b, second));
+        Assert.Single(results, r => r);
+        Assert.Equal(0m, await BalanceAsync(w, "A-01"));
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        Assert.Equal(1, await db.StockDocuments.CountAsync(d => d.Id == a.Input.RequestId || d.Id == b.Input.RequestId, Ct));
+    }
     private static readonly Guid Pcs = SeedData.Units.Single(u => u.Code == "PCS").Id;
     private static readonly Guid El = SeedData.Categories.Single(c => c.Code == "EL").Id;
     private static readonly Guid PurchaseIn = SeedData.Purposes.Single(p => p.Direction == PurposeDirection.In && p.Code == "PURCHASE").Id;

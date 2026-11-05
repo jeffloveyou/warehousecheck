@@ -4,6 +4,17 @@
     ViewData["Title"] = "系統設定";
 }
 <h1>系統設定</h1>
+<details class="panel" id="role-task-guide">
+    <summary>角色能做哪些工作</summary>
+    <dl>
+        <dt>查詢者</dt><dd>查物料、庫存與單據；不因此取得進出庫操作權限。</dd>
+        <dt>作業員</dt><dd>快速進出、建立進出倉單、預留與輸入盤點；可提出物料。</dd>
+        <dt>物料管理員</dt><dd>核准與維護物料、分類、單位及搜尋索引；進出庫作業需另外具備作業角色。</dd>
+        <dt>倉庫主管</dt><dd>維護倉庫儲位、進出庫及核准單據、管理盤點；仍受帳號的可作業倉庫及自核設定限制。</dd>
+        <dt>系統管理員</dt><dd>維護帳號與系統設定、查操作日誌及系統狀態；不自動取得物料或倉庫主管權限。</dd>
+    </dl>
+    <p class="muted">同帳號可有多個角色，權限合併；開關只調整作業規則，不會替帳號新增角色或倉庫權限。</p>
+</details>
 <p class="muted">所有功能開關集中在這裡。<strong>關閉功能只會隱藏輸入欄位、停止檢查，既有資料一律保留</strong>，在詳情、列印與操作日誌中仍可查看；重新開啟就能繼續使用。每次變更都會記錄在操作日誌（下方「最近變更」）。</p>
 @if (TempData["Message"] is string message)
 {
@@ -22,6 +33,7 @@
     <input type="hidden" name="Original.ItemApprovalEnabled" value="@Model.Original.ItemApprovalEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.OpeningApprovalEnabled" value="@Model.Original.OpeningApprovalEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.StocktakeApprovalEnabled" value="@Model.Original.StocktakeApprovalEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.QuickCheckoutEnabled" value="@Model.Original.QuickCheckoutEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.DocumentApprovalEnabled" value="@Model.Original.DocumentApprovalEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.AllowSelfApproveDocuments" value="@Model.Original.AllowSelfApproveDocuments.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.DocumentPurposeEnabled" value="@Model.Original.DocumentPurposeEnabled.ToString().ToLowerInvariant()" />
@@ -49,6 +61,12 @@
     <input type="hidden" name="Original.RetentionPostingFailuresDays" value="@Model.Original.RetentionPostingFailuresDays" />
     <input type="hidden" name="Original.RetentionImportBatchesDays" value="@Model.Original.RetentionImportBatchesDays" />
     <h2>使用模式</h2>
+    <div class="message info" id="settings-effect-preview" role="status">
+        <strong>表單設定效果預覽（儲存後生效）</strong>
+        <p id="settings-checkout-effect">@(Model.Form.QuickCheckoutEnabled ? (Model.Form.DocumentApprovalEnabled ? "快速進出會送審；主管核准後才入帳。" : "快速進出確認結帳即入帳。") : "快速進出使用轉草稿流程，再到單據完成作業。")</p>
+        <p id="settings-required-effect">必填表頭依下方已啟用且勾選必填的欄位檢查。</p>
+        <p class="muted">已送審單據繼續等待主管核准；預覽與套用模式都不會自行儲存。</p>
+    </div>
     <p id="usage-mode">目前：<strong>@(Model.CurrentMode is { } mode ? Warehouse.Application.Settings.UsageModes.Label(mode) : "自訂")</strong></p>
     @if (Model.ModeApplied is { } applied)
     {
@@ -98,6 +116,7 @@
     <p><label><input type="checkbox" name="Form.LocationImagesEnabled" value="true" checked="@Model.Form.LocationImagesEnabled" /> 倉位圖片</label></p>
     <p class="muted">關閉只會隱藏畫面上的欄位，已填的資料會保留，重新開啟就能看到。每次變更都會留下稽核紀錄。</p>
     <h2>進出倉單</h2>
+    <p><label><input type="checkbox" name="Form.QuickCheckoutEnabled" value="true" checked="@Model.Form.QuickCheckoutEnabled" /> 快速進出一次結帳（關閉時使用原有轉草稿流程）</label></p>
     <p><label><input type="checkbox" name="Form.DocumentApprovalEnabled" value="true" checked="@Model.Form.DocumentApprovalEnabled" /> 單據需要審核（草稿 → 送審 → 倉庫主管核准才過帳）</label></p>
     <p class="muted">關閉時（預設）：草稿確認即過帳。開啟後出倉單送審時會預留庫存。已在待核准的單據不受影響。</p>
     <p><label><input type="checkbox" name="Form.AllowSelfApproveDocuments" value="true" checked="@Model.Form.AllowSelfApproveDocuments" /> 允許建立者核准自己的進出倉單</label></p>
@@ -180,3 +199,6 @@
     </table>
 </div>
 <p><a href="/Admin/Audit?ActionPrefix=setting.">在操作日誌查看全部設定變更</a></p>
+@section Scripts {
+    <script src="~/js/settings-preview.js" asp-append-version="true"></script>
+}

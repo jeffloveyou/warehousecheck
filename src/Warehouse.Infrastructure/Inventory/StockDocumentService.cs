@@ -22,7 +22,7 @@ namespace Warehouse.Infrastructure.Inventory;
 /// 修改草稿：開交易 → 鎖單據列 → 版本與權限 → 修改 → 稽核 → commit（同期初）。
 /// 過帳（確認或核准）的步驟見 <see cref="PostCoreAsync"/>；結存只經 <see cref="IInventoryPostingService"/> 改變。
 /// </summary>
-public sealed class StockDocumentService(
+public sealed partial class StockDocumentService(
     WarehouseDbContext db, IInventoryPostingService posting, ISettingsService settings, TimeProvider clock,
     IPostingFailureLog? failures = null) : IStockDocumentService
 {
@@ -34,7 +34,8 @@ public sealed class StockDocumentService(
     private const string ApproveCommand = "document.approve";
 
     public async Task<PagedResult<DocumentRow>> ListAsync(
-        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken)
+        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken,
+        string? recipient = null, string? project = null, DocumentListFilter? filter = null)
     {
         page = Paging.ClampPage(page);
         var docs = db.StockDocuments.AsNoTracking().Where(d => d.DocType != StockDocumentType.Opening);
@@ -50,9 +51,41 @@ public sealed class StockDocumentService(
         {
             docs = docs.Where(d => d.WarehouseId == w);
         }
+        static string Text(string value) => value.Trim()[..Math.Min(value.Trim().Length, Paging.MaxKeywordLength)];
+        if (!string.IsNullOrWhiteSpace(recipient))
+        {
+            var text = Text(recipient);
+            docs = docs.Where(d => d.RecipientName != null && d.RecipientName.Contains(text));
+        }
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            var text = Text(project);
+            docs = docs.Where(d => d.ProjectReference != null && d.ProjectReference.Contains(text));
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.DocNo))
+        {
+            var number = Text(filter.DocNo).ToUpperInvariant();
+            docs = docs.Where(d => d.DocNo == number);
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.ItemCode))
+        {
+            var code = TextNormalizer.Normalize(Text(filter.ItemCode));
+            docs = docs.Where(d => d.Lines.Any(l => db.Items.Any(i => i.Id == l.ItemId && i.ItemCode == code)));
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.CreatorName))
+        {
+            var name = Text(filter.CreatorName);
+            docs = docs.Where(d => d.CreatedByName.Contains(name));
+        }
+        if (filter?.CreatedById is { } creator) docs = docs.Where(d => d.CreatedById == creator);
+        if (filter?.ReturnedOnly == true) docs = docs.Where(d => d.Status == StockDocumentStatus.Draft && d.ReturnComment != null);
+        if (filter?.AllowedWarehouseIds is { } allowed) docs = docs.Where(d => allowed.Contains(d.WarehouseId));
+        if (filter?.From is { } from) docs = docs.Where(d => d.CreatedAt >= from.ToUniversalTime());
+        if (filter?.To is { } to) docs = docs.Where(d => d.CreatedAt < to.ToUniversalTime());
         var total = await docs.CountAsync(cancellationToken);
         var rows = await docs
             .OrderByDescending(d => d.CreatedAt)
+            .ThenBy(d => d.Id)
             .Skip((page - 1) * Paging.DefaultPageSize)
             .Take(Paging.DefaultPageSize)
             .Select(d => new DocumentRow(
@@ -60,7 +93,7 @@ public sealed class StockDocumentService(
                 db.Warehouses.Where(x => x.Id == d.WarehouseId).Select(x => x.Code).First(),
                 db.DocumentPurposes.Where(p => p.Id == d.PurposeId).Select(p => p.Name).FirstOrDefault(),
                 db.BusinessPartners.Where(p => p.Id == d.PartnerId).Select(p => p.Name).FirstOrDefault(),
-                d.ExternalNo, d.Lines.Count, d.CreatedByName, d.CreatedAt, d.PostedAt))
+                d.ExternalNo, d.Lines.Count, d.CreatedByName, d.CreatedAt, d.PostedAt, d.RecipientName, d.ProjectReference))
             .ToListAsync(cancellationToken);
         return new PagedResult<DocumentRow>(rows, page, Paging.DefaultPageSize, total);
     }
@@ -77,6 +110,8 @@ public sealed class StockDocumentService(
                 PurposeName = db.DocumentPurposes.Where(p => p.Id == d.PurposeId).Select(p => p.Name).FirstOrDefault(),
                 PartnerName = db.BusinessPartners.Where(p => p.Id == d.PartnerId).Select(p => p.Name).FirstOrDefault(),
                 ReversalOfDocNo = db.StockDocuments.Where(o => o.Id == d.ReversalOfDocumentId).Select(o => o.DocNo).FirstOrDefault(),
+                RelatedReversal = db.StockDocuments.Where(o => o.ReversalOfDocumentId == d.Id && o.Status != StockDocumentStatus.Cancelled)
+                    .Select(o => new DocumentReversalLink(o.Id, o.DocNo, o.Status)).FirstOrDefault(),
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (head is null)
@@ -103,7 +138,7 @@ public sealed class StockDocumentService(
             d.Id, d.DocNo, d.DocType, d.Status, d.WarehouseId, head.WarehouseCode, d.PurposeId, head.PurposeName,
             d.PartnerId, head.PartnerName, d.ExternalNo, d.Note, d.ReversalOfDocumentId, head.ReversalOfDocNo,
             d.CreatedById, d.CreatedByName, d.CreatedAt, d.SubmittedAt, d.ApprovedByName, d.PostedAt, d.ReturnComment,
-            head.Version, lines, d.FromScanCart);
+            head.Version, lines, d.FromScanCart, d.RecipientUserId, d.RecipientName, d.ProjectReference, head.RelatedReversal);
     }
 
     public async Task<Guid> CreateAsync(
@@ -303,7 +338,7 @@ public sealed class StockDocumentService(
             var warehouseCode = await WarehouseLock.LockUsableAsync(db, input.WarehouseId, "倉庫已停用，不能建立單據。", cancellationToken);
             await WarehouseAccess.EnsureAsync(db, actor, input.WarehouseId, cancellationToken);
             var current = await settings.GetAsync(cancellationToken);
-            var effective = await EffectiveHeaderAsync(input.Type, new StockDocumentHeader(input.PurposeId, null, null, null), null, current, cancellationToken);
+            var effective = await EffectiveHeaderAsync(input.Type, new StockDocumentHeader(input.PurposeId, null, null, cart.Note), null, current, cancellationToken);
             var now = clock.GetUtcNow();
             var doc = StockDocument.CreateMovement(
                 input.RequestId, await NextDocNoAsync(input.Type, cancellationToken), input.Type, input.WarehouseId, effective, null, actor.Id, actor.Name, now);
@@ -441,6 +476,13 @@ public sealed class StockDocumentService(
             }
             RequireEditor(doc, actor);
             RequireHeaderFields(doc, current);
+            var created = await SubmitCoreAsync(doc, actor, now, cancellationToken);
+            return ("document.submit", (object?)new { Reservations = created });
+        });
+
+    // 呼叫端持有交易；普通送審與購物車結帳共用預留規則。
+    private async Task<int> SubmitCoreAsync(StockDocument doc, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+    {
             doc.Submit(now);
             // 出倉單送審即預留（D-26）：依料號合計；指定手動預留的行只補預留「超出手動預留剩餘量」的部分（M4-02 審查 #6）。
             // 可用量不足就無法送審；允許負庫存的物料只預留有的部分（使用者 2026-10-22）
@@ -466,8 +508,8 @@ public sealed class StockDocumentService(
                     .ToList();
                 created = (await posting.ReserveManyAsync(requests, actor, now, cancellationToken, forDocument: true)).Count;
             }
-            return ("document.submit", (object?)new { Reservations = created });
-        });
+        return created;
+    }
 
     public Task ConfirmAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
         IdempotentAsync(ConfirmCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken, async (doc, current, now) =>
@@ -558,6 +600,7 @@ public sealed class StockDocumentService(
         var header = new StockDocumentHeader(null, original.PartnerId, original.ExternalNo, $"沖銷 {original.DocNo}");
         var reversal = StockDocument.CreateMovement(
             Guid.NewGuid(), await NextDocNoAsync(type, cancellationToken), type, warehouseId, header, original.Id, actor.Id, actor.Name, now);
+        reversal.SetRecipient(original.RecipientUserId, original.RecipientName, original.ProjectReference);
         var itemIds = original.Lines.Select(l => l.ItemId!.Value).Distinct().ToList();
         var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
             .Select(i => new { i.Id, i.TrackingMode, DecimalPlaces = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => (int)u.DecimalPlaces).First() })

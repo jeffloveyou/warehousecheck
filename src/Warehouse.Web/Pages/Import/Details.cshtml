@@ -24,6 +24,10 @@
     <p id="import-summary">共 @b.RowCount 列；錯誤 <strong>@b.ErrorCount</strong> 列；警告 @b.WarningCount 列
         @if (b.Status == ImportStatus.Committed && b.CommittedAt is { } at) { <span class="chip" id="import-status">已匯入 @Display.Time(at)</span> }
     </p>
+    @if (b.ErrorCount + b.WarningCount > 0)
+    {
+        <p><a asp-page-handler="Issues" asp-route-id="@b.Id" id="import-issues-download">下載完整錯誤與警告（CSV，含來源列號）</a></p>
+    }
     @if (b.ErrorCount > 0)
     {
         <p class="message error">有錯誤，整批不會匯入。請依下表修正檔案後重新上傳。</p>
@@ -63,6 +67,6 @@
     </div>
     @if (b.ErrorCount + b.WarningCount > b.Issues.Count)
     {
-        <p class="muted">只列出前 @b.Issues.Count 筆。</p>
+        <p class="muted">畫面只列出前 @b.Issues.Count 筆；請下載完整錯誤與警告查看其餘內容。</p>
     }
 }

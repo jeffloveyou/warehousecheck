@@ -27,6 +27,9 @@ public class MovementsModel(IStockQueryService stock, IWarehouseService warehous
     [BindProperty(SupportsGet = true)]
     public string? ActorName { get; set; }
 
+    [BindProperty(SupportsGet = true)] public string? Recipient { get; set; }
+    [BindProperty(SupportsGet = true)] public string? Project { get; set; }
+
     [BindProperty(SupportsGet = true)]
     public DateOnly? From { get; set; }
 
@@ -69,7 +72,7 @@ public class MovementsModel(IStockQueryService stock, IWarehouseService warehous
 
     public string ExportUrl => Url.Page("/Stock/Movements", "Export", new
     {
-        ItemCode, WarehouseId, LocationCode, DocNo, ActorName, From = From?.ToString("yyyy-MM-dd"), To = To?.ToString("yyyy-MM-dd"),
+        ItemCode, WarehouseId, LocationCode, DocNo, ActorName, Recipient, Project, From = From?.ToString("yyyy-MM-dd"), To = To?.ToString("yyyy-MM-dd"),
     })!;
 
     /// <summary>日期檢查：起日不可晚於迄日；手改網址的極端日期（0001-01-01、9999-12-31）轉 UTC 會溢位，先擋下。</summary>
@@ -88,11 +91,11 @@ public class MovementsModel(IStockQueryService stock, IWarehouseService warehous
         ItemCode, WarehouseId, LocationCode, DocNo, ActorName,
         From is { } f ? TaipeiTime.StartOfDay(f) : null,
         To is { } t ? TaipeiTime.StartOfDay(t.AddDays(1)) : null,
-        PageNumber);
+        PageNumber, Recipient, Project);
 
     public string PageUrl(int page) => Url.Page("/Stock/Movements", new
     {
-        ItemCode, WarehouseId, LocationCode, DocNo, ActorName,
+        ItemCode, WarehouseId, LocationCode, DocNo, ActorName, Recipient, Project,
         From = From?.ToString("yyyy-MM-dd"),
         To = To?.ToString("yyyy-MM-dd"),
         p = page,

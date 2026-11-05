@@ -30,6 +30,8 @@ public sealed record SystemSettings(
     /// <summary>進出倉單是否需要審核（預設 false：確認即過帳，FR-08）。開啟時出倉單送審即預留（D-26）。</summary>
     public bool DocumentApprovalEnabled { get; init; }
 
+    public bool QuickCheckoutEnabled { get; init; } = true;
+
     /// <summary>進出倉單審核時，建立者可否核准自己的單（預設 false；與期初的 D-07 開關分開）。</summary>
     public bool AllowSelfApproveDocuments { get; init; }
 
@@ -157,6 +159,7 @@ public static class SettingKeys
     public const string OpeningApprovalEnabled = "stock.opening.approval_enabled";
     public const string StocktakeApprovalEnabled = "stock.stocktake.approval_enabled";
     public const string DocumentApprovalEnabled = "stock.documents.approval_enabled";
+    public const string QuickCheckoutEnabled = "stock.documents.quick_checkout_enabled";
     public const string AllowSelfApproveDocuments = "stock.documents.allow_self_approval";
     public const string DocumentPurposeEnabled = "stock.documents.field.purpose.enabled";
     public const string DocumentPurposeRequired = "stock.documents.field.purpose.required";

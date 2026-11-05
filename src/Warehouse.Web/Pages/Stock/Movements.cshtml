@@ -1,6 +1,7 @@
 @page
 @model Warehouse.Web.Pages.Stock.MovementsModel
 @{
+    ViewData["MobileCards"] = true;
     ViewData["Title"] = "異動歷史";
 }
 <h1>異動歷史</h1>
@@ -17,6 +18,8 @@
     <input type="text" name="LocationCode" value="@Model.LocationCode" maxlength="40" placeholder="儲位碼" aria-label="儲位碼" />
     <input type="text" name="DocNo" value="@Model.DocNo" maxlength="20" placeholder="單號" aria-label="單號" />
     <input type="text" name="ActorName" value="@Model.ActorName" maxlength="50" placeholder="操作者" aria-label="操作者" />
+    <input name="Recipient" value="@Model.Recipient" maxlength="100" placeholder="實際領用人" aria-label="實際領用人" />
+    <input name="Project" value="@Model.Project" maxlength="100" placeholder="專案／工單" aria-label="專案／工單" />
     <label>起 <input type="date" name="From" value="@(Model.From?.ToString("yyyy-MM-dd"))" /></label>
     <label>迄 <input type="date" name="To" value="@(Model.To?.ToString("yyyy-MM-dd"))" /></label>
     <button type="submit" id="movement-submit">查詢</button>
@@ -29,7 +32,7 @@
 <div class="table-wrap">
     <table id="movement-history">
         <thead>
-            <tr><th>時間</th><th>單號</th><th>類型</th><th>料號</th><th>品名</th><th>倉庫</th><th>儲位</th><th>批號</th><th>序號</th><th>異動量</th><th>異動後結存</th><th>操作者</th></tr>
+            <tr><th>時間</th><th>單號</th><th>類型</th><th>料號</th><th>品名</th><th>倉庫</th><th>儲位</th><th>批號</th><th>序號</th><th>異動量</th><th>異動後結存</th><th>操作者</th><th>領用人</th><th>專案／工單</th></tr>
         </thead>
         <tbody>
             @foreach (var m in Model.Result.Items)
@@ -62,11 +65,13 @@
                         }
                     </td>
                     <td>@m.ActorName</td>
+                    <td>@m.RecipientName</td>
+                    <td>@m.ProjectReference</td>
                 </tr>
             }
             @if (Model.Result.Items.Count == 0)
             {
-                <tr><td colspan="12" class="muted">沒有符合的異動。</td></tr>
+                <tr><td colspan="14" class="muted">沒有符合的異動。</td></tr>
             }
         </tbody>
     </table>

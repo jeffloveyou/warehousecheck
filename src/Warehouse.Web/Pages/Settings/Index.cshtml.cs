@@ -47,6 +47,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
 
         public bool StocktakeApprovalEnabled { get; set; }
 
+        public bool QuickCheckoutEnabled { get; set; } = true;
         public bool DocumentApprovalEnabled { get; set; }
 
         public bool AllowSelfApproveDocuments { get; set; }
@@ -106,6 +107,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 ItemApprovalEnabled = ItemApprovalEnabled,
                 OpeningApprovalEnabled = OpeningApprovalEnabled,
                 StocktakeApprovalEnabled = StocktakeApprovalEnabled,
+                QuickCheckoutEnabled = QuickCheckoutEnabled,
                 DocumentApprovalEnabled = DocumentApprovalEnabled,
                 AllowSelfApproveDocuments = AllowSelfApproveDocuments,
                 DocumentPurposeEnabled = DocumentPurposeEnabled,
@@ -143,6 +145,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             ItemApprovalEnabled = s.ItemApprovalEnabled,
             OpeningApprovalEnabled = s.OpeningApprovalEnabled,
             StocktakeApprovalEnabled = s.StocktakeApprovalEnabled,
+            QuickCheckoutEnabled = s.QuickCheckoutEnabled,
             DocumentApprovalEnabled = s.DocumentApprovalEnabled,
             AllowSelfApproveDocuments = s.AllowSelfApproveDocuments,
             DocumentPurposeEnabled = s.DocumentPurposeEnabled,
@@ -196,6 +199,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.ItemApprovalEnabled => "物料建檔需要審核",
         SettingKeys.OpeningApprovalEnabled => "期初單需要審核",
         SettingKeys.StocktakeApprovalEnabled => "盤點需要審核",
+        SettingKeys.QuickCheckoutEnabled => "快速進出一次結帳",
         SettingKeys.DocumentApprovalEnabled => "單據需要審核",
         SettingKeys.AllowSelfApproveDocuments => "進出倉單允許自核",
         SettingKeys.DocumentPurposeEnabled => "表頭：用途啟用",

@@ -23,7 +23,8 @@ var cs = Environment.GetEnvironmentVariable("WAREHOUSE_TEST_DB") ?? throw new In
 var root = FindRepoRoot();
 var webDll = Path.Combine(root, "src", "Warehouse.Web", "bin", "Debug", "net10.0", "Warehouse.Web.dll");
 var chrome = Path.Combine(root, "poc", ".browsers", "chromium-109", "chrome-win", "chrome.exe");
-var shots = args.Length > 0 ? args[0] : Path.Combine(root, "tools", "ScanCheck", "results");
+var shots = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? Path.Combine(root, "tools", "ScanCheck", "results");
+shots = Path.GetFullPath(shots); // Chromium 的假鏡頭檔案參數必須可從瀏覽器工作目錄解析。
 Directory.CreateDirectory(shots);
 var suffix = Guid.NewGuid().ToString("N")[..5];
 var failures = new List<string>();
@@ -149,7 +150,21 @@ async Task<Dictionary<string, decimal>> LinesAsync(Guid docId, string location)
 }
 
 var page = await LoginAsync(1280);
+if (args.Contains("--quick-only", StringComparer.Ordinal))
+{
+    await page.Context.RouteAsync(new Regex(@"/js/camera-scan\.js"), route => route.FulfillAsync(new() { ContentType = "text/javascript", Body = QuickCheckoutCheck.CameraStub }));
+    await QuickCheckoutCheck.RunAsync(page, baseUrl, cs, user, warehouseCode, warehouseId, itemCodes, Check, shots);
+    Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
+    Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
+    return failures.Count == 0 ? 0 : 1;
+}
 await page.GotoAsync(baseUrl + "/Documents");
+if (await page.Locator("select[name='Create.Type']").CountAsync() == 0)
+{
+    Console.WriteLine("建立單據入口未出現：URL=" + page.Url + "，標題=" + await page.TitleAsync());
+    Console.WriteLine("頁面提示：" + string.Join(" | ", await page.Locator("h1,.message.error,.validation-summary-errors").AllTextContentsAsync()));
+    await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "document-entry-failure.png"), FullPage = true });
+}
 await page.SelectOptionAsync("select[name='Create.Type']", "Inbound");
 await page.SelectOptionAsync("select[name='Create.WarehouseId']", warehouseId.ToString());
 await page.SelectOptionAsync("select[name='Header.PurposeId']", SeedData.Purposes.First(p => p.Code == "PURCHASE").Id.ToString());
@@ -531,21 +546,7 @@ Check(await WaitForAsync(camBlank, "() => document.body.dataset.trackState === '
 
 // 12f. 多步驟流程：camera-scan.js 換成測試替身（window.__fakeScan(文字) 等於鏡頭讀到一個碼），驗證當前欄、跳欄、放錯欄、數量方式、送出後自動重開。
 // 解碼本身由 12a～12e 與 tools/DecodeCheck 驗證。
-const string StubModule = """
-    let h = null, running = false;
-    export async function start(video, handlers, options) {
-      if (h && h !== handlers && h.onStop) { const o = h; h = null; o.onStop(); }
-      h = handlers; running = true; window.__stubContinuous = !!(options && options.continuous);
-      document.body.dataset.cameraState = '掃描中'; if (handlers.onState) handlers.onState('掃描中');
-    }
-    export function stop() {
-      running = false; const o = h; h = null;
-      document.body.dataset.cameraState = '停止'; document.body.dataset.trackState = 'ended';
-      if (o && o.onState) o.onState('停止'); if (o && o.onStop) o.onStop();
-    }
-    export function isRunning() { return running; }
-    window.__fakeScan = (text, format) => { if (h) h.onResult(text, 0, format || 'ean_13'); };
-    """;
+const string StubModule = QuickCheckoutCheck.CameraStub;
 Guid stocktakeId;
 await using (var db = Db())
 {
@@ -705,7 +706,7 @@ Check(await page.EvaluateAsync<bool>("() => document.getElementById('scan-status
 await page.SelectOptionAsync("#quick-add-mode", "manual");
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[7]);
-await WaitIdleAsync(page);
+await page.WaitForSelectorAsync("#quick-qty", new() { State = WaitForSelectorState.Visible });
 Check(await page.IsVisibleAsync("#quick-qty") && await page.EvaluateAsync<string>("() => document.activeElement.id") == "quick-qty", "快速進出（手動）：掃到物料後跳到數量欄");
 await page.FillAsync("#quick-qty", "5");
 await page.PressAsync("#quick-qty", "Enter");
@@ -722,7 +723,7 @@ var savedCookies = await quickContext.CookiesAsync();
 await quickContext.ClearCookiesAsync();
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
-await WaitIdleAsync(page);
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('登入已逾時')");
 var expiredStatus = await page.InnerTextAsync("#scan-status");
 Check(!expiredStatus.Contains("已加入") && (await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]) && !(await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[8]),
     "快速進出：登入逾時時不顯示已加入（" + expiredStatus + "）");
@@ -734,6 +735,7 @@ await otherDevice.GotoAsync(quickCartUrl);
 Check((await otherDevice.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]), "快速進出：換裝置登入，購物車內容還在");
 Check(!await otherDevice.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：購物車");
 
+if (await page.Locator("#quick-failures li").CountAsync() > 0) await page.Locator("#quick-failures li button").Nth(1).ClickAsync();
 await page.ClickAsync("#quick-inbound");
 await page.WaitForSelectorAsync("#quick-convert-form");
 Check(await page.InputValueAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location") == "A-01", "快速進出：補齊畫面帶入掃碼時的儲位");
@@ -781,6 +783,8 @@ await using (var db = Db())
     Check(page.Url.EndsWith("/Quick", StringComparison.Ordinal) && !await db.StockDocuments.AnyAsync(d => d.Id == draftId),
         "快速進出：購物車轉入的出倉草稿可刪除（不留單據），回快速進出");
 }
+
+await QuickCheckoutCheck.RunAsync(stub, baseUrl, cs, user, warehouseCode, warehouseId, itemCodes, Check, shots);
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");

@@ -4,6 +4,7 @@
 @using Warehouse.Application.Warehousing
 @using Warehouse.Web.Pages.Documents
 @{
+    ViewData["MobileCards"] = true;
     var d = Model.Doc;
     var s = Model.Settings;
     var isTransfer = d.DocType == StockDocumentType.Transfer;
@@ -27,7 +28,11 @@
 }
 @if (d.ReversalOfDocumentId is { } originalId)
 {
-    <div class="message info">這是 <a href="/Documents/Details/@originalId">@d.ReversalOfDocNo</a> 的沖銷單（方向相反，過帳後抵銷原單）。</div>
+    <div class="message info">這是 <a href="/Documents/Details/@originalId">@d.ReversalOfDocNo</a> 的沖銷單。此單方向與原單相反，仍需核對明細及完成過帳才會抵銷；原單與異動紀錄會保留。</div>
+}
+@if (d.RelatedReversal is { } reversal)
+{
+    <div class="message info">關聯沖銷單：<a href="/Documents/Details/@reversal.Id">@reversal.DocNo</a>（@Display.Of(reversal.Status)）。請查看沖銷單狀態確認是否已完成更正。</div>
 }
 <dl class="status">
     <dt>類型</dt><dd>@Display.Of(d.DocType)</dd>
@@ -48,6 +53,8 @@
     {
         <dt>備註</dt><dd>@d.Note</dd>
     }
+    @if (d.RecipientName is not null) { <dt>實際領用人</dt><dd>@d.RecipientName</dd> }
+    @if (d.ProjectReference is not null) { <dt>專案／工單</dt><dd>@d.ProjectReference</dd> }
     <dt>建立</dt><dd>@d.CreatedByName @Display.Time(d.CreatedAt)</dd>
     <dt>送審</dt><dd>@(d.SubmittedAt is { } submittedAt ? Display.Time(submittedAt) : "")</dd>
     <dt>核准／過帳</dt><dd>@d.ApprovedByName @(d.PostedAt is { } postedAt ? Display.Time(postedAt) : "")</dd>
@@ -251,13 +258,15 @@
     {
         <form method="post" asp-page-handler="Cancel">
             <input type="hidden" name="Version" value="@Model.Version" />
+            <label class="inline-check"><input type="checkbox" required /> 確定取消 @d.DocNo（尚未入帳，釋放本單預留）</label>
             <button type="submit" class="danger" id="document-cancel">取消這張單</button>
         </form>
     }
     @if (Model.CanReverse)
     {
         <form method="post" asp-page-handler="Reverse">
-            <button type="submit" class="secondary" id="document-reverse">建立沖銷單</button>
+            <p class="muted">更正 @d.DocNo：建立方向相反的草稿，核對並過帳後才影響庫存；原單保留，不會直接刪除紀錄。</p>
+            <button type="submit" class="secondary" id="document-reverse">建立沖銷草稿</button>
         </form>
     }
     <a href="/Documents/Print/@d.Id" target="_blank" rel="noopener" id="document-print">列印</a>

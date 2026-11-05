@@ -19,6 +19,39 @@ namespace Warehouse.IntegrationTests;
 [Collection(MigratedDatabaseCollection.Name)]
 public partial class ScanPagesTests
 {
+    [Fact]
+    public async Task 快速進出_局部加入識別碼與去重_帳號查詢不含管理資料()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var other = await LoginAsync(factory, Roles.Operator);
+        var (warehouseCode, _, itemCode) = await SeedAsync(factory);
+        var created = await op.PostFormAsync("/Quick", "/Quick?handler=Create", new Dictionary<string, string>());
+        var url = created.Headers.Location!.OriginalString;
+        var page = await op.GetStringAsync(url);
+        var token = WebUtility.HtmlDecode(TokenPattern().Match(page).Groups[1].Value);
+        async Task<HttpResponseMessage> Add(object body)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=AddDelta") { Content = JsonContent.Create(body) };
+            request.Headers.Add("RequestVerificationToken", token);
+            return await op.Client.SendAsync(request, Ct);
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await Add(new { itemCode, quantity = 1m })).StatusCode);
+        var body = new { itemCode, quantity = 1m, locationCode = $"WH:LOC:{warehouseCode}:S-01", operationId = Guid.NewGuid() };
+        using var first = await Add(body);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        using var firstJson = JsonDocument.Parse(await first.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(1m, firstJson.RootElement.GetProperty("line").GetProperty("quantity").GetDecimal());
+        using var again = await Add(body);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        using var againJson = JsonDocument.Parse(await again.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(1m, againJson.RootElement.GetProperty("line").GetProperty("quantity").GetDecimal());
+        using var recipients = JsonDocument.Parse(await op.GetStringAsync(url + "?handler=Recipients"));
+        Assert.InRange(recipients.RootElement.GetArrayLength(), 1, 20);
+        foreach (var row in recipients.RootElement.EnumerateArray())
+            Assert.Equal(new[] { "displayName", "id", "userName" }, row.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        Assert.Equal(HttpStatusCode.NotFound, (await other.Client.GetAsync(url + "?handler=Recipients", Ct)).StatusCode);
+    }
     private const string Password = "Test-pass-123";
     private static readonly Guid Pcs = SeedData.Units.Single(u => u.Code == "PCS").Id;
     private static readonly Guid El = SeedData.Categories.Single(c => c.Code == "EL").Id;

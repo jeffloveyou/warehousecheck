@@ -79,6 +79,10 @@ function unsupportedReason() {
 
 async function tick(video, mine) {
   if (mine !== session) return;
+  if (callbacks && callbacks.shouldPause && callbacks.shouldPause()) {
+    timer = setTimeout(function () { tick(video, mine); }, DECODE_INTERVAL_MS);
+    return;
+  }
   let wait = DECODE_INTERVAL_MS;
   try {
     if (video.readyState >= 2) {

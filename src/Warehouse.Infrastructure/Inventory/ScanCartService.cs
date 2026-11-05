@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
+using System.Text.Json;
 using Warehouse.Application.Abstractions;
+using Npgsql;
 using Warehouse.Application.Errors;
 using Warehouse.Application.Inventory;
 using Warehouse.Domain;
@@ -19,7 +20,7 @@ namespace Warehouse.Infrastructure.Inventory;
 /// <see cref="IScanCartService"/> 實作（ADR-0026）。購物車只是清單：不寫稽核（使用者決定放棄不留紀錄）、不動結存。
 /// 每個修改：開交易 → 鎖購物車列（FOR UPDATE，多裝置同時改時依序處理）→ 只能改自己的 → 修改 → 儲存。
 /// </summary>
-public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) : IScanCartService
+public sealed partial class ScanCartService(WarehouseDbContext db, TimeProvider clock) : IScanCartService
 {
     public async Task<IReadOnlyList<ScanCartSummary>> ListAsync(Actor actor, CancellationToken cancellationToken) =>
         await db.ScanCarts.AsNoTracking()
@@ -28,13 +29,18 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
             .Select(c => new ScanCartSummary(
                 c.Id, c.Note, db.Warehouses.Where(w => w.Id == c.WarehouseId).Select(w => w.Code).FirstOrDefault(),
                 c.Lines.Count, c.CreatedAt, c.UpdatedAt))
-            .ToListAsync(cancellationToken);
+            .Take(20).ToListAsync(cancellationToken);
 
-    public async Task<ScanCartDetails?> GetAsync(Guid id, Actor actor, CancellationToken cancellationToken)
+    public Task<ScanCartDetails?> GetAsync(Guid id, Actor actor, CancellationToken cancellationToken) =>
+        ReadAsync(id, actor, cancellationToken);
+
+    private async Task<ScanCartDetails?> ReadAsync(Guid id, Actor actor, CancellationToken cancellationToken, Guid? lineId = null)
     {
+        await using var snapshot = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken) : null;
         var head = await db.ScanCarts.AsNoTracking()
             .Where(c => c.Id == id && c.OwnerId == actor.Id)
-            .Select(c => new { Cart = c, WarehouseCode = db.Warehouses.Where(w => w.Id == c.WarehouseId).Select(w => w.Code).FirstOrDefault() })
+            .Select(c => new { Cart = c, Version = EF.Property<uint>(c, "Version"), WarehouseCode = db.Warehouses.Where(w => w.Id == c.WarehouseId).Select(w => w.Code).FirstOrDefault() })
             .SingleOrDefaultAsync(cancellationToken);
         if (head is null)
         {
@@ -42,7 +48,7 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
         }
         var lines = await (
             from l in db.Set<ScanCartLine>().AsNoTracking()
-            where l.CartId == id
+            where l.CartId == id && (lineId == null || l.Id == lineId)
             join item in db.Items on l.ItemId equals item.Id
             join unit in db.Units on item.BaseUnitId equals unit.Id
             from loc in db.Locations.Where(x => x.Id == l.LocationId).DefaultIfEmpty()
@@ -52,7 +58,7 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
                 item.TrackingMode, item.Status == ItemStatus.Active, l.LocationId, loc.Code, l.Quantity))
             .ToListAsync(cancellationToken);
         var c = head.Cart;
-        return new ScanCartDetails(c.Id, c.Note, c.WarehouseId, head.WarehouseCode, c.CreatedAt, c.UpdatedAt, lines);
+        return new ScanCartDetails(c.Id, c.Note, c.WarehouseId, head.WarehouseCode, c.CreatedAt, c.UpdatedAt, lines, head.Version, c.DraftJson);
     }
 
     public async Task<Guid> CreateAsync(string? note, Actor actor, CancellationToken cancellationToken)
@@ -63,26 +69,50 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
         return cart.Id;
     }
 
-    public Task SetNoteAsync(Guid id, string? note, Actor actor, CancellationToken cancellationToken) =>
+    public Task SetNoteAsync(Guid id, string? note, Actor actor, CancellationToken cancellationToken, uint? expectedVersion = null) =>
         MutateAsync(id, actor, cancellationToken, (cart, now) =>
         {
             cart.SetNote(note, now);
             return Task.CompletedTask;
-        });
+        }, expectedVersion);
 
-    public async Task<Guid> AddAsync(Guid id, ScanCartAddInput input, Actor actor, CancellationToken cancellationToken)
+    public async Task<Guid> AddAsync(Guid id, ScanCartAddInput input, Actor actor, CancellationToken cancellationToken) =>
+        (await AddWithResultAsync(id, input, actor, cancellationToken)).LineId;
+
+    public async Task<ScanCartAddResult> AddWithResultAsync(Guid id, ScanCartAddInput input, Actor actor, CancellationToken cancellationToken)
     {
-        var lineId = Guid.NewGuid();
-        await MutateAsync(id, actor, cancellationToken, async (cart, now) =>
+        if (input.OperationId == Guid.Empty) throw new DomainRuleException("請求識別碼不可為空。");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await ExecuteAsync(db, "SET LOCAL lock_timeout = '5s'", cancellationToken);
+        var key = input.OperationId is { } op ? "cart.add:" + op.ToString("N") : null;
+        const string command = "cart.add";
+        var hash = DocumentSupport.Hash(JsonSerializer.Serialize(new { CartId = id, ActorId = actor.Id, Input = input }));
+        if (key is not null)
         {
-            var item = await FindItemAsync(input.ItemCode, cancellationToken);
-            var location = await FindLocationAsync(cart, input.LocationCode, actor, cancellationToken);
-            lineId = cart.Add(lineId, item.Id, item.DecimalPlaces, location?.Id, location?.WarehouseId, input.Quantity, now).Id;
-        });
-        return lineId;
+            await ExecuteAsync(db, "SELECT pg_advisory_xact_lock(hashtextextended(@key, 0))", cancellationToken, Param("key", key));
+            if (await DocumentSupport.AlreadyProcessedAsync(db, key, command, hash, cancellationToken))
+            {
+                var done = await db.ProcessedCommands.AsNoTracking().SingleAsync(c => c.Key == key, cancellationToken);
+                var prior = await GetAsync(id, actor, cancellationToken);
+                return new(Guid.Parse(done.ResultRef), 0, prior, prior?.Lines.Count ?? 0);
+            }
+        }
+        var cart = await LoadAsync(id, actor, cancellationToken);
+        var version = db.Entry(cart).Property<uint>("Version").CurrentValue;
+        var item = await FindItemAsync(input.ItemCode, cancellationToken);
+        if (input.ItemId is { } selected && item.Id != selected)
+            throw new DomainRuleException("所選物料的料號已變更，請重新搜尋核對。");
+        var location = await FindLocationAsync(cart, input.LocationCode, actor, cancellationToken);
+        var line = cart.Add(Guid.NewGuid(), item.Id, item.DecimalPlaces, location?.Id, location?.WarehouseId, input.Quantity, clock.GetUtcNow());
+        db.Entry(cart).Property(c => c.UpdatedAt).IsModified = true;
+        if (key is not null) db.ProcessedCommands.Add(ProcessedCommand.Create(key, command, hash, line.Id.ToString(), clock.GetUtcNow()));
+        await SaveAsync(cancellationToken);
+        var details = await ReadAsync(id, actor, cancellationToken, line.Id);
+        await transaction.CommitAsync(cancellationToken);
+        return new(line.Id, version, details, cart.Lines.Count);
     }
 
-    public Task UpdateLineAsync(Guid id, Guid lineId, decimal quantity, string? locationCode, Actor actor, CancellationToken cancellationToken) =>
+    public Task UpdateLineAsync(Guid id, Guid lineId, decimal quantity, string? locationCode, Actor actor, CancellationToken cancellationToken, uint? expectedVersion = null) =>
         MutateAsync(id, actor, cancellationToken, async (cart, now) =>
         {
             var line = cart.Lines.SingleOrDefault(l => l.Id == lineId)
@@ -92,14 +122,14 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
                 .SingleAsync(cancellationToken);
             var location = await FindLocationAsync(cart, locationCode, actor, cancellationToken, ignoring: line);
             cart.UpdateLine(lineId, quantity, decimals, location?.Id, location?.WarehouseId, now);
-        });
+        }, expectedVersion);
 
-    public Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken) =>
+    public Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken, uint? expectedVersion = null) =>
         MutateAsync(id, actor, cancellationToken, (cart, now) =>
         {
             cart.RemoveLine(lineId, now);
             return Task.CompletedTask;
-        });
+        }, expectedVersion);
 
     public async Task DeleteAsync(Guid id, Actor actor, CancellationToken cancellationToken)
     {
@@ -110,11 +140,14 @@ public sealed class ScanCartService(WarehouseDbContext db, TimeProvider clock) :
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task MutateAsync(Guid id, Actor actor, CancellationToken cancellationToken, Func<ScanCart, DateTimeOffset, Task> action)
+    private async Task MutateAsync(Guid id, Actor actor, CancellationToken cancellationToken, Func<ScanCart, DateTimeOffset, Task> action, uint? expectedVersion = null)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var cart = await LoadAsync(id, actor, cancellationToken);
+        if (expectedVersion is { } expected && db.Entry(cart).Property<uint>("Version").CurrentValue != expected)
+            throw new ConcurrencyConflictException("scan_cart.concurrency_conflict", "購物車已在其他裝置修改，請重新讀取核對。");
         await action(cart, clock.GetUtcNow());
+        db.Entry(cart).Property(c => c.UpdatedAt).IsModified = true;
         await SaveAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

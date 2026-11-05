@@ -60,6 +60,8 @@
                 <tr><th>往來對象</th><td>@d.PartnerName</td><th></th><td></td></tr>
             }
             <tr><th>外部單號</th><td>@d.ExternalNo</td><th>建立者</th><td>@d.CreatedByName</td></tr>
+            @if (d.RecipientName is not null || d.ProjectReference is not null)
+            { <tr><th>實際領用人</th><td>@d.RecipientName</td><th>專案／工單</th><td>@d.ProjectReference</td></tr> }
             <tr><th>備註</th><td colspan="3">@d.Note</td></tr>
         </table>
         <table class="print-lines" id="print-lines">

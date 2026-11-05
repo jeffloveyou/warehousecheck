@@ -99,7 +99,10 @@
     var camera = null;
 
     function enqueue(value, source, extra) {
-      queue.push({ value: value, source: source, extra: extra || null });
+      var job = { value: value, source: source, extra: extra || null };
+      if (o.onQueued) o.onQueued(job);
+      queue.push(job);
+      if (o.onBusyChange) o.onBusyChange(true);
       drain();
     }
 
@@ -113,8 +116,10 @@
         } catch (e) {
           o.onReject('處理「' + job.value + '」時發生錯誤：' + (e && e.message ? e.message : e));
         }
+        if (o.onFinished) o.onFinished(job);
       }
       working = false;
+      if (o.onBusyChange) o.onBusyChange(false);
     }
 
     input.addEventListener('keydown', function (ev) {
@@ -146,13 +151,14 @@
     function checkFocus() {
       if (!o.focusWarning) return;
       if (warnTimer) { clearTimeout(warnTimer); warnTimer = null; }
+      if (input.disabled) { o.focusWarning.hidden = true; return; }
       if (focusOk()) {
         o.focusWarning.hidden = true;
         return;
       }
       warnTimer = setTimeout(function () {
         warnTimer = null;
-        o.focusWarning.hidden = focusOk();
+        o.focusWarning.hidden = input.disabled || focusOk();
       }, 800);
     }
     document.addEventListener('focusin', checkFocus);
@@ -196,6 +202,7 @@
         }
         // 先 start 再顯示：start 會先停掉舊的工作階段（舊的 onStop 會收起畫面）
         camera.start(o.cameraVideo, {
+          shouldPause: function () { return typeof o.shouldPauseCamera === 'function' && o.shouldPauseCamera(); },
           onDecoder: function () { },
           onStop: function () { if (o.cameraBox) o.cameraBox.hidden = true; },
           onState: function (text) {

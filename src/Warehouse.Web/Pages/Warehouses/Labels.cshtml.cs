@@ -41,6 +41,10 @@ public class LabelsModel(IWarehouseService warehouses, IQrCodeRenderer qr, ISett
     [BindProperty(SupportsGet = true, Name = "p")]
     public int PageNumber { get; set; } = 1;
 
+    [BindProperty(SupportsGet = true)] public bool PrintSelected { get; set; }
+    [BindProperty(SupportsGet = true)] public List<Guid> SelectedIds { get; set; } = [];
+    public string? Error { get; private set; }
+
     public IReadOnlyList<WarehouseRow> Warehouses { get; private set; } = [];
 
     public PagedResult<LocationRow>? Result { get; private set; }
@@ -61,6 +65,8 @@ public class LabelsModel(IWarehouseService warehouses, IQrCodeRenderer qr, ISett
         {
             Layout = "small";
         }
+        // 已依白名單／預設值處理版型，移除未傳 Layout 的隱含 Required 錯誤。
+        ModelState.Remove(nameof(Layout));
 
         // 第一次開頁（網址沒有 Status）預設只印「有效」的儲位；選「全部狀態」送出時 Status 參數是空字串，照全部
         if (!Request.Query.ContainsKey(nameof(Status)))
@@ -89,7 +95,18 @@ public class LabelsModel(IWarehouseService warehouses, IQrCodeRenderer qr, ISett
 
         Result = await warehouses.SearchLocationsAsync(
             new LocationSearch(WarehouseId, Keyword, Status, PageNumber, PerSheet * SheetsPerPage), cancellationToken);
-        Labels = Result.Items.Select(l => (l, qr.RenderSvg(l.QrContent))).ToList();
+        if (PrintSelected && !ModelState.IsValid)
+        {
+            Error = "選取格式不正確：" + string.Join("、", ModelState.Where(p => p.Value?.Errors.Count > 0).Select(p => p.Key));
+            return Page();
+        }
+        if (PrintSelected && (SelectedIds.Count is 0 or > 96 || SelectedIds.Any(id => Result.Items.All(l => l.Id != id))))
+        {
+            Error = "請勾選本頁的儲位；若儲位資料已變更，請重新查詢後選取。此次沒有產生標籤。";
+            return Page();
+        }
+        Labels = Result.Items.Where(l => !PrintSelected || SelectedIds.Contains(l.Id))
+            .Select(l => (l, qr.RenderSvg(l.QrContent))).ToList();
         return Page();
     }
 

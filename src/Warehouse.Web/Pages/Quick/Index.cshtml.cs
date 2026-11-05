@@ -19,12 +19,15 @@ public class IndexModel(IScanCartService carts) : PageModel
     [BindProperty]
     public string? Note { get; set; }
 
-    public IReadOnlyList<ScanCartSummary> Carts { get; private set; } = [];
+    [BindProperty(SupportsGet = true, Name = "p")]
+    public int PageNumber { get; set; } = 1;
+    public Warehouse.Application.Abstractions.PagedResult<ScanCartSummary> Result { get; private set; } = new([], 1, 20, 0);
+    public IReadOnlyList<ScanCartSummary> Carts => Result.Items;
 
     public string? Error { get; private set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken) =>
-        Carts = await carts.ListAsync(User.ToActor(), cancellationToken);
+        Result = await carts.ListPageAsync(User.ToActor(), PageNumber, cancellationToken);
 
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken cancellationToken)
     {
@@ -37,7 +40,7 @@ public class IndexModel(IScanCartService carts) : PageModel
         {
             Error = ex.Message;
         }
-        Carts = await carts.ListAsync(User.ToActor(), cancellationToken);
+        Result = await carts.ListPageAsync(User.ToActor(), PageNumber, cancellationToken);
         return Page();
     }
 
