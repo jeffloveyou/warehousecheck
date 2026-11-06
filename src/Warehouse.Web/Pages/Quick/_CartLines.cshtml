@@ -26,7 +26,7 @@
                                     <input type="hidden" name="version" value="@Model.Version" />
                                     <input type="text" name="quantity" value="@Display.Qty(l.Quantity)" inputmode="decimal" aria-label="第 @l.LineNo 行數量" style="width: 6em" />
                                     <input type="text" name="locationCode" value="@(l.LocationCode is null || Model.WarehouseCode is null ? "" : "WH:LOC:" + Model.WarehouseCode + ":" + l.LocationCode)"
-                                           placeholder="儲位 QR" aria-label="第 @l.LineNo 行儲位" style="width: 10em" autocomplete="off" />
+                                           placeholder="輸入或搜尋儲位" class="quick-line-location" data-item-id="@l.ItemId" aria-label="第 @l.LineNo 行儲位" style="width: 10em" autocomplete="off" />
                                     <button type="submit" class="secondary">更新</button>
                                     <button type="submit" class="secondary" asp-page="/Quick/Cart" asp-route-id="@Model.Id" asp-page-handler="RemoveLine">刪除</button>
                                 </form>

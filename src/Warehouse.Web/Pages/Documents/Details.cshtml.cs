@@ -104,6 +104,7 @@ public class DetailsModel(
 
     public sealed class LineForm
     {
+        public Guid? OperationId { get; set; }
         public string? LocationCode { get; set; }
 
         public string? ItemCode { get; set; }
@@ -145,8 +146,16 @@ public class DetailsModel(
         }, cancellationToken);
 
     public Task<IActionResult> OnPostAddLineAsync(Guid id, CancellationToken cancellationToken) =>
+        AddLineFormAsync(id, requireOperationId: false, cancellationToken);
+
+    public Task<IActionResult> OnPostAddLineOnceAsync(Guid id, CancellationToken cancellationToken) =>
+        AddLineFormAsync(id, requireOperationId: true, cancellationToken);
+
+    private Task<IActionResult> AddLineFormAsync(Guid id, bool requireOperationId, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
+            if (requireOperationId && Line.OperationId.GetValueOrDefault() == Guid.Empty)
+                throw new DomainRuleException("缺少加入明細的請求識別碼，請重新整理後再試。");
             var doc = await documents.GetAsync(id, cancellationToken)
                 ?? throw new NotFoundException("document.not_found", "找不到單據。");
             Guid? reservationId = null;
@@ -165,7 +174,7 @@ public class DetailsModel(
                 isTransfer ? Line.TargetLocationCode : null,
                 reservationId,
                 MergeIfSame: true); // 相同的行累加數量（使用者 2026-11-02 決定，與掃碼面板一致）
-            var lineId = await documents.AddLineAsync(id, input, actor, cancellationToken);
+            var lineId = await documents.AddLineAsync(id, input, actor, cancellationToken, Line.OperationId);
             if (!doc.Lines.Any(l => l.Id == lineId)
                 || (await documents.GetAsync(id, cancellationToken))?.Lines.FirstOrDefault(l => l.Id == lineId) is not { } line)
             {
@@ -290,7 +299,7 @@ public class DetailsModel(
         },
         Doc.WarehouseId,
         Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
-        Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!)
+        Url.Page("/Documents/Details", "ScanAddLineOnce", new { id = Doc.Id })!)
     {
         RemoveUrl = Url.Page("/Documents/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Documents/Details", "ItemSearch", new { id = Doc.Id }),
@@ -398,12 +407,20 @@ public class DetailsModel(
     /// 掃碼面板加入明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
     /// 成功回傳重繪的明細表（HTML）並在標頭帶新的單據版本；規則錯誤回 400 JSON。網路錯誤時畫面不自動重送（避免累加兩次）。
     /// </summary>
-    public async Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest request, CancellationToken cancellationToken)
+    public Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, requireOperationId: false, cancellationToken);
+
+    public Task<IActionResult> OnPostScanAddLineOnceAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, requireOperationId: true, cancellationToken);
+
+    private async Task<IActionResult> ScanAddLineAsync(Guid id, ScanLineRequest? request, bool requireOperationId, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
+        if (!ModelState.IsValid || request is null || (requireOperationId && request.OperationId.GetValueOrDefault() == Guid.Empty))
+            return BadRequest(new { message = "加入明細資料或請求識別碼不正確，請重新整理後再試。" });
         Guid lineId;
         DocumentDetails doc;
         try
@@ -418,7 +435,7 @@ public class DetailsModel(
                 isTransfer ? request.TargetWarehouseCode : null,
                 isTransfer ? request.TargetLocationCode : null,
                 doc.DocType == StockDocumentType.Outbound ? request.ReservationId : null,
-                request.Merge), User.ToActor(), cancellationToken);
+                request.Merge), User.ToActor(), cancellationToken, request.OperationId);
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
@@ -496,6 +513,7 @@ public class DetailsModel(
     /// <summary>掃碼面板送出的明細（JSON）。</summary>
     public sealed class ScanLineRequest
     {
+        public Guid? OperationId { get; set; }
         public string? LocationCode { get; set; }
 
         public string? ItemCode { get; set; }

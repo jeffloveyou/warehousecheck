@@ -322,6 +322,34 @@ Check(await page.InputValueAsync("#scan-item") == typedItem, "勾選刪除：輸
 await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "1b-merge-delete.png"), FullPage = true });
 await page.ClickAsync("#scan-clear");
 
+// 8a-2. 模擬單據明細已提交、回應遺失。重新整理後仍可用原操作鍵確認。
+var beforeRetry = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]);
+const string documentAddPattern = "**/*?handler=ScanAddLineOnce";
+await page.RouteAsync(documentAddPattern, async route =>
+{
+    _ = await route.FetchAsync();
+    await route.FulfillAsync(new() { Status = 200, ContentType = "text/html", Body = "" });
+});
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
+await WaitIdleAsync(page);
+await ScanAsync(page, "WH:ITEM:" + itemCodes[0].ToLowerInvariant());
+await WaitIdleAsync(page);
+await page.FillAsync("#scan-quantity", "2");
+await page.PressAsync("#scan-quantity", "Enter");
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('結果待確認')");
+await page.UnrouteAsync(documentAddPattern);
+Check(await page.EvaluateAsync<bool>("""
+    () => {
+      const button = document.querySelector('#document-confirm,#document-submit');
+      return button && !button.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }
+    """), "一般單據：加入結果未確認前，攔截過帳或送審");
+await page.ReloadAsync();
+await page.GetByRole(AriaRole.Button, new() { Name = "重試原加入明細", Exact = true }).ClickAsync();
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('已確認原加入操作')");
+Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]) == beforeRetry + 2,
+    "一般單據：回應遺失後重新整理並重試，原明細只加一次");
+
 // 8b. 期初單：同一個面板（物料 → 儲位 → 數量）；「查建議儲位」欄 Enter 先解析成正式料號，不直接送出
 await page.GotoAsync(baseUrl + "/Opening");
 await page.SelectOptionAsync("#opening-create-form select[name='WarehouseId']", warehouseId.ToString());
@@ -736,7 +764,8 @@ Check((await otherDevice.InnerTextAsync("#quick-line-table")).Contains(itemCodes
 Check(!await otherDevice.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：購物車");
 
 if (await page.Locator("#quick-failures li").CountAsync() > 0) await page.Locator("#quick-failures li button").Nth(1).ClickAsync();
-await page.ClickAsync("#quick-inbound");
+await page.SelectOptionAsync("#quick-checkout-type", "DraftInbound");
+await page.ClickAsync("#quick-checkout");
 await page.WaitForSelectorAsync("#quick-convert-form");
 Check(await page.InputValueAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location") == "A-01", "快速進出：補齊畫面帶入掃碼時的儲位");
 await page.SelectOptionAsync("#quick-purpose", SeedData.Purposes.First(p => p.Code == "PURCHASE" && p.Direction == Warehouse.Domain.Inventory.PurposeDirection.In).Id.ToString());
@@ -767,9 +796,13 @@ await page.SelectOptionAsync("#quick-add-mode", "auto");
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
 await WaitIdleAsync(page);
-await page.ClickAsync("#quick-outbound");
+await page.SelectOptionAsync("#quick-checkout-type", "DraftOutbound");
+await page.ClickAsync("#quick-checkout");
 await page.WaitForSelectorAsync("#quick-convert-form");
-await page.SelectOptionAsync("#quick-warehouse", warehouseId.ToString());
+if (await page.Locator("select#quick-warehouse").CountAsync() > 0)
+    await page.SelectOptionAsync("#quick-warehouse", warehouseId.ToString());
+else
+    Check(await page.InputValueAsync("#quick-warehouse") == warehouseId.ToString(), "快速進出：補齊頁保留準備時已選的倉庫");
 await page.FillAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location", "A-02");
 await page.ClickAsync("h1");
 await page.ClickAsync("#quick-convert");

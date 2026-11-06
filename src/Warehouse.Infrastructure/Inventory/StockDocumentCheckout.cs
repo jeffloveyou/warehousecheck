@@ -45,8 +45,6 @@ public sealed partial class StockDocumentService
             var prior = await db.StockDocuments.AsNoTracking().SingleAsync(d => d.Id == input.RequestId && d.CreatedById == actor.Id, cancellationToken);
             return new(prior.Id, prior.DocNo, prior.Status);
         }
-        var current = await settings.GetAsync(cancellationToken);
-        if (!current.QuickCheckoutEnabled) throw new DomainRuleException("快速結帳已關閉，請使用轉草稿流程。");
         await ExecuteAsync(db, "SELECT 1 FROM scan_carts WHERE id = @id FOR UPDATE", cancellationToken, Param("id", cartId));
         var cart = await db.ScanCarts.Include(c => c.Lines).SingleOrDefaultAsync(c => c.Id == cartId && c.OwnerId == actor.Id, cancellationToken)
             ?? throw new NotFoundException("scan_cart.not_found", "找不到購物車，請回清單查看。");
@@ -56,6 +54,10 @@ public sealed partial class StockDocumentService
             throw new DomainRuleException("購物車的儲位屬於另一個倉庫。");
         await WarehouseLock.LockUsableAsync(db, input.WarehouseId, "倉庫已停用。", cancellationToken);
         await WarehouseAccess.EnsureAsync(db, actor, input.WarehouseId, cancellationToken);
+        var current = await settings.GetAsync(cancellationToken);
+        if (!current.QuickCheckoutEnabled) throw new DomainRuleException("快速結帳已關閉，請使用轉草稿流程。");
+        if (input.ExpectedApprovalEnabled != current.DocumentApprovalEnabled)
+            throw new ConflictException("scan_cart.approval_changed", "單據審核模式需要重新核對。請重新整理購物車，確認按鈕顯示的作業後再送出。");
         if (cart.Lines.Count == 0 || input.Allocations.Any(a => a.Quantity <= 0 || string.IsNullOrWhiteSpace(a.LocationCode))
             || input.Allocations.Any(a => cart.Lines.All(l => l.Id != a.LineId))
             || cart.Lines.Any(l => input.Allocations.Where(a => a.LineId == l.Id).Sum(a => a.Quantity) != l.Quantity))

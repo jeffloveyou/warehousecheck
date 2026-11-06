@@ -77,7 +77,7 @@ public interface IStockDocumentService
 
     Task UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken);
 
-    Task<Guid> AddLineAsync(Guid id, DocumentLineInput input, Actor actor, CancellationToken cancellationToken);
+    Task<Guid> AddLineAsync(Guid id, DocumentLineInput input, Actor actor, CancellationToken cancellationToken, Guid? operationId = null);
 
     Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken);
 

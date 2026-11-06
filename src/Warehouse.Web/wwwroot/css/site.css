@@ -151,6 +151,21 @@ input[type=file] { max-width: 100%; }
 code.json { white-space: pre-wrap; word-break: break-all; }
 
 /* 快速進出：手機常駐結帳摘要與分配卡片。 */
+.quick-location-controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+.quick-location-entry { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.quick-location-entry > input, .quick-location-entry > .picker { flex: 1 1 220px; min-width: 0; }
+.quick-location-controls input, .quick-location-controls select, .quick-location-controls button { min-height: 44px; }
+.quick-allocation > label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.quick-allocation .picker { min-width: 0; max-width: 100%; }
+.quick-total-label { display: inline-flex; flex-direction: column; gap: 4px; vertical-align: bottom; margin-right: 8px; }
+.quick-split-details, .quick-bulk-details { margin: 12px 0; }
+.quick-split-details > summary, .quick-bulk-details > summary { padding: 8px 0; cursor: pointer; }
+.quick-allocation [hidden] { display: none; }
+.quick-location-controls select { min-width: 0; }
+@media (max-width: 600px) {
+  .quick-location-controls { grid-template-columns: minmax(0, 1fr); }
+  .quick-location-entry > input, .quick-location-entry > .picker { flex-basis: 100%; }
+}
 .quick-checkout-bar { position: sticky; bottom: 0; background: #fff; border-top: 2px solid #243447; padding: 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; z-index: 5; }
 .quick-checkout-bar button, .quick-allocation-card button, .quick-failures button { min-height: 44px; }
 .quick-allocation-card { padding: 12px; border: 1px solid #ccd; margin: 10px 0; }
@@ -174,6 +189,16 @@ code.json { white-space: pre-wrap; word-break: break-all; }
 }
 
 .quick-checkout-bar[hidden] { display: none; }
+.quick-line-edit, .quick-line-summary, .quick-allocation-card > .allocation-select { display: none; }
+.quick-bulk-mode .quick-allocation-card > .allocation-select { display: inline-block; }
+.quick-line-editor[hidden], #quick-lines tr[hidden] { display: none; }
+@media (max-width: 600px) {
+  .quick-allocation-card h4 { margin: 4px 0; }
+  .quick-line-summary { display: block; margin: 4px 0; }
+  .quick-allocation-card .quick-line-edit { display: inline-block; }
+  #quick-cart .scan-bar { flex-wrap: wrap; }
+  #quick-cart .scan-bar input { min-width: 0; }
+}
 #quick-cart :disabled, #quick-checkout-form :disabled, #quick-line-table :disabled { opacity: .65; cursor: default; }
 #quick-checkout-result:not(:empty) { margin: 12px 0; padding: 12px; border: 1px solid #243447; font-size: 17px; }
 .allocation-error { border: 2px solid #b3261e; }

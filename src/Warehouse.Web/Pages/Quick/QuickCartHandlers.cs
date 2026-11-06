@@ -95,7 +95,14 @@ public partial class CartModel
         return await Warehouse.Web.Pages.Shared.LineEntryJson.LocationsAsync(queries, warehouseId, q, itemId, LocationListMode.StockAscending, cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostCheckoutAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, CancellationToken cancellationToken)
+    // 舊頁可查回已完成的原請求。新版走獨立入口，避免回滾時舊服務忽略審核模式。
+    public Task<IActionResult> OnPostCheckoutAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, CancellationToken cancellationToken) =>
+        CheckoutAsync(id, input, cancellationToken);
+
+    public Task<IActionResult> OnPostCheckoutReviewedAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, CancellationToken cancellationToken) =>
+        CheckoutAsync(id, input, cancellationToken);
+
+    private async Task<IActionResult> CheckoutAsync(Guid id, ScanCartCheckoutInput? input, CancellationToken cancellationToken)
     {
         if (input is null || !ModelState.IsValid) return BadRequest(new { message = "結帳資料格式不正確。" });
         try

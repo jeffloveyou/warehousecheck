@@ -6,20 +6,10 @@
     <form method="post" asp-page-handler="Checkout" asp-route-id="@Model.Cart.Id" class="panel" id="quick-checkout-form" hidden data-approval="@Model.Options.Settings.DocumentApprovalEnabled.ToString().ToLowerInvariant()"
           data-reservations="@Model.Options.Settings.LineReservationEnabled.ToString().ToLowerInvariant()"
           data-required-headers="@(Model.Options.Settings.DocumentPurposeRequired ? "Header_PurposeId," : "")@(Model.Options.Settings.DocumentPartnerRequired ? "Header_PartnerId," : "")@(Model.Options.Settings.DocumentExternalNoRequired ? "Header_ExternalNo," : "")@(Model.Options.Settings.DocumentNoteRequired ? "Header_Note" : "")">
-        <h2>核對整車，一次結帳</h2>
+        <h2>結帳資料</h2>
         <p class="muted">目前只是清單，尚未異動庫存。選擇動作、核對各儲位數量後確認。</p>
-        <div class="actions"><button type="button" id="quick-save-draft" class="secondary">儲存核對草稿至帳號</button><span id="quick-draft-status" role="status">尚未修改</span><button type="button" id="quick-review-draft" class="secondary" hidden>已核對目前清單，保留草稿</button></div>
+        <p>本批倉庫：<strong id="quick-checkout-warehouse-label">（未指定）</strong></p>
         <div class="form-grid">
-            <label for="quick-checkout-type">這批要做什麼 *</label>
-            <select id="quick-checkout-type" required><option value="">請選擇</option><option value="Inbound">進貨入庫</option><option value="Outbound">領料出庫</option></select>
-            <label for="quick-checkout-warehouse">倉庫 *</label>
-            <select id="quick-checkout-warehouse" required>
-                <option value="">選擇倉庫</option>
-                @foreach (var w in Model.WarehouseOptions)
-                {
-                    <option value="@w.Id" selected="@(Model.Cart.WarehouseId == w.Id || (Model.Cart.WarehouseId is null && Model.WarehouseOptions.Count == 1))">@w.Code @w.Name</option>
-                }
-            </select>
             <partial name="/Pages/Documents/_HeaderFields.cshtml" model="new HeaderFieldsModel(Model.Options, new DocumentHeaderForm { Note = Model.Cart.Note }, null)" />
             <label for="quick-recipient">領用人（出庫必填）</label>
             <div>
@@ -30,17 +20,8 @@
             <label for="quick-project">專案／工單（選填）</label>
             <input id="quick-project" maxlength="100" autocomplete="off" />
         </div>
-        <h3>實際儲位分配</h3>
-        <p class="muted">同一行可分多個儲位，合計必須等於該行數量；不會自動猜取料位置。</p>
-        <div class="actions"><label><input type="checkbox" id="quick-select-all" /> 勾選全部</label><input id="quick-bulk-location" placeholder="填入勾選列的空白儲位" aria-label="批次儲位" maxlength="200" /><button type="button" id="quick-bulk-apply" class="secondary">只填空白儲位</button></div>
-        <div id="quick-allocations"></div>
         <button type="button" class="secondary" id="quick-precheck">更新出庫檢查</button>
         <div id="quick-stock" role="status"></div>
-        <div id="quick-checkout-result" role="status" aria-live="polite"></div>
-        <div class="quick-checkout-bar">
-            <strong id="quick-summary"></strong>
-            <button type="submit" id="quick-checkout">核對後確認結帳</button>
-        </div>
         <noscript><p>一次結帳需要 JavaScript；仍可使用下方轉草稿流程。</p></noscript>
     </form>
 }

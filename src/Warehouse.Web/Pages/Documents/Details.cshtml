@@ -165,7 +165,8 @@
                 <p class="muted">本倉共 @balances.TotalCount 筆結存，只列前 @balances.Items.Count 筆；其他請至<a href="/Stock?WarehouseId=@d.WarehouseId" target="_blank" rel="noopener">庫存查詢</a>，再手動輸入儲位、批號、序號。</p>
             }
         }
-        <form method="post" asp-page-handler="AddLine" id="document-line-form">
+        <form method="post" asp-page-handler="AddLineOnce" id="document-line-form">
+            <input type="hidden" name="Line.OperationId" value="@(Model.Line.OperationId ?? Guid.NewGuid())" />
             <div class="form-grid">
                 <label for="Line_LocationCode">@(isInbound ? "入庫儲位碼" : "來源儲位碼") <span class="required-mark">*</span></label>
                 <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="200" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />

@@ -53,7 +53,12 @@ public partial class ScanCartTests
         var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
         var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
             new StockDocumentHeader(ProductionOut, null, null, details.Note),
-            [new(line, "A-01", 4m), new(line, "A-02", 6m)], recipient.Id, "P-001");
+            [new(line, "A-01", 4m), new(line, "A-02", 6m)], recipient.Id, "P-001", ExpectedApprovalEnabled: false);
+        Assert.Equal("scan_cart.approval_changed", await CodeAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input with { ExpectedApprovalEnabled = true }, me, Ct))));
+        Assert.Equal("scan_cart.approval_changed", await CodeAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input with { ExpectedApprovalEnabled = null }, me, Ct))));
+        Assert.Equal(4m, await BalanceAsync(w, "A-01"));
+        Assert.Equal(6m, await BalanceAsync(w, "A-02"));
+        Assert.NotNull(await Carts(s => s.GetAsync(cart, me, Ct)));
         var result = await Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct));
         Assert.Equal(StockDocumentStatus.Posted, result.Status);
         Assert.Equal(result, await Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct)));
@@ -80,7 +85,7 @@ public partial class ScanCartTests
         var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 2m), me, Ct));
         var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
         var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
-            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], me.Id, null);
+            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], me.Id, null, ExpectedApprovalEnabled: false);
         Assert.NotNull(await MessageAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input, me, Ct))));
         Assert.NotNull(await Carts(s => s.GetAsync(cart, me, Ct)));
         await using (var db = MigratedDatabaseFixture.CreateContext())
@@ -108,7 +113,7 @@ public partial class ScanCartTests
             var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), me, Ct));
             var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
             return (cart, new(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
-                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], me.Id, null));
+                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], me.Id, null, ExpectedApprovalEnabled: false));
         }
         var first = await NewCart();
         var second = await NewCart();
@@ -135,7 +140,7 @@ public partial class ScanCartTests
         var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 2m), me, Ct));
         var details = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
         var input = new ScanCartCheckoutInput(Guid.NewGuid(), details.Version, StockDocumentType.Outbound, w,
-            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], other.Id, null);
+            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 2m)], other.Id, null, ExpectedApprovalEnabled: false);
         await using (var db = MigratedDatabaseFixture.CreateContext())
         {
             var u = await db.Users.SingleAsync(u => u.Id == other.Id, Ct); u.IsActive = false; await db.SaveChangesAsync(Ct);
@@ -144,7 +149,8 @@ public partial class ScanCartTests
         await SetApprovalAsync(true);
         try
         {
-            var result = await Docs(s => s.CheckoutScanCartAsync(cart, input with { RecipientUserId = me.Id }, me, Ct));
+            Assert.Equal("scan_cart.approval_changed", await CodeAsync(() => Docs(s => s.CheckoutScanCartAsync(cart, input with { RecipientUserId = me.Id }, me, Ct))));
+            var result = await Docs(s => s.CheckoutScanCartAsync(cart, input with { RecipientUserId = me.Id, ExpectedApprovalEnabled = true }, me, Ct));
             Assert.Equal(StockDocumentStatus.Submitted, result.Status);
             Assert.Equal(5m, await BalanceAsync(w, "A-01"));
             var next = await Carts(s => s.CreateAsync(null, me, Ct));
@@ -171,7 +177,7 @@ public partial class ScanCartTests
             var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 1m), actor, Ct));
             var c = (await Carts(s => s.GetAsync(cart, actor, Ct)))!;
             return (cart, new(Guid.NewGuid(), c.Version, StockDocumentType.Outbound, w,
-                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], actor.Id, null));
+                new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 1m)], actor.Id, null, ExpectedApprovalEnabled: false));
         }
         var a = await Prepare(first);
         var b = await Prepare(second);
@@ -269,6 +275,145 @@ public partial class ScanCartTests
         await Docs(async s => await s.ConfirmAsync(doc, details.Version, "key-" + Guid.NewGuid(), me, Ct));
         Assert.Equal(6m, await BalanceAsync(w, "A-01"));
         _ = c;
+    }
+
+    [Fact(DisplayName = "轉移庫草稿依實際分配，並行重送只留同一張草稿")]
+    public async Task ConvertTransferUsesActualAllocationsAndReplaysSameDraft()
+    {
+        var me = await UserAsync();
+        var (warehouse, warehouseCode) = await WarehouseAsync("A-01", "B-02", "C-03", "D-01", "D-02");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        await InboundAsync(warehouse, ("B-02", item, 6m), me);
+        await InboundAsync(warehouse, ("C-03", item, 4m), me);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, $"WH:LOC:{warehouseCode}:A-01", 10m), me, Ct));
+        var snapshot = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var request = new ScanCartConvertInput(StockDocumentType.Transfer, warehouse, null,
+            [new(line, "B-02", TargetLocationCode: "D-01", Quantity: 6m),
+             new(line, "C-03", TargetLocationCode: "D-02", Quantity: 4m)],
+            Guid.NewGuid(), ExpectedVersion: snapshot.Version);
+
+        var results = await Task.WhenAll(Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct)),
+            Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct)));
+        Assert.All(results, id => Assert.Equal(request.RequestId, id));
+        var changedRequest = request with { Lines = [request.Lines[0] with { TargetLocationCode = "D-02" }, request.Lines[1]] };
+        var reused = await Assert.ThrowsAsync<ConflictException>(() => Docs(s => s.CreateFromScanCartAsync(cart, changedRequest, me, Ct)));
+        Assert.Equal("idempotency.key_reused", reused.ErrorCode);
+        var draft = (await Docs(s => s.GetAsync(request.RequestId, Ct)))!;
+        Assert.Equal(StockDocumentStatus.Draft, draft.Status);
+        Assert.Collection(draft.Lines.OrderBy(l => l.LocationCode),
+            l => Assert.Equal(("B-02", "D-01", 6m), (l.LocationCode, l.TargetLocationCode, l.Quantity)),
+            l => Assert.Equal(("C-03", "D-02", 4m), (l.LocationCode, l.TargetLocationCode, l.Quantity)));
+        Assert.Null(await Carts(s => s.GetAsync(cart, me, Ct)));
+        Assert.Equal(6m, await BalanceAsync(warehouse, "B-02"));
+        Assert.Equal(4m, await BalanceAsync(warehouse, "C-03"));
+        Assert.Equal(0m, await BalanceAsync(warehouse, "D-01"));
+        Assert.Equal(0m, await BalanceAsync(warehouse, "D-02"));
+        await using var db = MigratedDatabaseFixture.CreateContext();
+        Assert.False(await db.StockMovements.AnyAsync(m => m.DocumentId == draft.Id, Ct));
+        await Docs(s => s.DeleteScanCartDraftAsync(draft.Id, draft.Version, me, Ct));
+        Assert.Null(await Docs(s => s.GetAsync(draft.Id, Ct)));
+        await Assert.ThrowsAsync<NotFoundException>(() => Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct)));
+    }
+
+    [Fact(DisplayName = "轉草稿分配合計錯誤或夾帶未知明細時保留原清單")]
+    public async Task ConvertRejectsInvalidTotalsAndUnknownLinesWithoutChangingCart()
+    {
+        var me = await UserAsync();
+        var (warehouse, _) = await WarehouseAsync("A-01", "A-02");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, null, 10m), me, Ct));
+        var snapshot = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var badSum = new ScanCartConvertInput(StockDocumentType.Inbound, warehouse, PurchaseIn,
+            [new(line, "A-01", Quantity: 6m), new(line, "A-02", Quantity: 3m)],
+            Guid.NewGuid(), ExpectedVersion: snapshot.Version);
+        var extraLine = badSum with
+        {
+            // 原列的合計已完整，僅多了一筆未知列，不能被忽略後轉單。
+            Lines = [new(line, "A-01", Quantity: 10m), new(Guid.NewGuid(), "A-02", Quantity: 1m)],
+            RequestId = Guid.NewGuid(),
+        };
+
+        foreach (var request in new[] { badSum, extraLine })
+        {
+            Assert.NotNull(await MessageAsync(() => Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct))));
+            var retained = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+            Assert.Equal(snapshot.Version, retained.Version);
+            Assert.Equal(snapshot.Lines.Single(), retained.Lines.Single());
+            Assert.Null(await Docs(s => s.GetAsync(request.RequestId, Ct)));
+        }
+    }
+
+    [Theory(DisplayName = "補齊後另一裝置改量或同倉換位，轉草稿拒絕舊版本")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConvertRejectsVersionAfterQuantityOrSameWarehouseLocationChanges(bool changeQuantity)
+    {
+        var me = await UserAsync();
+        var (warehouse, warehouseCode) = await WarehouseAsync("A-01", "A-02");
+        var item = await ItemCodeAsync(TrackingMode.None);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var line = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(item, $"WH:LOC:{warehouseCode}:A-01", 10m), me, Ct));
+        var before = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var request = new ScanCartConvertInput(StockDocumentType.Inbound, warehouse, PurchaseIn,
+            [new(line, "A-01", Quantity: 6m), new(line, "A-02", Quantity: 4m)],
+            Guid.NewGuid(), ExpectedVersion: before.Version);
+        var newQuantity = changeQuantity ? 12m : 10m;
+        var newLocation = changeQuantity ? "A-01" : "A-02";
+        await Carts(s => s.UpdateLineAsync(cart, line, newQuantity, $"WH:LOC:{warehouseCode}:{newLocation}", me, Ct, before.Version));
+
+        Assert.Equal("scan_cart.concurrency_conflict", await CodeAsync(() => Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct))));
+        var retained = (await Carts(s => s.GetAsync(cart, me, Ct)))!.Lines.Single();
+        Assert.Equal((line, newLocation, newQuantity), (retained.Id, retained.LocationCode, retained.Quantity));
+        Assert.Null(await Docs(s => s.GetAsync(request.RequestId, Ct)));
+    }
+
+    [Fact(DisplayName = "同車一般料可拆分轉草稿，批號和序號維持單列補齊")]
+    public async Task ConvertSplitsOrdinaryLinesAndKeepsTrackedLinesIntact()
+    {
+        var me = await UserAsync();
+        var (warehouse, _) = await WarehouseAsync("A-01", "A-02");
+        var plain = await ItemCodeAsync(TrackingMode.None);
+        var lot = await ItemCodeAsync(TrackingMode.Lot);
+        var serial = await ItemCodeAsync(TrackingMode.Serial);
+        var cart = await Carts(s => s.CreateAsync(null, me, Ct));
+        var plainLine = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(plain, null, 10m), me, Ct));
+        var lotLine = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(lot, null, 2m), me, Ct));
+        var serialLine = await Carts(s => s.AddAsync(cart, new ScanCartAddInput(serial, null, 2m), me, Ct));
+        var snapshot = (await Carts(s => s.GetAsync(cart, me, Ct)))!;
+        var serials = new[] { "SN-" + Suffix().ToUpperInvariant(), "SN-" + Suffix().ToUpperInvariant() };
+        var good = new ScanCartConvertInput(StockDocumentType.Inbound, warehouse, PurchaseIn,
+            [new(plainLine, "A-01", Quantity: 6m), new(plainLine, "A-02", Quantity: 4m),
+             new(lotLine, "A-01", LotNo: "L-01", Quantity: 2m), new(serialLine, "A-02", SerialNos: serials, Quantity: 2m)],
+            Guid.NewGuid(), ExpectedVersion: snapshot.Version);
+        var splitLot = good with
+        {
+            Lines = [good.Lines[0], good.Lines[1], new(lotLine, "A-01", LotNo: "L-01", Quantity: 1m),
+                new(lotLine, "A-02", LotNo: "L-01", Quantity: 1m), good.Lines[3]],
+            RequestId = Guid.NewGuid(),
+        };
+        var splitSerial = good with
+        {
+            Lines = [good.Lines[0], good.Lines[1], good.Lines[2], new(serialLine, "A-01", SerialNos: [serials[0]], Quantity: 1m),
+                new(serialLine, "A-02", SerialNos: [serials[1]], Quantity: 1m)],
+            RequestId = Guid.NewGuid(),
+        };
+        foreach (var request in new[] { splitLot, splitSerial })
+        {
+            Assert.NotNull(await MessageAsync(() => Docs(s => s.CreateFromScanCartAsync(cart, request, me, Ct))));
+            Assert.Equal(snapshot.Version, (await Carts(s => s.GetAsync(cart, me, Ct)))!.Version);
+            Assert.Null(await Docs(s => s.GetAsync(request.RequestId, Ct)));
+        }
+
+        var id = await Docs(s => s.CreateFromScanCartAsync(cart, good, me, Ct));
+        var lines = (await Docs(s => s.GetAsync(id, Ct)))!.Lines;
+        Assert.Equal(5, lines.Count);
+        Assert.Equal([6m, 4m], lines.Where(l => l.ItemCode == plain).OrderBy(l => l.LocationCode).Select(l => l.Quantity).ToArray());
+        var lotRow = Assert.Single(lines, l => l.ItemCode == lot);
+        Assert.Equal(("L-01", 2m), (lotRow.LotNo, lotRow.Quantity));
+        Assert.Equal(serials.Order().ToArray(), lines.Where(l => l.ItemCode == serial).Select(l => l.SerialNo!).Order().ToArray());
+        Assert.All(lines.Where(l => l.ItemCode == serial), l => Assert.Equal(1m, l.Quantity));
     }
 
     // T-QC-03：任一行不合規則整批不轉（購物車保留、沒有草稿）；倉庫與購物車鎖定的不同被拒；序號物料每個序號一行；移庫不用用途

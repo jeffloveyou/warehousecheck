@@ -75,7 +75,7 @@ public partial class ScanCartTests
         var line = await Carts(s => s.AddAsync(cartId, new ScanCartAddInput(code, null, 5m, Guid.NewGuid()), me, Ct));
         var cart = (await Carts(s => s.GetAsync(cartId, me, Ct)))!;
         var input = new ScanCartCheckoutInput(Guid.NewGuid(), cart.Version, StockDocumentType.Outbound, warehouse,
-            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 5m, reservationId)], me.Id, null);
+            new StockDocumentHeader(ProductionOut, null, null, null), [new(line, "A-01", 5m, reservationId)], me.Id, null, ExpectedApprovalEnabled: false);
         var result = await Docs(s => s.CheckoutScanCartAsync(cartId, input, me, Ct));
         Assert.Equal(result, await Carts(s => s.CheckoutResultAsync(cartId, me, Ct)));
         Assert.Null(await Carts(s => s.CheckoutResultAsync(cartId, other, Ct)));

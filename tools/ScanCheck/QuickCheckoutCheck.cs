@@ -35,6 +35,7 @@ internal static class QuickCheckoutCheck
         Guid warehouseId, IReadOnlyList<string> itemCodes, Action<bool, string> check, string outputDirectory)
     {
         WarehouseDbContext Db() => new(new DbContextOptionsBuilder<WarehouseDbContext>().UseNpgsql(cs).Options);
+        await QuickLocationCheck.RunAsync(page, baseUrl, cs, user, warehouseCode, warehouseId, itemCodes, check, outputDirectory);
         await page.GotoAsync(baseUrl + "/Quick");
         await page.ClickAsync("#quick-create");
         await page.WaitForSelectorAsync("#quick-cart");
@@ -56,7 +57,7 @@ internal static class QuickCheckoutCheck
         }))
         {
             var phone = await mobile.NewPageAsync(); await phone.GotoAsync(cartUrl);
-            await phone.WaitForSelectorAsync("#quick-checkout-form");
+            await phone.WaitForSelectorAsync(".quick-checkout-bar");
             check(await phone.EvaluateAsync<bool>("""
                 () => { const b = document.querySelector('.quick-checkout-bar').getBoundingClientRect();
                   return b.y >= 0 && b.bottom <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1; }
@@ -109,6 +110,8 @@ internal static class QuickCheckoutCheck
         await page.FillAsync("#Header_Note", "整車測試備註");
         await page.FillAsync("#quick-project", "QC-" + user);
         var first = page.Locator("#quick-allocations section").First;
+        if (!await first.Locator(".quick-split-details").EvaluateAsync<bool>("e => e.open"))
+            await first.Locator(".quick-split-details > summary").ClickAsync();
         await first.GetByRole(AriaRole.Button, new() { Name = "＋分到另一儲位", Exact = true }).ClickAsync();
         await first.Locator(".allocation-quantity").Nth(0).FillAsync("1");
         await first.Locator(".allocation-quantity").Nth(1).FillAsync("1");
@@ -116,7 +119,7 @@ internal static class QuickCheckoutCheck
         for (var n = 0; n < await locations.CountAsync(); n++) await locations.Nth(n).FillAsync(n == 1 ? "A-02" : "A-01");
         await page.ClickAsync("h1");
         var checkoutCalls = 0;
-        await page.RouteAsync("**/*?handler=Checkout", async route =>
+        await page.RouteAsync("**/*?handler=CheckoutReviewed", async route =>
         {
             checkoutCalls++;
             if (checkoutCalls == 1)
@@ -130,6 +133,15 @@ internal static class QuickCheckoutCheck
         await page.WaitForFunctionAsync("() => document.getElementById('quick-checkout-result').textContent.includes('結果待確認')");
         check(await page.IsDisabledAsync("#quick-project") && await page.IsDisabledAsync("#scan-input"),
             "一次結帳：提交成功但回應遺失，原內容與掃碼鎖住，只能重試原結果");
+        check(await page.EvaluateAsync<bool>("""
+            () => {
+              const cart = document.getElementById('quick-cart');
+              const key = 'quick.work.' + cart.dataset.actorId + '.' + cart.dataset.cartId;
+              const old = JSON.parse(localStorage.getItem(key));
+              const reviewed = JSON.parse(localStorage.getItem(key + '.checkout-reviewed'));
+              return old.checkoutRequest === null && typeof reviewed.expectedApprovalEnabled === 'boolean';
+            }
+            """), "一次結帳：新版待確認請求不會被舊頁當成舊格式重送");
         await page.ClickAsync("#quick-checkout");
         await page.WaitForFunctionAsync("() => document.getElementById('quick-checkout-result').textContent.includes('已完成')");
         await page.WaitForTimeoutAsync(900); // 超過焦點警示的800ms，完成後不應再提示回到已停用的掃碼框。
@@ -138,7 +150,7 @@ internal static class QuickCheckoutCheck
             && await page.IsHiddenAsync("#scan-focus-warning")
             && (await page.InnerTextAsync("#scan-status")).Contains("已完成入庫"), "一次結帳：完成後顯示完成狀態，收起編輯與重試入口");
         check(await page.IsEnabledAsync("#quick-next"), "R2：完成頁可直接開始下一車");
-        await page.UnrouteAsync("**/*?handler=Checkout");
+        await page.UnrouteAsync("**/*?handler=CheckoutReviewed");
         var receipt = await page.Context.NewPageAsync(); await receipt.GotoAsync(cartUrl);
         check(receipt.Url.Contains("/Documents/Details/"), "R1：原購物車網址在結帳後可查回單據"); await receipt.CloseAsync();
         await using (var db = Db())
@@ -223,7 +235,7 @@ internal static class QuickCheckoutCheck
             var benchUrl = baseUrl + "/Quick/Cart/" + benchCart;
             var pageTimer = Stopwatch.StartNew();
             await page.GotoAsync(benchUrl);
-            await page.WaitForFunctionAsync("() => !document.getElementById('quick-checkout-form').hidden");
+            await page.WaitForFunctionAsync("() => document.getElementById('quick-cart')?.dataset.ready === 'true'");
             var pageMs = pageTimer.ElapsedMilliseconds;
             var results = await page.EvaluateAsync<JsonElement>("""
                 async codes => {
@@ -256,7 +268,8 @@ internal static class QuickCheckoutCheck
             var state = await page.EvaluateAsync<JsonElement>("() => JSON.parse(document.getElementById('quick-initial').textContent)");
             var input = new ScanCartCheckoutInput(Guid.NewGuid(), state.GetProperty("version").GetUInt32(), StockDocumentType.Inbound,
                 warehouseId, new StockDocumentHeader(SeedData.Purposes.Single(p => p.Code == "PURCHASE" && p.Direction == PurposeDirection.In).Id, null, null, "效能測試"),
-                state.GetProperty("lines").EnumerateArray().Select(l => new ScanCartAllocation(l.GetProperty("id").GetGuid(), l.GetProperty("locationCode").GetString()!, l.GetProperty("quantity").GetDecimal())).ToList(), null, null);
+                state.GetProperty("lines").EnumerateArray().Select(l => new ScanCartAllocation(l.GetProperty("id").GetGuid(), l.GetProperty("locationCode").GetString()!, l.GetProperty("quantity").GetDecimal())).ToList(), null, null,
+                ExpectedApprovalEnabled: await page.GetAttributeAsync("#quick-checkout-form", "data-approval") == "true");
             if (n == 49)
             {
                 // 50 行檢查後仍繼續長到 500 行；用相同資料另建測試車結帳。
@@ -305,8 +318,12 @@ internal static class QuickCheckoutCheck
         await location.FocusAsync();
         await card.Locator(".picker-list li").Filter(new() { HasText = "A-02" }).First.ClickAsync();
         await Scan(codes[0]);
-        check(await location.InputValueAsync() == "A-02" && (await card.InnerTextAsync()).Contains("待分配 1"), "R1：選單選的B儲位不被重掃覆蓋，新增數量顯示待分配");
-        await card.Locator(".allocation-quantity").FillAsync("2");
+        check(await location.InputValueAsync() == "A-02" && await card.Locator(".allocation-quantity").InputValueAsync() == "1"
+            && (await card.Locator(".allocation-summary").InnerTextAsync()).Contains("待分配 1"),
+            "R1：選單選的B儲位不被重掃覆蓋，人工分配量保留並提示新增量待分配");
+        await card.Locator(".line-total").FillAsync("2");
+        await card.GetByRole(AriaRole.Button, new() { Name = "儲存總量", Exact = true }).ClickAsync();
+        await page.WaitForFunctionAsync("() => !window.WhScanBusy()");
         if (!await page.IsVisibleAsync("#quick-project")) await page.Locator("#quick-optional summary").ClickAsync();
         await page.FillAsync("#quick-project", "保留核對資料");
         await card.Locator(".line-total").FillAsync("8"); await page.ReloadAsync(); await page.WaitForSelectorAsync("#quick-cart");
@@ -331,7 +348,7 @@ internal static class QuickCheckoutCheck
         await Scan(codes[0]);
         await page.ClickAsync("#quick-undo"); await page.WaitForFunctionAsync("() => !window.WhScanBusy()");
         check((await page.InnerTextAsync("#quick-allocations h4")).Contains("合計 3"), "R2：撤銷僅減少最後一筆加入數量");
-        await page.ClickAsync("#quick-search summary"); await page.FillAsync("#quick-search-query", codes[1]); await page.ClickAsync("#quick-search-button");
+        await page.ClickAsync("#quick-find-item"); await page.FillAsync("#quick-search-query", codes[1]); await page.ClickAsync("#quick-search-button");
         await page.GetByRole(AriaRole.Button, new() { Name = "選擇並核對加入", Exact = true }).First.ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "確認物料及數量，加入清單", Exact = true }).ClickAsync();
         await page.WaitForFunctionAsync("() => !window.WhScanBusy()");

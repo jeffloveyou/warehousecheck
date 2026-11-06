@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -7,11 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Items;
 using Warehouse.Application.Warehousing;
+using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Items;
 using Warehouse.Infrastructure.Persistence;
 using Warehouse.Infrastructure.Warehousing;
+using Warehouse.Infrastructure.Settings;
 
 namespace Warehouse.IntegrationTests;
 
@@ -19,6 +22,63 @@ namespace Warehouse.IntegrationTests;
 [Collection(MigratedDatabaseCollection.Name)]
 public partial class ScanPagesTests
 {
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task 快速進出_所有模式都有加入時儲位欄_查詢只限本人(bool checkoutEnabled, bool serial)
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var other = await LoginAsync(factory, Roles.Operator);
+        var (warehouseCode, warehouseId, itemCode) = await SeedAsync(factory);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WarehouseDbContext>();
+        var settings = new SettingsService(db, TimeProvider.System);
+        var original = await settings.GetAsync(Ct);
+        var manager = new Actor(Guid.NewGuid(), "儲位頁面測試", false, IsWarehouseManager: true);
+        try
+        {
+            await settings.UpdateAsync(original, original with { QuickCheckoutEnabled = checkoutEnabled }, manager, Ct);
+            if (serial)
+            {
+                var itemManager = new Actor(Guid.NewGuid(), "序號測試管理員", true);
+                var workflow = new ItemWorkflowService(db, TimeProvider.System);
+                var item = await workflow.SubmitAsync(Guid.NewGuid(),
+                    new ItemDraft("儲位欄序號 " + Guid.NewGuid().ToString("N"), El, Pcs, TrackingMode.Serial, null, null, null), itemManager, Ct);
+                var version = await db.Items.Where(i => i.Id == item.ItemId).Select(i => EF.Property<uint>(i, "Version")).SingleAsync(Ct);
+                await workflow.ApproveAsync(item.ItemId, version, [], null, itemManager, Ct);
+                itemCode = await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync(Ct);
+            }
+            var created = await op.PostFormAsync("/Quick", "/Quick?handler=Create", new Dictionary<string, string>());
+            var url = created.Headers.Location!.OriginalString;
+            var empty = await op.GetStringAsync(url);
+            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=AddDelta")
+            {
+                Content = JsonContent.Create(new { itemCode, quantity = 1m, locationCode = $"WH:LOC:{warehouseCode}:S-01", operationId = Guid.NewGuid() }),
+            };
+            request.Headers.Add("RequestVerificationToken", WebUtility.HtmlDecode(TokenPattern().Match(empty).Groups[1].Value));
+            Assert.Equal(HttpStatusCode.OK, (await op.Client.SendAsync(request, Ct)).StatusCode);
+            var page = await op.GetStringAsync(url);
+            Assert.Single(Regex.Matches(page, "id=\"quick-checkout-warehouse\""));
+            Assert.Contains("id=\"quick-location-input\"", page);
+            Assert.Contains("id=\"quick-location-apply\"", page);
+            Assert.True(page.IndexOf("id=\"quick-location-input\"", StringComparison.Ordinal) < page.IndexOf("id=\"scan-input\"", StringComparison.Ordinal));
+            Assert.Equal(checkoutEnabled && !serial, page.Contains("id=\"quick-checkout-form\"", StringComparison.Ordinal));
+            if (!checkoutEnabled || serial) Assert.Contains("儲位碼", page);
+            using var locations = JsonDocument.Parse(await op.GetStringAsync(url + $"?handler=Locations&warehouseId={warehouseId}&q=S-01"));
+            Assert.InRange(locations.RootElement.GetProperty("items").GetArrayLength(), 1, 20);
+            Assert.Contains(locations.RootElement.GetProperty("items").EnumerateArray(), l => l.GetProperty("code").GetString() == "S-01");
+            Assert.Equal(HttpStatusCode.NotFound,
+                (await other.Client.GetAsync(url + $"?handler=Locations&warehouseId={warehouseId}", Ct)).StatusCode);
+        }
+        finally
+        {
+            var current = await settings.GetAsync(Ct);
+            await settings.UpdateAsync(current, original, manager, Ct);
+        }
+    }
+
     [Fact]
     public async Task 快速進出_局部加入識別碼與去重_帳號查詢不含管理資料()
     {
@@ -166,6 +226,113 @@ public partial class ScanPagesTests
         var reservations = await manager.GetStringAsync("/Reservations");
         Assert.Contains("data-scan-field", reservations);
         Assert.Contains("/js/scan-field.js", reservations);
+    }
+
+    [Fact(DisplayName = "轉草稿準備驗證防偽造與車主權限，帶入分配後須確認才建立草稿")]
+    public async Task PrepareConvertAuthorizesOwnerAndDefersWritingUntilConfirmation()
+    {
+        await using var factory = new WarehouseWebFactory(TestDatabase.ConnectionString);
+        var op = await LoginAsync(factory, Roles.Operator);
+        var other = await LoginAsync(factory, Roles.Operator);
+        var (warehouseCode, warehouseId, itemCode) = await SeedAsync(factory);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<WarehouseDbContext>();
+        var manager = new Actor(Guid.NewGuid(), "轉草稿頁面測試", false, IsWarehouseManager: true);
+        var warehouses = new WarehouseService(db, TimeProvider.System);
+        var emptyLocation = new LocationDetails(null, null, null, null, null, null, null, null, false, false);
+        await warehouses.CreateLocationAsync(warehouseId, new LocationInput("S-02", emptyLocation), manager, Ct);
+        await warehouses.CreateLocationAsync(warehouseId, new LocationInput("S-03", emptyLocation), manager, Ct);
+
+        using var created = await op.PostFormAsync("/Quick", "/Quick?handler=Create", new Dictionary<string, string>());
+        var cartUrl = created.Headers.Location!.OriginalString;
+        var cartId = Guid.Parse(cartUrl["/Quick/Cart/".Length..]);
+        var convertUrl = $"/Quick/Convert/{cartId}";
+        var prepareUrl = convertUrl + "?handler=Prepare";
+        var cartHtml = await op.GetStringAsync(cartUrl);
+        using var add = new HttpRequestMessage(HttpMethod.Post, cartUrl + "?handler=AddDelta")
+        {
+            Content = JsonContent.Create(new { itemCode, quantity = 10m, locationCode = $"WH:LOC:{warehouseCode}:S-01", operationId = Guid.NewGuid() }),
+        };
+        add.Headers.Add("RequestVerificationToken", WebUtility.HtmlDecode(TokenPattern().Match(cartHtml).Groups[1].Value));
+        using var added = await op.Client.SendAsync(add, Ct);
+        Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+        var lineId = await db.Set<ScanCartLine>().Where(l => l.CartId == cartId).Select(l => l.Id).SingleAsync(Ct);
+        Task<uint> VersionAsync() => db.ScanCarts.Where(c => c.Id == cartId).Select(c => EF.Property<uint>(c, "Version")).SingleAsync(Ct);
+        var version = await VersionAsync();
+        var form = new Dictionary<string, string>
+        {
+            ["Type"] = "Inbound", ["WarehouseId"] = warehouseId.ToString(),
+            ["HasDocumentNote"] = "true", ["Note"] = "切換作業時保留的備註",
+            ["ExpectedVersion"] = version.ToString(CultureInfo.InvariantCulture),
+            ["AllocationJson"] = JsonSerializer.Serialize(new[]
+            {
+                new { lineId, locationCode = "S-02", quantity = 6m },
+                new { lineId, locationCode = "S-03", quantity = 4m },
+            }),
+        };
+
+        using var missingToken = await op.Client.PostAsync(prepareUrl, new FormUrlEncodedContent(form), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, missingToken.StatusCode);
+        using var notOwner = await other.PostFormAsync("/Quick", prepareUrl, new Dictionary<string, string>(form));
+        Assert.Equal(HttpStatusCode.NotFound, notOwner.StatusCode);
+        using var stale = await op.PostFormAsync(cartUrl, prepareUrl, new Dictionary<string, string>(form)
+        {
+            ["ExpectedVersion"] = (version - 1).ToString(CultureInfo.InvariantCulture),
+        });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var reserved = await op.PostFormAsync(cartUrl, prepareUrl, new Dictionary<string, string>(form)
+        {
+            ["AllocationJson"] = JsonSerializer.Serialize(new[] { new { lineId, locationCode = "S-02", quantity = 10m, reservationId = Guid.NewGuid() } }),
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, reserved.StatusCode);
+
+        using var prepared = await op.PostFormAsync(cartUrl, prepareUrl, new Dictionary<string, string>(form));
+        Assert.Equal(HttpStatusCode.OK, prepared.StatusCode);
+        var html = await prepared.Content.ReadAsStringAsync(Ct);
+        Assert.Contains("id=\"quick-convert-lines\"", html);
+        string Field(string name)
+        {
+            var tag = Regex.Match(html, $"<input\\b[^>]*\\bname=\"{Regex.Escape(name)}\"[^>]*>");
+            var value = Regex.Match(tag.Value, "\\bvalue=\"([^\"]*)\"");
+            Assert.True(tag.Success && value.Success, $"補齊頁應帶入 {name}");
+            return WebUtility.HtmlDecode(value.Groups[1].Value);
+        }
+        Assert.DoesNotContain("name=\"Lines[", html); // 回滾至舊版時不能讀成一筆全量。
+        Assert.Equal(lineId, Guid.Parse(Field("PreparedLines[0].LineId")));
+        Assert.Equal(lineId, Guid.Parse(Field("PreparedLines[1].LineId")));
+        Assert.Equal(("S-02", 6m), (Field("PreparedLines[0].LocationCode"), decimal.Parse(Field("PreparedLines[0].Quantity"), CultureInfo.InvariantCulture)));
+        Assert.Equal(("S-03", 4m), (Field("PreparedLines[1].LocationCode"), decimal.Parse(Field("PreparedLines[1].Quantity"), CultureInfo.InvariantCulture)));
+        Assert.Equal(form["ExpectedVersion"], Field("ExpectedVersion"));
+        Assert.Equal(form["Note"], Field("Note"));
+        var docId = Guid.Parse(Field("RequestId"));
+        Assert.Equal(version, await VersionAsync());
+        Assert.Equal(10m, await db.Set<ScanCartLine>().Where(l => l.CartId == cartId).Select(l => l.Quantity).SingleAsync(Ct));
+        Assert.False(await db.StockDocuments.AnyAsync(d => d.Id == docId || d.WarehouseId == warehouseId, Ct));
+
+        var purchase = SeedData.Purposes.Single(p => p.Direction == PurposeDirection.In && p.Code == "PURCHASE").Id;
+        var submit = new Dictionary<string, string>
+        {
+            ["Type"] = Field("Type"), ["WarehouseId"] = Field("WarehouseId"), ["PurposeId"] = purchase.ToString(),
+            ["RequestId"] = Field("RequestId"), ["ExpectedVersion"] = Field("ExpectedVersion"),
+            ["HasDocumentNote"] = Field("HasDocumentNote"), ["Note"] = Field("Note"),
+        };
+        for (var i = 0; i < 2; i++)
+        {
+            foreach (var property in new[] { "LineId", "LocationCode", "Quantity" })
+            {
+                var name = $"PreparedLines[{i}].{property}";
+                submit[name] = Field(name);
+            }
+        }
+        using var converted = await op.PostFormAsync(cartUrl, convertUrl, submit);
+        Assert.Equal(HttpStatusCode.Redirect, converted.StatusCode);
+        Assert.Equal($"/Documents/Details/{docId}", converted.Headers.Location!.OriginalString);
+        var draft = await db.StockDocuments.Include(d => d.Lines).SingleAsync(d => d.Id == docId, Ct);
+        Assert.Equal(StockDocumentStatus.Draft, draft.Status);
+        Assert.Equal([4m, 6m], draft.Lines.Select(l => l.Quantity).Order().ToArray());
+        Assert.Equal(form["Note"], draft.Note);
+        Assert.False(await db.ScanCarts.AnyAsync(c => c.Id == cartId, Ct));
+        Assert.False(await db.StockMovements.AnyAsync(m => m.DocumentId == docId, Ct));
     }
 
     // T-QC-06：快速進出畫面：作業員有選單、建立購物車、掃碼加入（JSON＋antiforgery）、選出倉補儲位產生草稿；別人看不到；系統管理員不能用

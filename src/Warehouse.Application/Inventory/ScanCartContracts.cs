@@ -28,7 +28,8 @@ public sealed record ScanCartAllocation(Guid LineId, string LocationCode, decima
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ReservationId = null);
 public sealed record ScanCartCheckoutInput(Guid RequestId, uint ExpectedVersion, StockDocumentType Type,
     Guid WarehouseId, StockDocumentHeader Header, IReadOnlyList<ScanCartAllocation> Allocations,
-    Guid? RecipientUserId, string? ProjectReference);
+    Guid? RecipientUserId, string? ProjectReference,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? ExpectedApprovalEnabled = null);
 public sealed record ScanCartCheckoutResult(Guid DocumentId, string DocNo, StockDocumentStatus Status);
 public sealed record RecipientOption(Guid Id, string UserName, string DisplayName);
 public sealed record ScanCartAddResult(Guid LineId, uint BaseVersion, ScanCartDetails? Cart, int LineCount);
@@ -40,14 +41,17 @@ public sealed record ScanCartStockRow(Guid ItemId, string ItemCode, string Locat
 /// <summary>
 /// 轉成草稿的一行：來源（進倉為目的）儲位必填；移庫另填目的倉庫／儲位。
 /// 批號物料填 <paramref name="LotNo"/>；序號物料填 <paramref name="SerialNos"/>（個數＝數量，每個序號一行）。
+/// <paramref name="Quantity"/> 是分配量，未指定時沿用舊版單列轉單的購物車數量。
 /// </summary>
 public sealed record ScanCartConvertLine(
     Guid LineId, string LocationCode, string? TargetWarehouseCode = null, string? TargetLocationCode = null,
-    string? LotNo = null, IReadOnlyList<string>? SerialNos = null, DateOnly? ExpiryDate = null);
+    string? LotNo = null, IReadOnlyList<string>? SerialNos = null, DateOnly? ExpiryDate = null, decimal? Quantity = null);
 
 /// <summary>整批轉成一張草稿單（進倉、出倉或移庫）。<paramref name="RequestId"/> 是新單據的 ID，重送不會建第二張。</summary>
 public sealed record ScanCartConvertInput(
-    StockDocumentType Type, Guid WarehouseId, Guid? PurposeId, IReadOnlyList<ScanCartConvertLine> Lines, Guid RequestId);
+    StockDocumentType Type, Guid WarehouseId, Guid? PurposeId, IReadOnlyList<ScanCartConvertLine> Lines, Guid RequestId,
+    uint? ExpectedVersion = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Note = null);
 
 /// <summary>
 /// 快速進出購物車（ADR-0026）：只是記在帳號的清單，不動結存、不預留。只有擁有者能看、能改。

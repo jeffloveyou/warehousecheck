@@ -12,7 +12,7 @@
 //  - 逐件累加：每掃一次物料就加入（相同的草稿行累加包裝數量）。
 //  - 序號物料一律每個序號一行、數量 1，欄位齊了自動加入。
 // 加入明細只是草稿，不影響庫存；過帳仍要按頁面上的「確認過帳」。
-// 網路錯誤不自動重送（避免累加兩次），改為重新讀取明細表讓人核對。
+// 單據掃碼以原識別碼及原內容重試；期初單沿用人工核對流程。
 (function () {
   'use strict';
 
@@ -45,7 +45,36 @@
   var lastLot = null;       // 同一物料連續掃時沿用批號 { itemId, lot }
   var busy = false;
   var confirmLarge = false; // 數量偏大時要再按一次 Enter
-  var uncertainKey = null;  // 上一筆「不確定是否已加入」的明細鍵：同一行再送要先確認（相同的行會累加，避免加兩次）
+  var uncertainKey = null;  // 舊掃碼入口及期初單的人工核對狀態
+  var keyedAdd = /[?&]handler=ScanAddLineOnce(?:&|$)/i.test(addUrl);
+  var pendingKey = 'wh.document.scan.pending:' + addUrl;
+  var pendingAdd = null;
+  if (keyedAdd) {
+    try { pendingAdd = JSON.parse(sessionStorage.getItem(pendingKey)); } catch (e) { }
+  }
+  var retryAdd = document.createElement('button');
+  retryAdd.type = 'button';
+  retryAdd.className = 'secondary';
+  retryAdd.textContent = '重試原加入明細';
+  retryAdd.hidden = !pendingAdd;
+  el.add.after(retryAdd);
+
+  function rememberAdd(data) {
+    pendingAdd = data;
+    retryAdd.hidden = !data;
+    try {
+      if (data) sessionStorage.setItem(pendingKey, JSON.stringify(data));
+      else sessionStorage.removeItem(pendingKey);
+    } catch (e) { }
+  }
+
+  function operationId() {
+    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    var hex = Array.from(bytes).map(function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
 
   // ---- 偏好跟著帳號（prefs.js，M8-06）；沒有 prefs.js 時退回這台裝置的 localStorage ----
   var LOCAL_KEYS = { 'scan.addMode': 'wh.scan.addMode', 'scan.hiddenFields': 'wh.scan.hiddenFields' };
@@ -139,10 +168,10 @@
     el.next.textContent = '下一步：' + LABELS[s] + (addMode() === 'each' ? '（逐件累加中）' : addMode() === 'auto' ? '（齊了自動加入）' : '');
   }
 
-  function status(text, kind) {
+  function status(text, kind, silent) {
     el.status.textContent = text;
     el.status.className = 'scan-status scan-' + kind;
-    window.WhScan.feedback(kind);
+    if (!silent) window.WhScan.feedback(kind);
   }
   function ok(text) { status(text, 'ok'); }
   function fail(text) { status(text, 'bad'); }
@@ -428,6 +457,7 @@
 
   // 一筆掃碼或輸入：伺服器解析 → 依類型套用 → 欄位齊了就跳數量或自動加入
     async function onScan(value, source, extra) {
+        if (pendingAdd && !busy) { fail('請先重試原加入明細，再掃下一筆。這次掃碼尚未加入。'); return; }
         if (source === 'camera') {
             var statusTargetId =
                 (extra && extra.resultTargetId) || el.input.id;
@@ -570,6 +600,7 @@
   }
 
   async function submitNow(each) {
+    if (pendingAdd) { fail('請先重試原加入明細，再加入下一筆。'); return; }
     var s = step();
     if (s !== 'quantity') {
       fail('還沒完成：' + LABELS[s]);
@@ -608,9 +639,18 @@
       return;
     }
     confirmLarge = false;
+    if (keyedAdd) {
+      data.operationId = operationId();
+      rememberAdd(data);
+    }
+    if (each) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
+    await sendLine(data, each, key, false);
+  }
+
+  async function sendLine(data, each, key, replaying) {
     busy = true;
     el.add.disabled = true;
-    if (each) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
+    retryAdd.disabled = true;
     try {
       var res = await fetch(addUrl, {
         method: 'POST',
@@ -623,14 +663,18 @@
         body: JSON.stringify(data)
       });
       var type = res.headers.get('Content-Type') || '';
-      if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+      if (res.ok && (!keyedAdd || res.headers.has('X-Line-Id')) && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+        if (keyedAdd) rememberAdd(null);
         // 相同的行會累加（標頭 X-Line-*，ScanLineHeaders.cs）：講清楚加到第幾行、現在共幾個；
         // 有效期限沿用該行時用警告色提醒這次填的值沒採用（預留不同會是另一行）
         var lineNo = res.headers.get('X-Line-No');
         var lineQty = res.headers.get('X-Line-Quantity');
         var ignored = (res.headers.get('X-Line-Ignored') || '').split(',').filter(Boolean)
           .map(function (k) { return k === 'expiry' ? '有效期限' : '預留'; });
-        if (res.headers.get('X-Line-Merged') === '1' && lineNo && lineQty) {
+        if (replaying) {
+          ok('已確認原加入操作，明細表已更新。');
+          log(data.itemCode, '已確認原加入操作', true);
+        } else if (res.headers.get('X-Line-Merged') === '1' && lineNo && lineQty) {
           var text = '已累加：' + data.itemCode + ' + ' + fmt(data.quantity) + '，第 ' + lineNo + ' 行現在共 ' + fmt(lineQty);
           if (ignored.length) {
             status(text + '。這次填的' + ignored.join('、') + '與該行不同，已沿用該行的值。', 'warn');
@@ -645,6 +689,7 @@
         afterSubmit();
       } else if (res.status === 400 && type.indexOf('json') >= 0) {
         // 400＝規則錯誤（伺服器在寫入前拒絕），這一筆沒有加入
+        if (keyedAdd) rememberAdd(null);
         epoch++;
         fail((await res.json()).message || '加入失敗');
         log(data.itemCode, '加入失敗', false);
@@ -652,23 +697,26 @@
       } else {
         // 其他錯誤（逾時登入、500 等）不能確定是否已寫入：重新讀取明細表讓人核對，不自動重送（PR 2 審查 S2）
         epoch++;
-        fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
+        fail(keyedAdd ? '加入結果待確認。請重試原加入明細，系統會使用同一筆請求。'
+          : res.redirected ? '登入已逾時，請重新整理頁面並登入。'
           : '不確定這一行是否已加入（HTTP ' + res.status + '），已重新讀取明細表，請核對後再繼續。');
         log(data.itemCode, '不確定是否已加入', false);
-        uncertainKey = key;
+        if (!keyedAdd) uncertainKey = key;
         if (each) pending = 0;
         await reloadLines();
       }
     } catch (e) {
       epoch++;
-      fail('網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
+      fail(keyedAdd ? '網路中斷，請重試原加入明細，系統會使用同一筆請求。'
+        : '網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
       log(data.itemCode, '不確定是否已加入', false);
-      uncertainKey = key;
+      if (!keyedAdd) uncertainKey = key;
       if (each) pending = 0;
       await reloadLines();
     } finally {
       busy = false;
       el.add.disabled = false;
+      retryAdd.disabled = false;
       showNext();
       focusScan();
     }
@@ -823,6 +871,17 @@
     submit(false);
   });
   el.add.addEventListener('click', function () { submit(false); });
+  document.addEventListener('submit', function (event) {
+    if (!pendingAdd || !event.target.querySelector('#document-submit,#document-confirm')) return;
+    event.preventDefault();
+    fail('請先確認上一筆加入結果，再送審或過帳。');
+    retryAdd.focus();
+  });
+  retryAdd.addEventListener('click', function () {
+    if (!pendingAdd || busy) return;
+    if (!navigator.onLine) { fail('目前離線，恢復連線後再重試原加入明細。'); return; }
+    inflight = sendLine(pendingAdd, false, null, true).catch(function () { });
+  });
   el.clear.addEventListener('click', clearLine);
   el.addMode.addEventListener('change', function () { save(ADD_MODE_KEY, el.addMode.value); pending = 0; showNext(); focusScan(); });
   if (el.targetWarehouse) {
@@ -942,6 +1001,7 @@
   // 初始化都成功後才收起沒有 JS 時的傳統表單（中途出錯時頁面仍有可用的輸入方式；同一頁只保留一套輸入）
   var fallback = document.querySelector('[data-entry-fallback]');
   if (fallback) fallback.hidden = true;
+  if (pendingAdd) status('上一筆加入結果待確認。請先重試原加入明細。', 'bad', true);
   applyFields();
   showNext();
   focusScan();
