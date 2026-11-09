@@ -3,6 +3,7 @@
 @using Warehouse.Domain.Inventory
 @using Warehouse.Application.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "預留";
     ViewData["UsesPrefs"] = true; // 掃碼靜音（M8-06）
     var now = DateTimeOffset.UtcNow;
@@ -17,7 +18,7 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
-<form method="get" class="filters" id="reservation-filter">
+<form method="get" data-page-query class="filters" id="reservation-filter">
     <input type="text" name="ItemCode" value="@Model.ItemCode" maxlength="20" placeholder="料號" aria-label="料號" />
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
@@ -70,6 +71,7 @@
         <div class="actions"><button type="submit" id="reservation-create">建立預留</button></div>
     </form>
 }
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="reservation-list">
         <thead>
@@ -148,6 +150,7 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>
 @section Scripts {
     @if (Model.CanManage)

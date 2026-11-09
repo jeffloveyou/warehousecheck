@@ -2,11 +2,12 @@
 @model Warehouse.Web.Pages.Stock.IndexModel
 @{
     ViewData["MobileCards"] = true;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "庫存";
 }
 <h1>庫存查詢</h1>
 <p><a href="/Stock/Movements" id="link-movements">異動歷史</a>　<a href="/Stock/Negative" id="link-negative">待補帳</a>　<a href="/Stock/Anomalies" id="link-anomalies">庫存異常</a></p>
-<form method="get" class="filters" id="stock-filters">
+<form method="get" data-page-query class="filters" id="stock-filters">
     <select name="WarehouseId" aria-label="倉庫" id="stock-warehouse">
         <option value="">選擇倉庫</option>
         @foreach (var w in Model.Warehouses)
@@ -18,6 +19,7 @@
     <input type="text" name="ItemCode" value="@Model.ItemCode" placeholder="料號" aria-label="料號" data-camera-field="item" data-camera-allow-pack data-camera-allow-inactive />
     <button type="submit" id="stock-submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
@@ -123,6 +125,7 @@
     <h2>尚未清點的儲位（@uncounted.TotalCount）</h2>
     <p>@string.Join("、", uncounted.Items.Select(u => u.LocationCode))@(uncounted.TotalCount > uncounted.Items.Count ? "…" : "")</p>
 }
+</div>
 @section Scripts {
     @* 儲位、料號欄的相機按鈕（docs/04 §6.2）：儲位 QR 連同倉庫一起帶入 *@
     <script src="~/js/scan-input.js" asp-append-version="true"></script>

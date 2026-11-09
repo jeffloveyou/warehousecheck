@@ -1,10 +1,12 @@
 @page
 @model Warehouse.Web.Pages.MasterData.UnitsModel
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "計量單位";
     var editing = Model.EditId is not null;
 }
 <h1>計量單位</h1>
+<div id="master-feedback" data-page-region="query master-list" aria-live="polite">
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>
@@ -14,7 +16,9 @@
     <div class="message error" id="page-error">@Model.Error</div>
 }
 
-<form method="post" asp-page-handler="Save" asp-route-edit="@Model.EditId" class="panel" id="unit-form">
+</div>
+<div id="master-editor" data-page-region="query master-editor" data-page-keep-on-error>
+<form method="post" data-page-write="master-list master-editor" data-page-replace-url asp-page-handler="Save" asp-route-edit="@Model.EditId" class="panel" id="unit-form">
     <h2>@(editing ? "修改單位" : "新增單位")</h2>
     <div asp-validation-summary="All" class="field-error"></div>
     <input type="hidden" asp-for="Version" />
@@ -30,35 +34,38 @@
         <button type="submit" id="unit-save">@(editing ? "儲存" : "新增")</button>
         @if (editing)
         {
-            <a href="/MasterData/Units">取消</a>
+            <a data-page-edit-link="master-list master-editor" href="/MasterData/Units">取消</a>
         }
     </div>
     <p class="muted">代碼建立後不可修改；已有物料使用的單位不可修改小數位數。</p>
 </form>
 
+</div>
+<div id="master-results" data-page-region="query master-list">
 <div class="table-wrap">
     <table id="unit-list">
         <thead><tr><th>代碼</th><th>名稱</th><th>小數位數</th><th>使用中</th><th>狀態</th><th></th></tr></thead>
         <tbody>
             @foreach (var u in Model.Units)
             {
-                <tr>
+                <tr data-page-row="@u.Id">
                     <td>@u.Code</td>
                     <td>@u.Name</td>
                     <td>@u.DecimalPlaces</td>
                     <td>@(u.IsInUse ? "是" : "否")</td>
                     <td>@(u.IsActive ? "啟用" : "停用")</td>
                     <td>
-                        <a href="/MasterData/Units?edit=@u.Id">修改</a>
-                        <form method="post" asp-page-handler="Toggle" class="inline">
+                        <a id="edit-@u.Id" data-page-edit-link="master-list master-editor" href="/MasterData/Units?edit=@u.Id">修改</a>
+                        <form method="post" data-page-write="master-list" data-page-keep-url asp-page-handler="Toggle" class="inline">
                             <input type="hidden" name="id" value="@u.Id" />
                             <input type="hidden" name="version" value="@u.Version" />
                             <input type="hidden" name="isActive" value="@((!u.IsActive).ToString().ToLowerInvariant())" />
-                            <button type="submit" class="link">@(u.IsActive ? "停用" : "啟用")</button>
+                            <button type="submit" id="toggle-@u.Id" class="link">@(u.IsActive ? "停用" : "啟用")</button>
                         </form>
                     </td>
                 </tr>
             }
         </tbody>
     </table>
+</div>
 </div>

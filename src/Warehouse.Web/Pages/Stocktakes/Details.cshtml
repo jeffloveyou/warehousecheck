@@ -4,12 +4,13 @@
 @{
     ViewData["MobileCards"] = true;
     var d = Model.Doc;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = $"盤點 {d.StocktakeNo}";
     ViewData["UsesPrefs"] = true; // 相機數量方式（camera-field.js）
     var reviewing = d.Status == StocktakeStatus.Submitted && Model.CanManage;
 }
 <p><a href="/Stocktakes">← 盤點列表</a></p>
-<h1>盤點 @d.StocktakeNo <span class="chip" id="stocktake-status">@Display.Of(d.Status)</span></h1>
+<h1 id="stocktake-heading" data-page-region>盤點 @d.StocktakeNo <span class="chip" id="stocktake-status">@Display.Of(d.Status)</span></h1>
 @if (TempData["Message"] is string message)
 {
     <div class="message info" id="page-message">@message</div>
@@ -18,13 +19,15 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
-<div class="panel">
+<div class="panel" id="stocktake-summary" data-page-region>
     <p>倉庫 @d.WarehouseCode｜範圍：@(d.AllLocations ? "全部儲位" : "指定儲位")（@d.LocationCodes.Count 個：@string.Join("、", d.LocationCodes.Take(20))@(d.LocationCodes.Count > 20 ? "…" : "")）</p>
     <p>快照時間 @Display.Time(d.SnapshotAt)｜建立 @d.CreatedByName
         @if (d.SubmittedAt is { } submitted) { <span>｜送審 @d.SubmittedByName @Display.Time(submitted)</span> }
         @if (d.ApprovedAt is { } approved) { <span>｜核准 @d.ApprovedByName @Display.Time(approved)</span> }
     </p>
-    <p>共 @d.LineCount 行；未盤（含待重盤）@d.UncountedCount 行@(d.QuantitiesHidden ? "" : $"；有差異 {d.DifferenceCount} 行")</p>
+    <div id="count-summary">
+        <p>共 @d.LineCount 行；未盤（含待重盤）@d.UncountedCount 行@(d.QuantitiesHidden ? "" : $"；有差異 {d.DifferenceCount} 行")</p>
+    </div>
     @if (d.Note is not null) { <p>備註：@d.Note</p> }
     @if (d.RecountComment is not null && d.Status == StocktakeStatus.Counting) { <div class="message error">要求重盤：@d.RecountComment</div> }
     @if (d.AdjustmentDocumentId is { } adj) { <p>調整單：<a href="/Documents/Details/@adj" id="adjustment-link">@d.AdjustmentDocNo</a></p> }
@@ -33,9 +36,9 @@
         @if (TempData["ExportError"] is string exportError) { <span class="bad">@exportError</span> }</p>
 </div>
 
+<div id="stocktake-count-editor" data-page-region data-page-key="@Model.CanCount">
 @if (Model.CanCount)
 {
-    <p id="stocktake-save-status" role="status" data-owner="@Model.ActorId" data-document="@d.Id">每行離開數量欄時背景儲存；空白代表未盤，0 代表實盤為零。</p>
     <form method="post" asp-page-handler="Count" asp-route-id="@d.Id" class="panel" id="stocktake-count-form">
         <h2>輸入實盤量</h2>
         <p class="muted">可直接掃儲位 QR、物料 QR 或原廠條碼（每格 Enter 跳下一格）。帳上沒有的物料會自動新增一行「現場找到」。同一行再輸入會覆蓋（留下紀錄）。</p>
@@ -64,8 +67,12 @@
         <div class="actions"><button type="submit" id="stocktake-count">記錄</button></div>
     </form>
 }
+</div>
 
-<div class="panel">
+<p id="stocktake-save-status" role="status" data-owner="@Model.ActorId" data-document="@d.Id">@(Model.CanCount ? "每行離開數量欄時背景儲存；空白代表未盤，0 代表實盤為零。" : "")</p>
+<button type="button" id="stocktake-review-current" class="secondary" hidden>讀取最新盤點結果</button>
+
+<div class="panel" id="stocktake-actions" data-page-region>
     @if (Model.CanCount && Model.ApprovalEnabled)
     {
         <form method="post" asp-page-handler="Submit" asp-route-id="@d.Id" class="inline">
@@ -101,7 +108,8 @@
     }
 </div>
 
-<form method="get" class="filters" id="line-filter">
+<div id="stocktake-filter" data-page-region data-page-key="@d.QuantitiesHidden">
+<form method="get" data-page-query class="filters" id="line-filter">
     <input type="text" name="Loc" value="@Model.Loc" placeholder="儲位" aria-label="篩選儲位" />
     <label><input type="checkbox" name="Uncounted" value="true" checked="@Model.Uncounted" /> 只看未盤</label>
     @if (!d.QuantitiesHidden)
@@ -110,7 +118,9 @@
     }
     <button type="submit">篩選</button>
 </form>
+</div>
 
+<div id="query-results" data-page-region>
 <form method="post" asp-page-handler="Recount" asp-route-id="@d.Id" id="recount-form">
     <input type="hidden" name="Version" value="@Model.Version" />
     <div class="table-wrap">
@@ -144,7 +154,7 @@
                         <td class="num">
                             @if (Model.CanCount)
                             {
-                                <input type="number" form="count-line-@l.Id" name="quantity" value="@(l.CountedQuantity is { } c ? Display.Qty(c) : "")" step="any" min="0" required aria-label="第 @l.LineNo 行實盤量" style="width: 6em" />
+                                <input type="number" id="quantity-@l.Id" form="count-line-@l.Id" name="quantity" value="@(l.CountedQuantity is { } c ? Display.Qty(c) : "")" step="any" min="0" required aria-label="第 @l.LineNo 行實盤量" style="width: 6em" />
                                 <button type="submit" form="count-line-@l.Id" class="link">存</button>
                             }
                             else
@@ -195,13 +205,11 @@
         <a href="@Model.LinesUrl(d.Lines.Page + 1)">下一頁</a>
     }
 </div>
+</div>
 @section Scripts {
-    @if (Model.CanCount)
-    {
-        @* 實盤輸入欄的相機按鈕（docs/04 §6.2）：只填值，不自動記錄實盤 *@
-        <script src="~/js/scan-input.js" asp-append-version="true"></script>
-        <script src="~/js/scan-field.js" asp-append-version="true"></script>
-        <script src="~/js/camera-field.js" asp-append-version="true"></script>
-        <script src="~/js/stocktake-counts.js" asp-append-version="true"></script>
-    }
+    @* 退回重盤可原地恢復輸入與相機按鈕，解碼器仍在開啟相機時才載入。 *@
+    <script src="~/js/scan-input.js" asp-append-version="true"></script>
+    <script src="~/js/scan-field.js" asp-append-version="true"></script>
+    <script src="~/js/camera-field.js" asp-append-version="true"></script>
+    <script src="~/js/stocktake-counts.js" asp-append-version="true"></script>
 }

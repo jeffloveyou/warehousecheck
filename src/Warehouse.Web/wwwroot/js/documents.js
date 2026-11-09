@@ -2,6 +2,40 @@
 (function () {
     'use strict';
 
+    var headerEditor = document.getElementById('document-header-editor');
+    if (headerEditor) {
+        var wait = document.getElementById('document-header-wait');
+        document.addEventListener('submit', function (event) {
+            if (headerEditor.hasAttribute('aria-busy') && event.target.closest('#document-actions')) {
+                event.preventDefault();
+                wait.hidden = false;
+            }
+        }, true);
+        document.addEventListener('wh:page-updated', function (event) {
+            if (event.detail !== headerEditor) return;
+            var saved = document.querySelector('#document-feedback [data-saved-header-version]');
+            if (!saved) return;
+            var version = saved.dataset.savedHeaderVersion;
+            document.querySelectorAll('#document-actions input[name="Version"]').forEach(function (input) {
+                input.value = version;
+            });
+            var lines = document.querySelector('[data-scan-lines]');
+            if (lines) lines.dataset.version = version;
+        });
+        document.addEventListener('wh:page-settled', function (event) {
+            if (event.detail.includes(headerEditor)) wait.hidden = true;
+        });
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-review-header-version]');
+            if (!button || headerEditor.hasAttribute('aria-busy')) return;
+            var version = headerEditor.querySelector('input[name="Version"]');
+            if (!version) return;
+            version.value = button.dataset.reviewHeaderVersion;
+            button.closest('details').remove();
+            document.getElementById('document-save-header').focus({ preventScroll: true });
+        });
+    }
+
     // 建立單據：依單據類型停用不適用的用途／往來對象群組（optgroup 的 data-types 列出適用的類型）
     var typeSelect = document.getElementById('Create_Type');
     if (typeSelect) {
@@ -50,6 +84,10 @@
         var form = root.querySelector('#lines-bulk-form');
         if (form) {
             form.addEventListener('submit', function (event) {
+                if (form.hasAttribute('aria-busy')) {
+                    event.preventDefault();
+                    return;
+                }
                 var checked = 0;
                 boxes.forEach(function (box) { if (box.checked) { checked++; } });
                 if (!window.confirm('確定刪除勾選的 ' + checked + ' 行明細？')) {

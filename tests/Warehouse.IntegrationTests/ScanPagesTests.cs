@@ -183,9 +183,9 @@ public partial class ScanPagesTests
         Assert.Equal("Item", resolved.GetProperty("kind").GetString());
         Assert.True(resolved.GetProperty("extra").TryGetProperty("suggestions", out _));
 
-        async Task<HttpResponseMessage> AddAsync(WebSession who, object body, string antiforgery)
+        async Task<HttpResponseMessage> AddAsync(WebSession who, object body, string antiforgery, string handler = "ScanAddLine")
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=ScanAddLine") { Content = JsonContent.Create(body) };
+            using var request = new HttpRequestMessage(HttpMethod.Post, url + "?handler=" + handler) { Content = JsonContent.Create(body) };
             request.Headers.Add("RequestVerificationToken", antiforgery);
             return await who.Client.SendAsync(request, Ct);
         }
@@ -200,7 +200,19 @@ public partial class ScanPagesTests
         var merged = await mergedResponse.Content.ReadAsStringAsync(Ct);
         Assert.Contains("data-scan-lines", merged);
         Assert.Contains("明細（1 行）", merged);
-        Assert.Contains("8 PCS", merged);
+        Assert.Contains("data-saved-quantity=\"8\"", merged);
+        var keyed = new { line.locationCode, line.itemCode, line.quantity, line.merge, operationId = Guid.NewGuid() };
+        var addedOnce = await AddAsync(op, keyed, token, "ScanAddLineOnce");
+        var replayed = await AddAsync(op, keyed, token, "ScanAddLineOnce");
+        Assert.Equal("12", Header(addedOnce, "X-Line-Quantity"));
+        Assert.Equal("12", Header(replayed, "X-Line-Quantity"));
+        Assert.Equal(Header(addedOnce, "X-Line-Id"), Header(replayed, "X-Line-Id"));
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op, keyed with { quantity = 9m }, token, "ScanAddLineOnce")).StatusCode);
+        var update = new { lineId = Header(addedOnce, "X-Line-Id"), originalQuantity = "12", quantity = "0", operationId = Guid.NewGuid() };
+        using var editRequest = new HttpRequestMessage(HttpMethod.Post, url + "?handler=ScanUpdateQuantity") { Content = JsonContent.Create(update) };
+        editRequest.Headers.Add("RequestVerificationToken", token);
+        Assert.Equal(HttpStatusCode.NoContent, (await op.Client.SendAsync(editRequest, Ct)).StatusCode);
+        Assert.Contains("data-saved-quantity=\"0\"", await op.GetStringAsync(url));
         var noItem = await AddAsync(op, new { locationCode = "S-01", quantity = 1m }, token);
         Assert.Equal(HttpStatusCode.BadRequest, noItem.StatusCode);
         var adminToken = WebUtility.HtmlDecode(TokenPattern().Match(await admin.GetStringAsync(url)).Groups[1].Value);

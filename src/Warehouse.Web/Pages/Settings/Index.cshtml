@@ -52,6 +52,7 @@
     <input type="hidden" name="Original.LineReservationEnabled" value="@Model.Original.LineReservationEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LineCrossTransferEnabled" value="@Model.Original.LineCrossTransferEnabled.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.LineLotSerialEnabled" value="@Model.Original.LineLotSerialEnabled.ToString().ToLowerInvariant()" />
+    <input type="hidden" name="Original.LineScanNumericToQuantity" value="@Model.Original.LineScanNumericToQuantity.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.AllowItemUnitTrackingChangeWithActivity" value="@Model.Original.AllowItemUnitTrackingChangeWithActivity.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.AllowItemCodeChange" value="@Model.Original.AllowItemCodeChange.ToString().ToLowerInvariant()" />
     <input type="hidden" name="Original.RememberMeDays" value="@Model.Original.RememberMeDays" />
@@ -123,6 +124,12 @@
     <p class="muted">預設不允許；與期初單的自核設定分開。不論哪一種，都會記錄建立者、核准者與時間。</p>
     <h3>明細輸入欄位</h3>
     <p><label><input type="checkbox" name="Form.LineLotSerialEnabled" value="true" checked="@Model.Form.LineLotSerialEnabled" /> 批號、序號欄</label></p>
+    <p><label>在數量欄掃碼時
+        <select name="Form.LineScanNumericToQuantity">
+            <option value="false" selected="@(!Model.Form.LineScanNumericToQuantity)">送到物料欄</option>
+            <option value="true" selected="@Model.Form.LineScanNumericToQuantity">純數字填入數量欄</option>
+        </select>
+    </label></p>
     <p><label><input type="checkbox" name="Form.LineExpiryEnabled" value="true" checked="@Model.Form.LineExpiryEnabled" /> 有效期限（進倉、期初）</label></p>
     <p><label><input type="checkbox" name="Form.LineReservationEnabled" value="true" checked="@Model.Form.LineReservationEnabled" /> 出倉指定預留</label></p>
     <p><label><input type="checkbox" name="Form.LineCrossTransferEnabled" value="true" checked="@Model.Form.LineCrossTransferEnabled" /> 跨倉移庫（目的儲位可在其他倉庫）</label></p>

@@ -2,6 +2,7 @@
 @model Warehouse.Web.Pages.Opening.IndexModel
 @using Warehouse.Domain.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "期初建帳";
 }
 <h1>期初建帳</h1>
@@ -10,7 +11,7 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
-<form method="get" class="filters">
+<form method="get" data-page-query class="filters" id="opening-filter">
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
@@ -41,6 +42,7 @@
         <button type="submit" id="opening-create">建立期初單</button>
     </form>
 }
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="opening-list">
         <thead><tr><th>單號</th><th>倉庫</th><th>狀態</th><th>明細</th><th>建立</th><th>核准</th></tr></thead>
@@ -73,4 +75,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

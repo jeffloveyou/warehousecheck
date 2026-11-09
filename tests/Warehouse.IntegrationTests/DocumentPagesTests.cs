@@ -167,7 +167,7 @@ public partial class DocumentPagesTests
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         var merged = await second.Content.ReadAsStringAsync(Ct);
         Assert.Contains("明細（1 行）", merged);
-        Assert.Contains(">5<", merged);
+        Assert.Contains("data-saved-quantity=\"5\"", merged);
         Assert.True(second.Headers.TryGetValues("X-Line-Merged", out var mergedFlag) && mergedFlag.Single() == "1");
         Assert.Equal("5", second.Headers.GetValues("X-Line-Quantity").Single());
         Assert.False(second.Headers.Contains("X-Line-Ignored"));
@@ -193,6 +193,28 @@ public partial class DocumentPagesTests
         }
         Assert.Contains("data-remove-url=", await op.GetStringAsync(docUrl));
         var lineId = second.Headers.GetValues("X-Line-Id").Single();
+        async Task<HttpResponseMessage> ChangeQuantityAsync(WebSession who, object body, string? antiforgery)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, docUrl + "?handler=ScanUpdateQuantity") { Content = JsonContent.Create(body) };
+            if (antiforgery is not null) request.Headers.Add("RequestVerificationToken", antiforgery);
+            return await who.Client.SendAsync(request, Ct);
+        }
+
+        var change = new { lineId, originalQuantity = "5", quantity = "7", operationId = Guid.NewGuid() };
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangeQuantityAsync(op, change, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await ChangeQuantityAsync(viewer, change, viewerToken)).StatusCode);
+        var competing = change with { quantity = "8", operationId = Guid.NewGuid() };
+        var edits = await Task.WhenAll(ChangeQuantityAsync(op, change, token), ChangeQuantityAsync(op, competing, token));
+        Assert.Contains(edits, result => result.StatusCode == HttpStatusCode.NoContent);
+        Assert.Contains(edits, result => result.StatusCode == HttpStatusCode.Conflict);
+        var winner = edits[0].StatusCode == HttpStatusCode.NoContent ? change : competing;
+        Assert.Equal(HttpStatusCode.NoContent, (await ChangeQuantityAsync(op, winner, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await ChangeQuantityAsync(op, winner with { quantity = "9" }, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangeQuantityAsync(op, winner with
+        {
+            originalQuantity = winner.quantity, quantity = "0", operationId = Guid.NewGuid(),
+        }, token)).StatusCode);
+        Assert.Contains($"data-saved-quantity=\"{winner.quantity}\"", await op.GetStringAsync(docUrl));
         Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, null, lineId)).StatusCode);   // 沒有 antiforgery
         Assert.Equal(HttpStatusCode.Forbidden, (await RemoveAsync(viewer, viewerToken, lineId)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, token)).StatusCode);   // 沒有勾選

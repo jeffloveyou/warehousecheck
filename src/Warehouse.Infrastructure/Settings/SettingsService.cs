@@ -104,6 +104,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
             LineReservationEnabled = Flag(SettingKeys.LineReservationEnabled, Defaults.LineReservationEnabled),
             LineCrossTransferEnabled = Flag(SettingKeys.LineCrossTransferEnabled, Defaults.LineCrossTransferEnabled),
             LineLotSerialEnabled = Flag(SettingKeys.LineLotSerialEnabled, Defaults.LineLotSerialEnabled),
+            LineScanNumericToQuantity = Flag(SettingKeys.LineScanNumericToQuantity, Defaults.LineScanNumericToQuantity),
             AllowItemUnitTrackingChangeWithActivity = Flag(
                 SettingKeys.AllowItemUnitTrackingChangeWithActivity, Defaults.AllowItemUnitTrackingChangeWithActivity),
             AllowItemCodeChange = Flag(SettingKeys.AllowItemCodeChange, Defaults.AllowItemCodeChange),
@@ -189,6 +190,7 @@ public sealed class SettingsService(WarehouseDbContext db, TimeProvider clock) :
         (SettingKeys.LineReservationEnabled, original.LineReservationEnabled, updated.LineReservationEnabled, current.LineReservationEnabled),
         (SettingKeys.LineCrossTransferEnabled, original.LineCrossTransferEnabled, updated.LineCrossTransferEnabled, current.LineCrossTransferEnabled),
         (SettingKeys.LineLotSerialEnabled, original.LineLotSerialEnabled, updated.LineLotSerialEnabled, current.LineLotSerialEnabled),
+        (SettingKeys.LineScanNumericToQuantity, original.LineScanNumericToQuantity, updated.LineScanNumericToQuantity, current.LineScanNumericToQuantity),
         (SettingKeys.AllowItemUnitTrackingChangeWithActivity, original.AllowItemUnitTrackingChangeWithActivity,
             updated.AllowItemUnitTrackingChangeWithActivity, current.AllowItemUnitTrackingChangeWithActivity),
         (SettingKeys.AllowItemCodeChange, original.AllowItemCodeChange, updated.AllowItemCodeChange, current.AllowItemCodeChange),

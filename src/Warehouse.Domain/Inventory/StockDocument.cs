@@ -339,6 +339,22 @@ public sealed class StockDocument
         return line;
     }
 
+    public void UpdateLineQuantity(Guid lineId, TrackingMode tracking, int decimalPlaces, decimal quantity)
+    {
+        EnsureDraft();
+        var line = _lines.FirstOrDefault(l => l.Id == lineId)
+            ?? throw new DomainRuleException("找不到要修改的明細。");
+        if (line.ItemId is null || tracking == TrackingMode.Serial || line.SerialNo is not null)
+        {
+            throw new DomainRuleException("序號物料與空儲位明細不能修改數量。");
+        }
+        if (DocType != StockDocumentType.Opening && quantity <= 0)
+        {
+            throw new DomainRuleException("數量必須大於 0。");
+        }
+        line.SetQuantity(tracking, decimalPlaces, quantity);
+    }
+
     public void RemoveLine(Guid lineId)
     {
         EnsureDraft();
@@ -502,20 +518,7 @@ public sealed class StockDocumentLine
         {
             throw new DomainRuleException("明細必須指定物料與儲位。");
         }
-        if (quantity < 0)
-        {
-            throw new DomainRuleException("期初數量不可小於 0。");
-        }
-        if (quantity > MaxQuantity)
-        {
-            throw new DomainRuleException("數量過大，請確認單位與輸入。");
-        }
-        if (decimal.Round(quantity, decimalPlaces) != quantity)
-        {
-            throw new DomainRuleException(decimalPlaces == 0
-                ? "這個物料的單位不可有小數。"
-                : $"這個物料的單位最多 {decimalPlaces} 位小數。");
-        }
+        ValidateQuantity(quantity, decimalPlaces);
         var lot = Code(lotNo, "批號");
         var serial = Code(serialNo, "序號");
         switch (trackingMode)
@@ -605,6 +608,34 @@ public sealed class StockDocumentLine
             throw new DomainRuleException($"這個物料的單位最多 {decimalPlaces} 位小數。");
         }
         Quantity = total;
+    }
+
+    private static void ValidateQuantity(decimal quantity, int decimalPlaces)
+    {
+        if (quantity < 0)
+        {
+            throw new DomainRuleException("期初數量不可小於 0。");
+        }
+        if (quantity > MaxQuantity)
+        {
+            throw new DomainRuleException("數量過大，請確認單位與輸入。");
+        }
+        if (decimal.Round(quantity, decimalPlaces) != quantity)
+        {
+            throw new DomainRuleException(decimalPlaces == 0
+                ? "這個物料的單位不可有小數。"
+                : $"這個物料的單位最多 {decimalPlaces} 位小數。");
+        }
+    }
+
+    internal void SetQuantity(TrackingMode tracking, int decimalPlaces, decimal quantity)
+    {
+        ValidateQuantity(quantity, decimalPlaces);
+        if (tracking == TrackingMode.Lot && LotNo is null && quantity > 0)
+        {
+            throw new DomainRuleException("批號管理的物料必須填寫批號。");
+        }
+        Quantity = quantity;
     }
 
     internal static StockDocumentLine CreateEmptyLocation(Guid id, Guid documentId, int lineNo, Guid locationId)

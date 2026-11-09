@@ -108,13 +108,15 @@ public class DetailsModel(
     public ScanPanelModel ScanPanel => new(
         "opening", Doc.WarehouseId,
         Url.Page("/Opening/Details", "ScanResolve", new { id = Doc.Id })!,
-        Url.Page("/Opening/Details", "ScanAddLine", new { id = Doc.Id })!)
+        Url.Page("/Opening/Details", "ScanAddLineOnce", new { id = Doc.Id })!)
     {
+        QuantityUrl = Url.Page("/Opening/Details", "ScanUpdateQuantity", new { id = Doc.Id }),
         RemoveUrl = Url.Page("/Opening/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Opening/Details", "ItemSearch", new { id = Doc.Id }),
         LocationsUrl = Url.Page("/Opening/Details", "Locations", new { id = Doc.Id }),
         WarehouseCode = Doc.WarehouseCode,
         LotSerialEnabled = LineSettings.LineLotSerialEnabled,
+        ScanNumericToQuantity = LineSettings.LineScanNumericToQuantity,
         ExpiryEnabled = LineSettings.LineExpiryEnabled,
     };
 
@@ -157,7 +159,13 @@ public class DetailsModel(
     /// 掃碼面板加入期初明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
     /// 成功回傳重繪的明細表（HTML）；規則錯誤回 400 JSON。「確認空儲位」仍用下方表單。
     /// </summary>
-    public async Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest request, CancellationToken cancellationToken)
+    public Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, null, cancellationToken);
+
+    public Task<IActionResult> OnPostScanAddLineOnceAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, request?.OperationId ?? Guid.Empty, cancellationToken);
+
+    private async Task<IActionResult> ScanAddLineAsync(Guid id, ScanLineRequest? request, Guid? operationId, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded)
         {
@@ -167,13 +175,13 @@ public class DetailsModel(
         bool merged;
         try
         {
-            if (string.IsNullOrWhiteSpace(request.ItemCode))
+            if (request is null || !ModelState.IsValid || string.IsNullOrWhiteSpace(request.ItemCode))
             {
                 throw new DomainRuleException("請先掃描物料。");
             }
             (lineId, merged) = await openings.AddLineAsync(id, new OpeningLineInput(
                 request.LocationCode ?? string.Empty, request.ItemCode, request.LotNo, request.SerialNo, request.ExpiryDate,
-                request.Quantity, request.Merge), User.ToActor(), cancellationToken);
+                request.Quantity, request.Merge), User.ToActor(), cancellationToken, operationId);
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
@@ -188,6 +196,7 @@ public class DetailsModel(
         Version = current.Version;
         var actor = User.ToActor();
         CanEdit = current.Status == StockDocumentStatus.Draft && (actor.IsWarehouseManager || current.CreatedById == actor.Id);
+        Response.Headers["X-Line-Id"] = lineId.ToString();
         if (current.Lines.FirstOrDefault(l => l.Id == lineId) is { } line)
         {
             // 累加時有效期限沿用該行：這次填了不同的日期就告訴畫面
@@ -231,6 +240,32 @@ public class DetailsModel(
         return Partial("_OpeningLines", this);
     }
 
+    /// <summary>明細數量失焦儲存（JSON）。</summary>
+    public async Task<IActionResult> OnPostScanUpdateQuantityAsync(Guid id, [FromBody] LineQuantityInput? request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.OpeningEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        if (request is null || !ModelState.IsValid)
+        {
+            return BadRequest(new { message = "明細數量資料不正確。" });
+        }
+        try
+        {
+            await openings.UpdateLineQuantityAsync(id, request, User.ToActor(), cancellationToken);
+            return new NoContentResult();
+        }
+        catch (ConflictException ex)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status409Conflict };
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     /// <summary>明細表送出的刪除（JSON）。</summary>
     public sealed class ScanRemoveRequest
     {
@@ -240,6 +275,8 @@ public class DetailsModel(
     /// <summary>掃碼面板送出的期初明細（JSON）。</summary>
     public sealed class ScanLineRequest
     {
+        public Guid? OperationId { get; set; }
+
         public string? LocationCode { get; set; }
 
         public string? ItemCode { get; set; }

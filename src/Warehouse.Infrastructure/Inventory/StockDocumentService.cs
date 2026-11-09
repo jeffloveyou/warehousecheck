@@ -200,7 +200,7 @@ public sealed partial class StockDocumentService(
         return doc.Id;
     }
 
-    public Task UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken) =>
+    public Task<uint> UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken) =>
         MutateAsync(id, expectedVersion, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
             var current = await settings.GetAsync(cancellationToken);
@@ -498,6 +498,14 @@ public sealed partial class StockDocumentService(
         db.StockDocuments.Remove(doc);
         await SaveAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public Task UpdateLineQuantityAsync(Guid id, LineQuantityInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        var (key, hash) = DocumentSupport.LineQuantityRequest(id, input, actor);
+        return MutateAsync(id, null, actor, editorOnly: true, cancellationToken,
+            (doc, now) => DocumentSupport.UpdateLineQuantityAsync(db, doc, input, actor, key, hash, now, cancellationToken),
+            () => DocumentSupport.AlreadyProcessedAsync(db, key, DocumentSupport.LineQuantityCommand, hash, cancellationToken));
     }
 
     public Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken) =>
@@ -832,7 +840,7 @@ public sealed partial class StockDocumentService(
     }
 
     /// <summary>修改單據的共用流程（鎖單據 → 載入 → 版本 → 權限 → 動作 → 稽核 → 儲存）。</summary>
-    private async Task MutateAsync(
+    private async Task<uint> MutateAsync(
         Guid id, uint? expectedVersion, Actor actor, bool editorOnly, CancellationToken cancellationToken,
         Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action, Func<Task<bool>>? replay = null)
     {
@@ -843,12 +851,14 @@ public sealed partial class StockDocumentService(
         {
             RequireEditor(doc, actor);
         }
-        if (replay is not null && await replay()) return;
+        if (replay is not null && await replay()) return db.Entry(doc).Property<uint>("Version").CurrentValue;
         var now = clock.GetUtcNow();
         var (name, after) = await action(doc, now);
         AuditLog.Add(db, actor, now, name, "stock_document", doc.Id.ToString(), null, after);
         await SaveAsync(cancellationToken);
+        var committedVersion = db.Entry(doc).Property<uint>("Version").CurrentValue;
         await transaction.CommitAsync(cancellationToken);
+        return committedVersion;
     }
 
     /// <summary>

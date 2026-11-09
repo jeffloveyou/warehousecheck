@@ -18,13 +18,14 @@
     <div class="print-toolbar">
         <h1>物料標籤補印</h1>
         <a href="/Items">回物料</a>
-        <form method="get" class="label-filters">
+        <form method="get" data-page-query class="label-filters" id="label-filter">
             <input type="search" name="q" value="@Model.Keyword" maxlength="100" aria-label="料號、品名或型號" placeholder="料號、品名或型號" />
             <button type="submit">搜尋</button>
         </form>
         <p>只列已啟用物料。勾選本頁要補印的物料，產生後核對標籤，再按列印。換頁前請先完成本頁列印。</p>
+<div id="label-toolbar-results" data-page-region>
         @if (Model.Error is not null) { <p role="alert">@Model.Error</p> }
-        <form method="post" asp-page-handler="Print" class="item-label-select">
+        <form method="post" data-page-post asp-page-handler="Print" class="item-label-select">
             <input type="hidden" name="q" value="@Model.Keyword" />
             <input type="hidden" name="p" value="@Model.PageNumber" />
             @foreach (var item in Model.Result.Items)
@@ -34,12 +35,15 @@
             @if (Model.Result.Items.Count == 0) { <p>沒有符合條件的已啟用物料。</p> }
             else { <button type="submit" id="item-label-generate">產生勾選標籤</button> }
         </form>
-        <span>共 @Model.Result.TotalCount 筆，第 @Model.Result.Page／@Model.Result.TotalPages 頁</span>
-        @if (Model.Result.Page > 1) { <a href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a> }
-        @if (Model.Result.Page < Model.Result.TotalPages) { <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a> }
+        <span class="label-pages">共 @Model.Result.TotalCount 筆，第 @Model.Result.Page／@Model.Result.TotalPages 頁
+            @if (Model.Result.Page > 1) { <a data-page-link href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a> }
+            @if (Model.Result.Page < Model.Result.TotalPages) { <a data-page-link href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a> }
+        </span>
         @if (Model.Labels.Count > 0) { <button type="button" id="item-label-print" onclick="window.print()">列印 @Model.Labels.Count 個（@sheets.Count 張）</button> }
         <p>列印設定：A4、實際大小 100%、關閉頁首頁尾；先用一般紙核對尺寸。</p>
+</div>
     </div>
+<div id="label-sheets" data-page-region>
     @foreach (var sheet in sheets)
     {
         <div class="label-sheet label-small" style="grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(8,1fr)">
@@ -52,5 +56,7 @@
             }
         </div>
     }
+</div>
+    <script src="~/js/page-update.js" asp-append-version="true"></script>
 </body>
 </html>

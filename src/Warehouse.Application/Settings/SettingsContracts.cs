@@ -73,6 +73,8 @@ public sealed record SystemSettings(
     /// <summary>顯示批號、序號欄（關閉時只在料號需要時顯示）。</summary>
     public bool LineLotSerialEnabled { get; init; } = true;
 
+    public bool LineScanNumericToQuantity { get; init; }
+
     /// <summary>
     /// 已有異動紀錄的物料可否改基本單位、追蹤模式（M8-05，ADR-0023；預設 false）。
     /// 開啟後仍有安全底線：沒有未完成單據、有效預留、進行中盤點；改追蹤模式時結存須為 0。
@@ -177,6 +179,7 @@ public static class SettingKeys
     public const string LineReservationEnabled = "stock.documents.line.reservation.enabled";
     public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
     public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
+    public const string LineScanNumericToQuantity = "stock.documents.line.scan_numeric_to_quantity";
     public const string AllowItemUnitTrackingChangeWithActivity = "items.allow_unit_tracking_change_with_activity";
     public const string AllowItemCodeChange = "items.allow_item_code_change";
     public const string RememberMeDays = "auth.remember_me_days";

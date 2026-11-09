@@ -3,6 +3,9 @@
 body { margin: 0; font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; font-size: 13px; color: #000; background: #fff; }
 .print-toolbar { padding: 8px 16px; background: #f3f5f7; border-bottom: 1px solid #ccd; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .print-toolbar button { padding: 6px 16px; border: 1px solid #243447; background: #243447; color: #fff; border-radius: 3px; cursor: pointer; }
+.print-toolbar > [data-page-region] { display: contents; }
+.print-toolbar > [data-page-region]:focus { display: block; }
+.print-toolbar > .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 .print-page { position: relative; width: 190mm; max-width: 100%; margin: 0 auto; padding: 8mm 0; }
 .print-company { text-align: center; font-size: 16px; margin: 0 0 4px; }
 .print-title { text-align: center; font-size: 22px; font-weight: bold; margin: 0 0 12px; letter-spacing: 4px; }

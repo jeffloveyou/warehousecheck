@@ -2,8 +2,10 @@
 @model Warehouse.Web.Pages.Warehouses.LocationsModel
 @using Warehouse.Domain.Warehousing
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "儲位";
 }
+<div id="location-heading" data-page-region>
 <h1>儲位 @(Model.CurrentWarehouse is { } w ? $"－{w.Code} {w.Name}" : "")</h1>
 @if (Model.CanManage && Model.CurrentWarehouse is { IsActive: true } importTarget)
 {
@@ -13,6 +15,7 @@
 {
     <p><a href="/Warehouses/Labels?WarehouseId=@labelTarget.Id&q=@Uri.EscapeDataString(Model.Keyword ?? "")&Status=@Model.Status" id="location-labels-link">列印儲位標籤（依目前條件）</a></p>
 }
+</div>
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>
@@ -21,7 +24,7 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
-<form method="get" class="filters" id="location-filters">
+<form method="get" data-page-query class="filters" id="location-filters">
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
         @foreach (var wh in Model.Warehouses)
@@ -42,6 +45,7 @@
 </form>
 
 <p class="muted">共 @Model.Result.TotalCount 筆</p>
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="location-list">
         <thead>
@@ -94,7 +98,9 @@
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
 </div>
+</div>
 
+<div id="location-create-region" data-page-region data-page-key="@(Model.CanManage && Model.CurrentWarehouse?.IsActive == true ? Model.WarehouseId?.ToString() : $"{Model.CanManage}:{Model.WarehouseId}")">
 @if (Model.CanManage && Model.CurrentWarehouse is { IsActive: true } current)
 {
     <form method="post" asp-page-handler="Create" asp-route-WarehouseId="@Model.WarehouseId" class="panel" id="location-form">
@@ -107,3 +113,4 @@ else if (Model.CanManage && Model.WarehouseId is null)
 {
     <p class="muted">先選擇倉庫，才能新增儲位。</p>
 }
+</div>

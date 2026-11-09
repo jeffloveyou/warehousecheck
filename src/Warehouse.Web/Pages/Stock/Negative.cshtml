@@ -1,11 +1,12 @@
 @page
 @model Warehouse.Web.Pages.Stock.NegativeModel
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "待補帳";
 }
 <h1>待補帳</h1>
 <p class="muted">允許負庫存的料號出庫超過結存後，會出現在這裡。補入庫（或盤點調整）讓結存回到 0 以上，就會從清單消失。下限是該料號全倉合計可用量的最低值。</p>
-<form method="get" class="filters" id="negative-filter">
+<form method="get" data-page-query class="filters" id="negative-filter">
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
@@ -15,6 +16,7 @@
     </select>
     <button type="submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="negative-list">
         <thead><tr><th>料號</th><th>品名</th><th>倉庫</th><th>儲位</th><th>結存</th><th>單位</th><th>下限</th><th>最後造成負數的單據</th><th>時間</th></tr></thead>
@@ -59,4 +61,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

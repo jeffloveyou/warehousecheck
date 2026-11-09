@@ -432,10 +432,76 @@ internal static class QuickCheckoutCheck
         var action = await page.Locator("#stocktake-submit").CountAsync() > 0 ? "#stocktake-submit" : "#stocktake-confirm";
         await page.ClickAsync(action);
         check((await page.InnerTextAsync("#stocktake-save-status")).Contains("還有未儲存"), "R1：盤點未存完不能直接送審或確認");
+        var stamp = page.Locator("#stocktake-actions input[name=CountStamp]");
+        var before = await stamp.CountAsync() == 1 ? await stamp.InputValueAsync() : null;
         await quantities.Nth(1).Locator("..").GetByRole(AriaRole.Button, new() { Name = "存", Exact = true }).ClickAsync();
         await page.WaitForFunctionAsync("() => Array.from(document.querySelectorAll('.count-save-state')).some(x => x.textContent.includes('已儲存 9'))");
+        await page.EvaluateAsync("() => { window.__noReload = true; }");
+        await page.Locator("#stocktake-review-current").ClickAsync();
+        await page.WaitForFunctionAsync("() => document.querySelector('#stocktake-save-status').textContent.includes('已讀取最新盤點結果')");
+        check(await page.EvaluateAsync<bool>("() => window.__noReload && document.activeElement.id === 'stocktake-review-current'")
+            && await quantities.Nth(1).InputValueAsync() == "9"
+            && (before is null || await stamp.InputValueAsync() != before),
+            "盤點：原地讀取最新盤點結果，保留焦點並更新確認用快照");
+        await CheckStocktakeStateChangesAsync(page, cs, id, codes[0], check);
         page.Dialog -= AcceptDialog;
         await page.GotoAsync(baseUrl + "/Quick");
+    }
+
+    private static async Task CheckStocktakeStateChangesAsync(IPage page, string cs, Guid id, string itemCode, Action<bool, string> check)
+    {
+        WarehouseDbContext Db() => new(new DbContextOptionsBuilder<WarehouseDbContext>().UseNpgsql(cs).Options);
+        var supervisor = new Actor(Guid.NewGuid(), "盤點狀態驗證主管", false, IsWarehouseManager: true);
+        var counter = new Actor(Guid.NewGuid(), "盤點狀態驗證作業員", false);
+        var url = page.Url;
+        await using var settingsDb = Db();
+        var settings = new SettingsService(settingsDb, TimeProvider.System);
+        var original = await settings.GetAsync(default);
+        var approval = original with { StocktakeApprovalEnabled = true, StocktakeBlindCount = true };
+        await settings.UpdateAsync(original, approval, supervisor, default);
+        var second = await page.Context.NewPageAsync();
+        async Task ChangeAsync(Func<StocktakeService, StocktakeDetails, Task> action)
+        {
+            await using var db = Db();
+            var service = new StocktakeService(db, new InventoryPostingService(db), new SettingsService(db, TimeProvider.System), TimeProvider.System);
+            var current = (await service.GetAsync(id, new StocktakeLineFilter(), supervisor, default))!;
+            await action(service, current);
+        }
+        try
+        {
+            await second.GotoAsync(url);
+            await page.FillAsync("#Count_ItemCode", itemCode);
+            await page.FillAsync("#Count_Quantity", "3");
+            await second.ClickAsync("#stocktake-submit");
+            await second.WaitForFunctionAsync("() => document.getElementById('stocktake-status').textContent === '待核准'");
+            await page.ClickAsync("#stocktake-review-current");
+            await page.WaitForFunctionAsync("() => document.getElementById('stocktake-status').textContent === '待核准'");
+            check(await page.IsHiddenAsync("#stocktake-count-form") && await page.IsHiddenAsync("#stocktake-submit")
+                && (await page.InnerTextAsync("#stocktake-save-status")).Contains("未存輸入已保留")
+                && await page.IsVisibleAsync("input[name=Diff]"),
+                "盤點：另一頁送審後同步狀態、解除盲盤並保留未記錄輸入");
+            await ChangeAsync((service, current) => service.RequestRecountAsync(id, current.Version, [current.Lines.Items[0].Id], "跨頁驗證重盤", supervisor, default));
+            await page.ClickAsync("#stocktake-review-current");
+            await page.WaitForFunctionAsync("() => document.getElementById('stocktake-status').textContent === '盤點中'");
+            check(await page.InputValueAsync("#Count_ItemCode") == itemCode && await page.InputValueAsync("#Count_Quantity") == "3"
+                && await page.IsHiddenAsync("input[name=Diff]") && await page.IsVisibleAsync("#stocktake-submit"),
+                "盤點：退回重盤時還原未記錄輸入，更新盲盤與送審按鈕");
+            var quantity = page.Locator("#stocktake-lines input[name=quantity]").First;
+            await quantity.FillAsync("8");
+            await quantity.PressAsync("Enter");
+            await page.WaitForFunctionAsync("() => document.querySelector('.count-save-state')?.textContent.includes('已儲存 8')");
+            await ChangeAsync((service, current) => service.SubmitAsync(id, current.Version, counter, default));
+            await ChangeAsync((service, current) => service.ApproveAsync(id, current.Version, Guid.NewGuid().ToString(), supervisor, default));
+            await page.ClickAsync("#stocktake-review-current");
+            await page.WaitForFunctionAsync("() => document.getElementById('stocktake-status').textContent === '已核准'");
+            check(await page.IsHiddenAsync("#stocktake-count-form") && await page.IsVisibleAsync("#adjustment-link"),
+                "盤點：重盤恢復背景儲存，核准後原地顯示調整單");
+        }
+        finally
+        {
+            await second.CloseAsync();
+            await settings.UpdateAsync(approval, original, supervisor, default);
+        }
     }
 
 }

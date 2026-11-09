@@ -2,11 +2,12 @@
 @model Warehouse.Web.Pages.Stock.MovementsModel
 @{
     ViewData["MobileCards"] = true;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "異動歷史";
 }
 <h1>異動歷史</h1>
 <p class="muted">所有庫存異動的帳（只增不改）。不填條件時只列最近的異動；日期為台灣當地日期，含起迄兩天。</p>
-<form method="get" class="filters" id="movement-filter">
+<form method="get" data-page-query class="filters" id="movement-filter">
     <input type="text" name="ItemCode" value="@Model.ItemCode" maxlength="20" placeholder="料號" aria-label="料號" />
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
@@ -24,6 +25,7 @@
     <label>迄 <input type="date" name="To" value="@(Model.To?.ToString("yyyy-MM-dd"))" /></label>
     <button type="submit" id="movement-submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
@@ -86,4 +88,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

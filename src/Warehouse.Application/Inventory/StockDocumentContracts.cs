@@ -37,6 +37,13 @@ public sealed record DocumentDetails(
     Guid? RecipientUserId = null, string? RecipientName = null, string? ProjectReference = null,
     DocumentReversalLink? RelatedReversal = null);
 
+/// <summary>以讀到的原數量修改單行草稿明細。同一操作識別碼可重試。</summary>
+public sealed record LineQuantityInput(
+    Guid LineId,
+    [property: System.Text.Json.Serialization.JsonRequired] decimal OriginalQuantity,
+    [property: System.Text.Json.Serialization.JsonRequired] decimal Quantity,
+    Guid OperationId);
+
 /// <summary>
 /// 新增明細：儲位碼、料號以文字輸入（掃碼或手輸，大小寫、全形會正規化）。
 /// 移庫：<see cref="TargetLocationCode"/> 必填；<see cref="TargetWarehouseCode"/> 空白＝與來源同倉，但目的儲位是 <c>WH:LOC:</c> QR 時用 QR 上的倉庫（M5-01）。
@@ -75,9 +82,11 @@ public interface IStockDocumentService
         StockDocumentType type, Guid warehouseId, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken,
         Guid? requestId = null);
 
-    Task UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken);
+    Task<uint> UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken);
 
     Task<Guid> AddLineAsync(Guid id, DocumentLineInput input, Actor actor, CancellationToken cancellationToken, Guid? operationId = null);
+
+    Task UpdateLineQuantityAsync(Guid id, LineQuantityInput input, Actor actor, CancellationToken cancellationToken);
 
     Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken);
 

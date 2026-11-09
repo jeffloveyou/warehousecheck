@@ -2,6 +2,7 @@
 @model Warehouse.Web.Pages.Admin.Users.IndexModel
 @using Warehouse.Application.Abstractions
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "帳號管理";
 }
 <h1>帳號管理</h1>
@@ -38,11 +39,12 @@
     </div>
     <div class="actions"><button type="submit" id="user-create">新增並產生初始密碼</button></div>
 </form>
-<form method="get" class="filters" id="user-filter">
+<form method="get" data-page-query class="filters" id="user-filter">
     <input type="search" name="q" value="@Model.Keyword" placeholder="帳號或顯示名稱" aria-label="搜尋帳號" />
     <label><input type="checkbox" name="inactive" value="true" checked="@Model.IncludeInactive" /> 含停用帳號</label>
     <button type="submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="user-list">
         <thead><tr><th>帳號</th><th>顯示名稱</th><th>角色</th><th>狀態</th><th></th></tr></thead>
@@ -78,4 +80,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

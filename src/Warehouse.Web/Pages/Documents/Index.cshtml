@@ -4,6 +4,7 @@
 @using Warehouse.Web.Pages.Documents
 @{
     ViewData["MobileCards"] = true;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "進出倉單";
 }
 <h1>進出倉單</h1>
@@ -17,7 +18,7 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
-<form method="get" class="filters" id="document-filter">
+<form method="get" data-page-query class="filters" id="document-filter">
     <select name="Type" aria-label="類型">
         <option value="">全部類型</option>
         @foreach (var t in IndexModel.CreatableTypes)
@@ -78,6 +79,7 @@
         <div class="actions"><button type="submit" id="document-create">建立單據</button></div>
     </form>
 }
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="document-list">
         <thead>
@@ -119,6 +121,7 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>
 @section Scripts {
     <script src="~/js/documents.js" asp-append-version="true"></script>

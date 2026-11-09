@@ -37,6 +37,8 @@ public class DetailsModel(
 
     private Guid? _redirectId;
     private bool _keepHeaderInput;
+    public uint? SavedHeaderVersion { get; private set; }
+    public bool ReviewHeaderVersion { get; private set; }
 
     public DocumentDetails Doc { get; private set; } = null!;
 
@@ -141,7 +143,11 @@ public class DetailsModel(
         {
             _keepHeaderInput = true;
             var header = await DocumentFormSupport.ToHeaderAsync(Header, master, cancellationToken);
-            await documents.UpdateHeaderAsync(id, Version, header, actor, cancellationToken);
+            var committedVersion = await documents.UpdateHeaderAsync(id, Version, header, actor, cancellationToken);
+            if (Request.Headers["X-Warehouse-Page-Update"] == "1")
+            {
+                SavedHeaderVersion = committedVersion;
+            }
             return "已儲存表頭。";
         }, cancellationToken);
 
@@ -301,6 +307,7 @@ public class DetailsModel(
         Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
         Url.Page("/Documents/Details", "ScanAddLineOnce", new { id = Doc.Id })!)
     {
+        QuantityUrl = Url.Page("/Documents/Details", "ScanUpdateQuantity", new { id = Doc.Id }),
         RemoveUrl = Url.Page("/Documents/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Documents/Details", "ItemSearch", new { id = Doc.Id }),
         LocationsUrl = Url.Page("/Documents/Details", "Locations", new { id = Doc.Id }),
@@ -308,6 +315,7 @@ public class DetailsModel(
         WarehouseCode = Doc.WarehouseCode,
         TargetWarehouses = TargetWarehouses,
         LotSerialEnabled = Settings.LineLotSerialEnabled,
+        ScanNumericToQuantity = Settings.LineScanNumericToQuantity,
         ExpiryEnabled = Settings.LineExpiryEnabled,
         ReservationEnabled = Settings.LineReservationEnabled,
     };
@@ -504,6 +512,32 @@ public class DetailsModel(
         return Partial("_DocumentLines", this);
     }
 
+    /// <summary>明細數量失焦儲存（JSON）。</summary>
+    public async Task<IActionResult> OnPostScanUpdateQuantityAsync(Guid id, [FromBody] LineQuantityInput? request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        if (request is null || !ModelState.IsValid)
+        {
+            return BadRequest(new { message = "明細數量資料不正確。" });
+        }
+        try
+        {
+            await documents.UpdateLineQuantityAsync(id, request, User.ToActor(), cancellationToken);
+            return new NoContentResult();
+        }
+        catch (ConflictException ex)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status409Conflict };
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     /// <summary>明細表送出的刪除（JSON）。</summary>
     public sealed class ScanRemoveRequest
     {
@@ -549,12 +583,35 @@ public class DetailsModel(
         }
         try
         {
-            TempData["Message"] = await action(User.ToActor());
+            var message = await action(User.ToActor());
+            if (SavedHeaderVersion is { } committedVersion)
+            {
+                if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))
+                {
+                    return NotFound();
+                }
+                ModelState.Clear();
+                if (Version != committedVersion || !CanEdit)
+                {
+                    SavedHeaderVersion = null;
+                    ReviewHeaderVersion = CanEdit;
+                    Error = "表頭已儲存，但讀取時單據已變更。請核對目前表頭與單據狀態。";
+                }
+                else
+                {
+                    TempData["Message"] = message;
+                }
+                return Page();
+            }
+            TempData["Message"] = message;
             return RedirectToPage(new { id = _redirectId ?? id });
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
-            Error = ex.Message;
+            SavedHeaderVersion = null;
+            ReviewHeaderVersion = _keepHeaderInput && Request.Headers["X-Warehouse-Page-Update"] == "1"
+                && ex is ConcurrencyConflictException;
+            Error = ReviewHeaderVersion ? "單據已被他人修改。請比對目前表頭與你的輸入。" : ex.Message;
         }
         if (!await LoadAsync(id, fillHeaderFromDoc: !_keepHeaderInput, cancellationToken))
         {

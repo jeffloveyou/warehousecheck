@@ -104,5 +104,7 @@
     @if (ViewData["MobileCards"] is true)
     { <script src="~/js/table-cards.js" asp-append-version="true"></script> }
     @await RenderSectionAsync("Scripts", required: false)
+    @if (ViewData["PageUpdates"] is true)
+    { <script src="~/js/page-update.js" asp-append-version="true"></script> }
 </body>
 </html>

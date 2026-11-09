@@ -399,8 +399,11 @@
     feedback('ok');
     if (search) {
       if (input.form) {
-        rememberReopen(group);
-        input.form.submit();
+        if (input.form.hasAttribute('data-page-query')) input.form.requestSubmit();
+        else {
+          rememberReopen(group);
+          input.form.submit();
+        }
       }
       return 'stay';
     }

@@ -81,6 +81,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         public bool LineCrossTransferEnabled { get; set; }
 
         public bool LineLotSerialEnabled { get; set; }
+        public bool LineScanNumericToQuantity { get; set; }
 
         public bool AllowItemUnitTrackingChangeWithActivity { get; set; }
 
@@ -125,6 +126,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 LineReservationEnabled = LineReservationEnabled,
                 LineCrossTransferEnabled = LineCrossTransferEnabled,
                 LineLotSerialEnabled = LineLotSerialEnabled,
+                LineScanNumericToQuantity = LineScanNumericToQuantity,
                 AllowItemUnitTrackingChangeWithActivity = AllowItemUnitTrackingChangeWithActivity,
                 AllowItemCodeChange = AllowItemCodeChange,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
@@ -163,6 +165,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             LineReservationEnabled = s.LineReservationEnabled,
             LineCrossTransferEnabled = s.LineCrossTransferEnabled,
             LineLotSerialEnabled = s.LineLotSerialEnabled,
+            LineScanNumericToQuantity = s.LineScanNumericToQuantity,
             AllowItemUnitTrackingChangeWithActivity = s.AllowItemUnitTrackingChangeWithActivity,
             AllowItemCodeChange = s.AllowItemCodeChange,
             PrintCompanyName = s.PrintCompanyName,
@@ -218,6 +221,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.LineReservationEnabled => "明細：指定預留",
         SettingKeys.LineCrossTransferEnabled => "明細：跨倉移庫",
         SettingKeys.LineLotSerialEnabled => "明細：批號序號欄",
+        SettingKeys.LineScanNumericToQuantity => "在數量欄掃碼時",
         SettingKeys.AllowItemUnitTrackingChangeWithActivity => "有異動的物料可改單位／追蹤模式",
         SettingKeys.AllowItemCodeChange => "已核准的物料可改料號",
         SettingKeys.RememberMeDays => "記住登入天數",

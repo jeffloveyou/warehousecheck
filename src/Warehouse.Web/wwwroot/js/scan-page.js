@@ -24,45 +24,20 @@
       return;
     }
     var url = '/Scan?code=' + encodeURIComponent(value);
-    try {
-      var res = await fetch(url, { credentials: 'same-origin' });
-      if (!res.ok || res.redirected) {
-        throw new Error(res.redirected ? '登入已逾時，請重新整理頁面並登入。' : '查詢失敗（HTTP ' + res.status + '）');
-      }
-      var template = document.createElement('template');
-      template.innerHTML = await res.text();
-      var fresh = template.content.querySelector('[data-scan-result]');
-      var old = document.querySelector('[data-scan-result]');
-      if (!fresh || !old) throw new Error('查詢結果格式不正確');
-      if (window.WhCameraField) window.WhCameraField.release(old); // 登錄欄的相機開著：先關掉再換
-      old.parentNode.replaceChild(fresh, old);
-      if (window.WhCameraField) window.WhCameraField.enhance(fresh); // 新結果區的登錄欄也要有相機按鈕
-      history.replaceState(null, '', url);
-      var summary = fresh.querySelector('#scan-summary');
-      if (summary && $('scan-live')) $('scan-live').textContent = summary.textContent;
-      var kind = fresh.getAttribute('data-kind');
-      window.WhScan.feedback(kind === 'Item' || kind === 'Location' ? 'ok' : kind === 'Text' ? 'warn' : 'error');
-    } catch (e) {
-      var old2 = document.querySelector('[data-scan-result]');
-      old2.textContent = '';
-      var div = document.createElement('div');
-      div.className = 'message error';
-      div.textContent = '「' + value + '」' + (e && e.message ? e.message : '查詢失敗');
-      old2.appendChild(div);
-      window.WhScan.feedback('error');
-    }
+    if (!await window.WhPageQuery(url)) return;
+    var kind = $('scan-result').dataset.kind;
+    window.WhScan.feedback(kind === 'Item' || kind === 'Location' ? 'ok' : kind === 'Text' ? 'warn' : 'error');
   }
+
+  document.addEventListener('wh:page-updated', function (event) {
+    if (event.detail.id === 'scan-result') $('scan-live').textContent = $('scan-summary').textContent;
+  });
 
   window.WhScan.attach({
     input: input,
     onScan: lookup,
     onReject: function (message) {
-      var old = document.querySelector('[data-scan-result]');
-      old.textContent = '';
-      var div = document.createElement('div');
-      div.className = 'message error';
-      div.textContent = message;
-      old.appendChild(div);
+      $('scan-live').textContent = message;
       window.WhScan.feedback('error');
     },
     focusWarning: $('scan-focus-warning'),

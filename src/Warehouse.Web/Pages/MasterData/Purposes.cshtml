@@ -2,11 +2,13 @@
 @model Warehouse.Web.Pages.MasterData.PurposesModel
 @using Warehouse.Domain.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "用途類型";
     var editing = Model.EditId is not null && Model.Purposes.Any(p => p.Id == Model.EditId);
 }
 <h1>用途類型</h1>
 <p class="muted">進倉單、出倉單選用的用途（例：採購入庫、生產領料）。移庫不選用途。停用後新單據不能再選，已用過的單據保留原值；代碼與方向建立後不可修改。</p>
+<div id="master-feedback" data-page-region="query master-list" aria-live="polite">
 @if (TempData["Message"] is string message)
 {
     <div class="message info" id="page-message">@message</div>
@@ -15,9 +17,11 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
+</div>
+<div id="master-editor" data-page-region="query master-editor" data-page-keep-on-error>
 @if (Model.CanManage)
 {
-    <form method="post" asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="purpose-form">
+    <form method="post" data-page-write="master-list master-editor" data-page-replace-url asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="purpose-form">
         <h2>@(editing ? "修改用途" : "新增用途")</h2>
         <input type="hidden" name="Version" value="@Model.Version" />
         <div class="form-grid">
@@ -47,18 +51,20 @@
             <button type="submit" id="purpose-save">@(editing ? "儲存" : "新增")</button>
             @if (editing)
             {
-                <a href="/MasterData/Purposes">取消</a>
+                <a data-page-edit-link="master-list master-editor" href="/MasterData/Purposes">取消</a>
             }
         </div>
     </form>
 }
+</div>
+<div id="master-results" data-page-region="query master-list">
 <div class="table-wrap">
     <table id="purpose-list">
         <thead><tr><th>方向</th><th>代碼</th><th>名稱</th><th>排序</th><th>狀態</th><th></th></tr></thead>
         <tbody>
             @foreach (var p in Model.Purposes)
             {
-                <tr>
+                <tr data-page-row="@p.Id">
                     <td>@Display.Of(p.Direction)</td>
                     <td>@p.Code</td>
                     <td>@p.Name</td>
@@ -67,12 +73,12 @@
                     <td>
                         @if (Model.CanManage)
                         {
-                            <a href="/MasterData/Purposes?edit=@p.Id">修改</a>
-                            <form method="post" asp-page-handler="Toggle" class="inline">
+                            <a id="edit-@p.Id" data-page-edit-link="master-list master-editor" href="/MasterData/Purposes?edit=@p.Id">修改</a>
+                            <form method="post" data-page-write="master-list" data-page-keep-url asp-page-handler="Toggle" class="inline">
                                 <input type="hidden" name="id" value="@p.Id" />
                                 <input type="hidden" name="version" value="@p.Version" />
                                 <input type="hidden" name="isActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
-                                <button type="submit" class="link">@(p.IsActive ? "停用" : "啟用")</button>
+                                <button type="submit" id="toggle-@p.Id" class="link">@(p.IsActive ? "停用" : "啟用")</button>
                             </form>
                         }
                     </td>
@@ -84,4 +90,5 @@
             }
         </tbody>
     </table>
+</div>
 </div>

@@ -130,6 +130,11 @@
   }
   async function edit(handler, input) {
     if (locked()) return;
+    var focused = document.activeElement;
+    var row = focused.closest('[data-line-id]');
+    var container = row && row.parentElement;
+    var neighbors = row && [row.nextElementSibling, row.previousElementSibling];
+    var control = row && Array.from(row.querySelectorAll('input:not([type=hidden]),button')).indexOf(focused);
     requestInFlight = true; persist(); sync();
     try {
       cart = await post(handler, input);
@@ -143,10 +148,31 @@
           if (handler === 'EditLine' && line && card.querySelectorAll('.quick-allocation').length === 1) card.querySelector('.allocation-quantity').value = line.quantity;
         }
       }
-      renderCart(); changed(); status('已儲存清單修改（尚未入帳）。', 'ok'); return true;
+      var changedLine = handler === 'EditLine' && cart.lines.find(function (l) { return l.id === input.lineId; });
+      renderCart(changedLine, handler === 'DeleteLine' ? input.lineId : null);
+      changed(); status('已儲存清單修改（尚未入帳）。', 'ok'); return true;
     }
     catch (e) { status(e.message + '；輸入保留，請核對後再送出。', 'bad'); if (e.code === 'scan_cart.concurrency_conflict') { draftStale = true; $('quick-review-draft').hidden = false; } }
-    finally { requestInFlight = false; sync(); }
+    finally {
+      requestInFlight = false; sync();
+      if (document.activeElement === document.body && focused !== document.body) {
+        var target = focused.isConnected && !focused.disabled ? focused : null;
+        if (!target && container) {
+          var currentRow = Array.from(container.children).find(function (candidate) { return candidate.dataset.lineId === row.dataset.lineId; });
+          if (currentRow && control >= 0) target = currentRow.querySelectorAll('input:not([type=hidden]),button')[control];
+          if (!target) {
+            var neighbor = neighbors.find(function (candidate) { return candidate && candidate.isConnected && !candidate.hidden; });
+            if (neighbor) target = neighbor.querySelector('.quick-line-edit, button[formaction]');
+          }
+          if (!target) {
+            target = container.closest('[data-quick-lines],#quick-allocation-panel');
+            if (target && !target.hidden) target.tabIndex = -1;
+            else target = el.input;
+          }
+        }
+        if (target) target.focus({ preventScroll: true });
+      }
+    }
   }
   var MODE_KEY = 'quick.addMode';
   try { var saved = localStorage.getItem(MODE_KEY); if (saved === 'manual' || saved === 'auto') el.mode.value = saved; } catch (e) { }
@@ -344,7 +370,7 @@
     var del = document.createElement('button'); del.type = 'submit'; del.formAction = base + '?handler=RemoveLine'; del.className = 'secondary'; del.textContent = '刪除'; form.appendChild(del);
     row.cells[5].appendChild(form); return row;
   }
-  function renderCart(line) {
+  function renderCart(line, removedId) {
     var root = document.querySelector('[data-quick-lines]'); if (!root) return;
     if (!checkoutNoteEdited && $('Header_Note')) $('Header_Note').value = cart.note || '';
     if (cart.warehouseId && warehouseInput.value !== cart.warehouseId) {
@@ -356,7 +382,11 @@
     var table = root.querySelector('table');
     if (!table) { root.textContent = ''; var h = document.createElement('h2'); root.appendChild(h); table = document.createElement('table'); table.id = 'quick-line-table'; table.innerHTML = '<thead><tr><th>#</th><th>料號</th><th>品名</th><th>儲位</th><th>數量</th><th>修改</th></tr></thead><tbody></tbody>'; var wrap = document.createElement('div'); wrap.className = 'table-wrap'; wrap.appendChild(table); root.appendChild(wrap); }
     var body = table.querySelector('tbody');
-    if (!line) { body.textContent = ''; cart.lines.forEach(function (l) { body.appendChild(rowFor(l)); }); }
+    if (removedId) {
+      var removed = body.querySelector('[data-line-id="' + removedId + '"]');
+      if (removed) removed.remove();
+    }
+    else if (!line) { body.textContent = ''; cart.lines.forEach(function (l) { body.appendChild(rowFor(l)); }); }
     else { var old = body.querySelector('[data-line-id="' + line.id + '"]'); if (old) old.replaceWith(rowFor(line)); else body.appendChild(rowFor(line)); }
     root.querySelector('h2').textContent = '購物車內容（' + cart.lines.length + ' 行' + (cart.warehouseCode ? '，倉庫 ' + cart.warehouseCode : '') + '）';
     root.dataset.version = cart.version;
