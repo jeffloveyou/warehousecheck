@@ -36,6 +36,8 @@
                 <label class="inline-check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" /> @Roles.DisplayName(role)</label>
             }
         </span>
+        <span>公用帳號</span>
+        <label class="inline-check"><input type="checkbox" name="Input.IsShared" value="true" checked="@Model.Input.IsShared" id="Input_IsShared" /> 多人共用（送出進出倉時必須從人員名單選操作人）</label>
     </div>
     <div class="actions"><button type="submit" id="user-create">新增並產生初始密碼</button></div>
 </form>
@@ -53,7 +55,7 @@
             {
                 <tr>
                     <td>@u.UserName</td>
-                    <td>@u.DisplayName</td>
+                    <td>@u.DisplayName@if (u.IsShared) { <span class="chip">公用</span> }</td>
                     <td>@string.Join("、", u.Roles.Select(Roles.DisplayName))@(u.AllWarehouses ? "" : $"（限 {u.WarehouseIds.Count} 個倉庫）")</td>
                     <td>
                         @(u.IsActive ? "啟用" : "停用")

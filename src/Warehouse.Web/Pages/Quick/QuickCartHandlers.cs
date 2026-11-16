@@ -96,19 +96,23 @@ public partial class CartModel
     }
 
     // 舊頁可查回已完成的原請求。新版走獨立入口，避免回滾時舊服務忽略審核模式。
-    public Task<IActionResult> OnPostCheckoutAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, CancellationToken cancellationToken) =>
-        CheckoutAsync(id, input, cancellationToken);
+    // 公用帳號的操作人放在查詢字串 operatorNameId（ADR-0030），結帳 JSON 格式不變，舊頁仍可送出（一般帳號）。
+    public Task<IActionResult> OnPostCheckoutAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, [FromQuery] Guid? operatorNameId, CancellationToken cancellationToken) =>
+        CheckoutAsync(id, input, operatorNameId, cancellationToken);
 
-    public Task<IActionResult> OnPostCheckoutReviewedAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, CancellationToken cancellationToken) =>
-        CheckoutAsync(id, input, cancellationToken);
+    public Task<IActionResult> OnPostCheckoutReviewedAsync(Guid id, [FromBody] ScanCartCheckoutInput? input, [FromQuery] Guid? operatorNameId, CancellationToken cancellationToken) =>
+        CheckoutAsync(id, input, operatorNameId, cancellationToken);
 
-    private async Task<IActionResult> CheckoutAsync(Guid id, ScanCartCheckoutInput? input, CancellationToken cancellationToken)
+    /// <summary>公用帳號（ADR-0030）：結帳畫面要顯示人員名單；一般帳號為 false，畫面不出現選單。</summary>
+    public bool IsSharedAccount => User.IsSharedAccount();
+
+    private async Task<IActionResult> CheckoutAsync(Guid id, ScanCartCheckoutInput? input, Guid? operatorNameId, CancellationToken cancellationToken)
     {
         if (input is null || !ModelState.IsValid) return BadRequest(new { message = "結帳資料格式不正確。" });
         try
         {
-            var result = await documents.CheckoutScanCartAsync(id, input, User.ToActor(), cancellationToken);
-            var actor = User.ToActor();
+            var actor = await OperatorActor.ResolveAsync(User, operatorNameId, master, cancellationToken);
+            var result = await documents.CheckoutScanCartAsync(id, input, actor, cancellationToken);
             await preferences.TrySetAsync(actor.Id, Warehouse.Application.Accounts.UserPreferenceKeys.DocumentsLastWarehouse, input.WarehouseId.ToString(), cancellationToken);
             if (input.Header.PurposeId is { } purpose)
                 await preferences.TrySetAsync(actor.Id, input.Type == StockDocumentType.Inbound ? Warehouse.Application.Accounts.UserPreferenceKeys.QuickLastPurposeIn : Warehouse.Application.Accounts.UserPreferenceKeys.QuickLastPurposeOut, purpose.ToString(), cancellationToken);

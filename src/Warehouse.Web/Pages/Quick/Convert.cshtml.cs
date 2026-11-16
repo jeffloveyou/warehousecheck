@@ -209,7 +209,7 @@ public partial class ConvertModel(
         return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostAsync(Guid id, Guid? operatorNameId, CancellationToken cancellationToken)
     {
         if (Type is not { } type || type is not (StockDocumentType.Inbound or StockDocumentType.Outbound or StockDocumentType.Transfer))
         {
@@ -241,7 +241,7 @@ public partial class ConvertModel(
             {
                 throw new DomainRuleException($"第 {string.Join("、", blank)} 行還沒選儲位。");
             }
-            var actor = User.ToActor();
+            var actor = await OperatorActor.ResolveAsync(User, operatorNameId, master, cancellationToken);
             var docId = await documents.CreateFromScanCartAsync(id, new ScanCartConvertInput(
                 type, warehouseId, type == StockDocumentType.Transfer ? null : PurposeId, lines, RequestId, ExpectedVersion, HasDocumentNote ? Note ?? string.Empty : null), actor, cancellationToken);
             // 記住這次的倉庫與用途，下次預設帶入（只是畫面預設，權限與用途仍在轉單時檢查）

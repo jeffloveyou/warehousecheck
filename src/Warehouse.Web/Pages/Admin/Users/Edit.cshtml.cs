@@ -36,6 +36,14 @@ public class EditModel(
         public List<string> Roles { get; set; } = [];
 
         public string ConcurrencyStamp { get; set; } = string.Empty;
+
+        public bool IsShared { get; set; }
+
+        /// <summary>
+        /// 表單有「公用帳號」欄位時為 true。A/B 換版期間舊版編輯頁沒有這個欄位（勾選框沒勾時也不會送出），
+        /// 沒帶就傳 null＝不變更，避免舊頁儲存時把公用旗標清掉（審查 #3）。
+        /// </summary>
+        public bool IsSharedPresent { get; set; }
     }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken cancellationToken)
@@ -44,14 +52,17 @@ public class EditModel(
         {
             return NotFound();
         }
-        Input = new EditForm { DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp };
+        Input = new EditForm
+        {
+            DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp, IsShared = Account.IsShared,
+        };
         return Page();
     }
 
     public Task<IActionResult> OnPostSaveAsync(CancellationToken cancellationToken) =>
         RunAsync(async () =>
         {
-            await admin.UpdateAsync(new UpdateUserRequest(Id, Input.DisplayName, Input.Roles, Input.ConcurrencyStamp),
+            await admin.UpdateAsync(new UpdateUserRequest(Id, Input.DisplayName, Input.Roles, Input.ConcurrencyStamp, Input.IsSharedPresent ? Input.IsShared : null),
                 User.ToActor(), cancellationToken);
             if (Id == User.ToActor().Id && await users.FindByIdAsync(Id.ToString()) is { } self)
             {
@@ -105,7 +116,10 @@ public class EditModel(
         {
             return NotFound();
         }
-        Input = new EditForm { DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp };
+        Input = new EditForm
+        {
+            DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp, IsShared = Account.IsShared,
+        };
         return Page();
     }
 
@@ -126,7 +140,10 @@ public class EditModel(
             if (ex is ConcurrencyConflictException)
             {
                 // 被別人改過：表單換成目前的資料，請使用者看過再改（不會用舊內容蓋掉別人的修改）
-                Input = new EditForm { DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp };
+                Input = new EditForm
+                {
+                    DisplayName = Account!.DisplayName, Roles = [.. Account.Roles], ConcurrencyStamp = Account.ConcurrencyStamp, IsShared = Account.IsShared,
+                };
             }
             return Page();
         }

@@ -1,0 +1,75 @@
+@page
+@model Warehouse.Web.Pages.MasterData.OperatorsModel
+@using Warehouse.Domain.Inventory
+@{
+    ViewData["PageUpdates"] = true;
+    ViewData["Title"] = "人員名單";
+    var editing = Model.EditId is not null && Model.Operators.Any(o => o.Id == Model.EditId);
+}
+<h1>人員名單</h1>
+<p class="muted">公用帳號（多人共用的帳號）送出進出倉動作時，要從這份名單選擇實際操作人，紀錄會寫成「姓名（公用帳號名稱）」。停用後不能再選，已寫入的紀錄保留原姓名；姓名不可重複。</p>
+<div id="master-feedback" data-page-region="query master-list" aria-live="polite">
+@if (TempData["Message"] is string message)
+{
+    <div class="message info" id="page-message">@message</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="message error" id="page-error">@Model.Error</div>
+}
+</div>
+<div id="master-editor" data-page-region="query master-editor" data-page-keep-on-error>
+@if (Model.CanManage)
+{
+    <form method="post" data-page-write="master-list master-editor" data-page-replace-url asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="operator-form">
+        <h2>@(editing ? "修改人員" : "新增人員")</h2>
+        <input type="hidden" name="Version" value="@Model.Version" />
+        <div class="form-grid">
+            <label for="Input_Name">姓名</label>
+            <input type="text" id="Input_Name" name="Input.Name" value="@Model.Input.Name" maxlength="@OperatorName.NameMaxLength" required />
+            <label for="Input_SortOrder">排序</label>
+            <input type="number" id="Input_SortOrder" name="Input.SortOrder" value="@Model.Input.SortOrder" step="1" />
+        </div>
+        <div class="actions">
+            <button type="submit" id="operator-save">@(editing ? "儲存" : "新增")</button>
+            @if (editing)
+            {
+                <a data-page-edit-link="master-list master-editor" href="/MasterData/Operators">取消</a>
+            }
+        </div>
+    </form>
+}
+</div>
+<div id="master-results" data-page-region="query master-list">
+<div class="table-wrap">
+    <table id="operator-list">
+        <thead><tr><th>姓名</th><th>排序</th><th>狀態</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var o in Model.Operators)
+            {
+                <tr data-page-row="@o.Id">
+                    <td>@o.Name</td>
+                    <td class="num">@o.SortOrder</td>
+                    <td>@(o.IsActive ? "啟用" : "停用")</td>
+                    <td>
+                        @if (Model.CanManage)
+                        {
+                            <a id="edit-@o.Id" data-page-edit-link="master-list master-editor" href="/MasterData/Operators?edit=@o.Id">修改</a>
+                            <form method="post" data-page-write="master-list" data-page-keep-url asp-page-handler="Toggle" class="inline">
+                                <input type="hidden" name="id" value="@o.Id" />
+                                <input type="hidden" name="version" value="@o.Version" />
+                                <input type="hidden" name="isActive" value="@((!o.IsActive).ToString().ToLowerInvariant())" />
+                                <button type="submit" id="toggle-@o.Id" class="link">@(o.IsActive ? "停用" : "啟用")</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            @if (Model.Operators.Count == 0)
+            {
+                <tr><td colspan="4" class="muted">尚無人員。</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+</div>

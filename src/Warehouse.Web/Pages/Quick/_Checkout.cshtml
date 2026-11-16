@@ -9,13 +9,14 @@
         <h2>結帳資料</h2>
         <p class="muted">目前只是清單，尚未異動庫存。選擇動作、核對各儲位數量後確認。</p>
         <p>本批倉庫：<strong id="quick-checkout-warehouse-label">（未指定）</strong></p>
+        @await Component.InvokeAsync("OperatorPicker", new { inForm = true })
         <div class="form-grid">
             <partial name="/Pages/Documents/_HeaderFields.cshtml" model="new HeaderFieldsModel(Model.Options, new DocumentHeaderForm { Note = Model.Cart.Note }, null)" />
             <label for="quick-recipient">領用人（出庫必填）</label>
             <div>
                 <input id="quick-recipient" value="@Model.ActorName" autocomplete="off" aria-label="搜尋領用帳號" />
                 <input type="hidden" id="quick-recipient-id" value="@Model.ActorId" />
-                <p class="muted">預設本人；代領時搜尋並點選帳號。操作人仍記為 @Model.ActorName。</p>
+                <p class="muted">@(Model.IsSharedAccount ? "預設為上方選擇的操作人；代領時搜尋並點選帳號。" : "預設本人；代領時搜尋並點選帳號。操作人仍記為 " + Model.ActorName + "。")</p>
             </div>
             <label for="quick-project">專案／工單（選填）</label>
             <input id="quick-project" maxlength="100" autocomplete="off" />

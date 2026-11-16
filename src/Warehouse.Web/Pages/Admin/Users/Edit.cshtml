@@ -40,8 +40,11 @@
                 <label class="inline-check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" /> @Roles.DisplayName(role)</label>
             }
         </span>
+        <span>公用帳號</span>
+        <input type="hidden" name="Input.IsSharedPresent" value="true" />
+        <label class="inline-check"><input type="checkbox" name="Input.IsShared" value="true" checked="@Model.Input.IsShared" id="Input_IsShared" /> 多人共用（送出進出倉時必須從人員名單選操作人）</label>
     </div>
-    <p class="muted">只能查詢的帳號請選「只讀使用者」。顯示名稱會寫進之後的單據與操作紀錄，舊紀錄保留當時的名稱。</p>
+    <p class="muted">只能查詢的帳號請選「只讀使用者」。顯示名稱會寫進之後的單據與操作紀錄，舊紀錄保留當時的名稱。公用帳號的紀錄會寫成「操作人（顯示名稱）」，例如「王小明（倉庫公用）」。</p>
     <div class="actions"><button type="submit" id="user-save">儲存</button></div>
 </form>
 <form method="post" asp-page-handler="Warehouses" asp-route-id="@account.Id" class="panel" id="user-warehouses-form">

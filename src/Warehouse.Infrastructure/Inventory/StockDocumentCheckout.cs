@@ -76,7 +76,9 @@ public sealed partial class StockDocumentService
         var doc = StockDocument.CreateMovement(input.RequestId, await NextDocNoAsync(input.Type, cancellationToken),
             input.Type, input.WarehouseId, effective, null, actor.Id, actor.Name, now);
         doc.MarkFromScanCart();
-        doc.SetRecipient(recipientId, recipient?.DisplayName, input.ProjectReference);
+        // 公用帳號領給自己（ADR-0030）：領用人名稱用含操作人的姓名「王小明（倉庫公用）」，不是帳號顯示名稱
+        var recipientName = recipient is { IsShared: true } && recipient.Id == actor.Id ? actor.Name : recipient?.DisplayName;
+        doc.SetRecipient(recipientId, recipientName, input.ProjectReference);
         foreach (var allocation in input.Allocations)
         {
             var line = cart.Lines.Single(l => l.Id == allocation.LineId);

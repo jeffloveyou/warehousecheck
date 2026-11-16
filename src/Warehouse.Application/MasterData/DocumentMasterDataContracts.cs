@@ -11,6 +11,8 @@ public sealed record PartnerRow(Guid Id, PartnerType Type, string Code, string N
 
 public sealed record PartnerInput(PartnerType Type, string Code, string Name);
 
+public sealed record OperatorNameRow(Guid Id, string Name, int SortOrder, bool IsActive, uint Version);
+
 /// <summary>
 /// 進出倉單的用途類型與往來對象（廠商、客戶、部門）主檔（M4-10，使用者 2026-10-22 決定）。
 /// 不提供刪除，一律停用：停用後新單據不能選，已用過的單據保留原值。代碼建立後不可改。
@@ -42,4 +44,16 @@ public interface IDocumentMasterDataService
     Task RenamePartnerAsync(Guid id, uint expectedVersion, string name, Actor actor, CancellationToken cancellationToken);
 
     Task SetPartnerActiveAsync(Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken);
+
+    /// <summary>人員名單（公用帳號的操作人，筆數少不分頁，最多 500 筆），依排序、姓名。</summary>
+    Task<IReadOnlyList<OperatorNameRow>> ListOperatorNamesAsync(bool includeInactive, CancellationToken cancellationToken);
+
+    /// <summary>取得啟用中的人員姓名；找不到或已停用回傳 null。</summary>
+    Task<string?> FindActiveOperatorNameAsync(Guid id, CancellationToken cancellationToken);
+
+    Task<Guid> CreateOperatorNameAsync(string name, int sortOrder, Actor actor, CancellationToken cancellationToken);
+
+    Task UpdateOperatorNameAsync(Guid id, uint expectedVersion, string name, int sortOrder, Actor actor, CancellationToken cancellationToken);
+
+    Task SetOperatorNameActiveAsync(Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken);
 }

@@ -128,6 +128,47 @@ public sealed class DocumentMasterDataService(WarehouseDbContext db, TimeProvide
         await SaveAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<OperatorNameRow>> ListOperatorNamesAsync(bool includeInactive, CancellationToken cancellationToken) =>
+        await db.OperatorNames.AsNoTracking()
+            .Where(o => includeInactive || o.IsActive)
+            .OrderBy(o => o.SortOrder).ThenBy(o => o.Name)
+            .Take(500) // 名單預期很小；設上限避免無限制查詢
+            .Select(o => new OperatorNameRow(o.Id, o.Name, o.SortOrder, o.IsActive, EF.Property<uint>(o, "Version")))
+            .ToListAsync(cancellationToken);
+
+    public async Task<string?> FindActiveOperatorNameAsync(Guid id, CancellationToken cancellationToken) =>
+        await db.OperatorNames.AsNoTracking()
+            .Where(o => o.Id == id && o.IsActive)
+            .Select(o => o.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<Guid> CreateOperatorNameAsync(string name, int sortOrder, Actor actor, CancellationToken cancellationToken)
+    {
+        var entry = OperatorName.Create(Guid.NewGuid(), name, sortOrder);
+        db.OperatorNames.Add(entry);
+        Audit(actor, "operator_name.create", entry.Id, null, new { entry.Name, entry.SortOrder });
+        await SaveAsync(cancellationToken, "姓名已在人員名單中。");
+        return entry.Id;
+    }
+
+    public async Task UpdateOperatorNameAsync(
+        Guid id, uint expectedVersion, string name, int sortOrder, Actor actor, CancellationToken cancellationToken)
+    {
+        var entry = await LoadAsync(db.OperatorNames, id, expectedVersion, "operator_name", "找不到人員。", cancellationToken);
+        var before = new { entry.Name, entry.SortOrder };
+        entry.Update(name, sortOrder);
+        Audit(actor, "operator_name.update", id, before, new { entry.Name, entry.SortOrder });
+        await SaveAsync(cancellationToken, "姓名已在人員名單中。");
+    }
+
+    public async Task SetOperatorNameActiveAsync(Guid id, uint expectedVersion, bool isActive, Actor actor, CancellationToken cancellationToken)
+    {
+        var entry = await LoadAsync(db.OperatorNames, id, expectedVersion, "operator_name", "找不到人員。", cancellationToken);
+        Audit(actor, isActive ? "operator_name.reactivate" : "operator_name.deactivate", id, new { entry.IsActive }, new { IsActive = isActive });
+        entry.SetActive(isActive);
+        await SaveAsync(cancellationToken);
+    }
+
     private void Audit(Actor actor, string action, Guid id, object? before, object? after) =>
         AuditLog.Add(db, actor, clock.GetUtcNow(), action, action.Split('.')[0], id.ToString(), before, after);
 
@@ -142,7 +183,7 @@ public sealed class DocumentMasterDataService(WarehouseDbContext db, TimeProvide
         return row;
     }
 
-    private async Task SaveAsync(CancellationToken cancellationToken)
+    private async Task SaveAsync(CancellationToken cancellationToken, string duplicateMessage = "代碼已存在（同一類型內代碼不可重複）。")
     {
         try
         {
@@ -154,7 +195,7 @@ public sealed class DocumentMasterDataService(WarehouseDbContext db, TimeProvide
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            throw new ConflictException("master.code_exists", "代碼已存在（同一類型內代碼不可重複）。");
+            throw new ConflictException("master.code_exists", duplicateMessage);
         }
     }
 }

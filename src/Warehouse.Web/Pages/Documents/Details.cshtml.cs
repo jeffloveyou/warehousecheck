@@ -206,40 +206,44 @@ public class DetailsModel(
             return "已刪除明細。";
         }, cancellationToken);
 
+    /// <summary>公用帳號選的操作人（人員名單 ID，由 operator-picker.js 補進表單），見 <see cref="OperatorActor"/>。</summary>
+    [BindProperty(Name = OperatorActor.FieldName)]
+    public Guid? OperatorNameId { get; set; }
+
     public Task<IActionResult> OnPostConfirmAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.ConfirmAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已確認並過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostSubmitAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.SubmitAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已送審，等待倉庫主管核准。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostApproveAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentApprove, async actor =>
         {
             await documents.ApproveAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已核准並過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostReturnAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentApprove, async actor =>
         {
             await documents.ReturnAsync(id, Version, Comment ?? string.Empty, actor, cancellationToken);
             return "已退回給建立者修改。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostCancelAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.CancelAsync(id, Version, actor, cancellationToken);
             return "已取消。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     /// <summary>快速進出轉入的草稿：直接刪除、不留單據（ADR-0026；稽核紀錄保留），回快速進出。</summary>
     public async Task<IActionResult> OnPostDeleteScanCartDraftAsync(Guid id, CancellationToken cancellationToken)
@@ -271,7 +275,7 @@ public class DetailsModel(
         {
             _redirectId = await documents.CreateReversalAsync(id, actor, cancellationToken);
             return "已建立沖銷單草稿，請檢查明細後確認過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostUploadAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
@@ -574,8 +578,9 @@ public class DetailsModel(
     public string CandidateUrl(string itemCode) => Url.Page("/Documents/Details", new { id = Doc.Id, ItemQuery = itemCode })!;
 
     /// <summary>執行動作：成功轉址（PRG）；已知錯誤重新載入並顯示訊息，保留使用者輸入。</summary>
+    /// <param name="requireOperator">進出倉狀態動作（確認、送審、核准、退回、取消、沖銷）：公用帳號必須選操作人（ADR-0030）。</param>
     private async Task<IActionResult> RunAsync(
-        Guid id, string policy, Func<Actor, Task<string>> action, CancellationToken cancellationToken)
+        Guid id, string policy, Func<Actor, Task<string>> action, CancellationToken cancellationToken, bool requireOperator = false)
     {
         if (!(await authorization.AuthorizeAsync(User, policy)).Succeeded)
         {
@@ -583,7 +588,10 @@ public class DetailsModel(
         }
         try
         {
-            var message = await action(User.ToActor());
+            var actor = requireOperator
+                ? await OperatorActor.ResolveAsync(User, OperatorNameId, master, cancellationToken)
+                : User.ToActor();
+            var message = await action(actor);
             if (SavedHeaderVersion is { } committedVersion)
             {
                 if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))

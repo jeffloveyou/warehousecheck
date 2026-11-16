@@ -91,6 +91,8 @@ public partial class AuthorizationSweepTests
         ["MasterData.CategoriesModel.OnPostToggleAsync"] = Policies.MasterDataManage,
         ["MasterData.PartnersModel.OnPostSaveAsync"] = Policies.PartnersManage,
         ["MasterData.PartnersModel.OnPostToggleAsync"] = Policies.PartnersManage,
+        ["MasterData.OperatorsModel.OnPostSaveAsync"] = Policies.PartnersManage,
+        ["MasterData.OperatorsModel.OnPostToggleAsync"] = Policies.PartnersManage,
         ["MasterData.PurposesModel.OnPostSaveAsync"] = Policies.PartnersManage,
         ["MasterData.PurposesModel.OnPostToggleAsync"] = Policies.PartnersManage,
         ["MasterData.UnitsModel.OnPostSaveAsync"] = Policies.MasterDataManage,

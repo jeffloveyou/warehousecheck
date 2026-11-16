@@ -123,7 +123,7 @@ public static class IdentitySetup
     }
 }
 
-/// <summary>登入時把顯示名稱與「需改密碼」放進 Cookie 的 claims，之後每個請求不必查資料庫。</summary>
+/// <summary>登入時把顯示名稱、「需改密碼」與「公用帳號」放進 Cookie 的 claims，之後每個請求不必查資料庫。</summary>
 public sealed class WarehouseClaimsPrincipalFactory(
     UserManager<AppUser> userManager,
     RoleManager<IdentityRole<Guid>> roleManager,
@@ -137,6 +137,10 @@ public sealed class WarehouseClaimsPrincipalFactory(
         if (user.MustChangePassword)
         {
             identity.AddClaim(new Claim(ActorClaims.MustChangePassword, "true"));
+        }
+        if (user.IsShared)
+        {
+            identity.AddClaim(new Claim(ActorClaims.Shared, "true"));
         }
         return identity;
     }

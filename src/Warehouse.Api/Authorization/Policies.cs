@@ -108,6 +108,11 @@ public static class ActorClaims
     /// <summary>值為 "true" 時必須先改密碼。</summary>
     public const string MustChangePassword = "warehouse:must_change_password";
 
+    /// <summary>值為 "true" 時是公用帳號：進出倉動作必須選操作人（ADR-0030）。</summary>
+    public const string Shared = "warehouse:shared";
+
+    public static bool IsSharedAccount(this ClaimsPrincipal user) => user.HasClaim(Shared, "true");
+
     public static Actor ToActor(this ClaimsPrincipal user)
     {
         var id = user.FindFirstValue(ClaimTypes.NameIdentifier)

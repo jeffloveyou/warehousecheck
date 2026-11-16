@@ -56,6 +56,7 @@
     <form method="post" asp-page-handler="Create" class="panel" id="document-create-form">
         <input type="hidden" name="Create.RequestId" value="@(Model.Create.RequestId ?? Guid.NewGuid())" />
         <h2>建立單據</h2>
+        @await Component.InvokeAsync("OperatorPicker", new { inForm = true })
         <div class="form-grid">
             <label for="Create_Type">類型 <span class="required-mark">*</span></label>
             <select id="Create_Type" name="Create.Type" required>

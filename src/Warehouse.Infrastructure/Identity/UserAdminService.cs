@@ -66,11 +66,14 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
         var password = PasswordGenerator.Generate();
         return await InTransactionAsync(actor, async now =>
         {
-            var user = new AppUser { UserName = userName, DisplayName = displayName, MustChangePassword = true };
+            var user = new AppUser
+            {
+                UserName = userName, DisplayName = displayName, MustChangePassword = true, IsShared = request.IsShared,
+            };
             Check(await users.CreateAsync(user, password));
             Check(await users.AddToRolesAsync(user, roles));
             AuditLog.Add(db, actor, now, "user.create", "user", user.Id.ToString(), null,
-                new { user.UserName, user.DisplayName, Roles = roles });
+                new { user.UserName, user.DisplayName, Roles = roles, user.IsShared });
             return new UserPasswordResult(user.Id, userName, password);
         }, cancellationToken);
     }
@@ -92,11 +95,14 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
                 throw new ConflictException("user.self", "不能移除自己的系統管理員角色。");
             }
             var beforeName = user.DisplayName;
-            if (beforeName == displayName && before.SequenceEqual(roles))
+            var beforeShared = user.IsShared;
+            var shared = request.IsShared ?? beforeShared;
+            if (beforeName == displayName && before.SequenceEqual(roles) && beforeShared == shared)
             {
                 return true; // 沒有變更：不換 security stamp、不寫稽核
             }
             user.DisplayName = displayName;
+            user.IsShared = shared;
             Check(await users.UpdateAsync(user));
             var removed = before.Except(roles).ToList();
             var added = roles.Except(before).ToList();
@@ -109,10 +115,10 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
                 Check(await users.AddToRolesAsync(user, added));
             }
             await EnsureActiveAdminAsync(cancellationToken);
-            // 角色變更要讓舊 Cookie 失效（Cookie 內的角色是登入當時的快照）
+            // 角色、公用帳號變更要讓舊 Cookie 失效（Cookie 內的角色與公用旗標是登入當時的快照）
             Check(await users.UpdateSecurityStampAsync(user));
             AuditLog.Add(db, actor, now, "user.update", "user", user.Id.ToString(),
-                new { DisplayName = beforeName, Roles = before }, new { user.DisplayName, Roles = roles });
+                new { DisplayName = beforeName, Roles = before, IsShared = beforeShared }, new { user.DisplayName, Roles = roles, user.IsShared });
             return true;
         }, cancellationToken);
     }
@@ -261,7 +267,7 @@ public sealed class UserAdminService(WarehouseDbContext db, UserManager<AppUser>
     private static UserSummary ToSummary(AppUser user, IReadOnlyList<string> roles, IReadOnlyList<Guid> warehouses, DateTimeOffset now) =>
         new(user.Id, user.UserName!, user.DisplayName, roles, user.IsActive,
             user.LockoutEnd is { } end && end > now, user.MustChangePassword, user.AllWarehouses, warehouses,
-            user.ConcurrencyStamp ?? string.Empty);
+            user.ConcurrencyStamp ?? string.Empty, user.IsShared);
 
     private static string ValidateDisplayName(string? displayName)
     {

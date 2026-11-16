@@ -79,7 +79,7 @@ public class IndexModel(
 
     public Task OnGetAsync(CancellationToken cancellationToken) => LoadAsync(cancellationToken);
 
-    public async Task<IActionResult> OnPostCreateAsync(CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostCreateAsync(Guid? operatorNameId, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
         {
@@ -96,7 +96,7 @@ public class IndexModel(
                 throw new DomainRuleException("請選擇倉庫。");
             }
             var header = await DocumentFormSupport.ToHeaderAsync(Header, master, cancellationToken);
-            var actor = User.ToActor();
+            var actor = await OperatorActor.ResolveAsync(User, operatorNameId, master, cancellationToken);
             var id = await documents.CreateAsync(type, warehouseId, header, actor, cancellationToken, Create.RequestId);
             // 記住這次的倉庫，下次建單預設帶入（M8-06；只是畫面預設，權限仍在建單時檢查）
             await preferences.TrySetAsync(actor.Id, Warehouse.Application.Accounts.UserPreferenceKeys.DocumentsLastWarehouse,

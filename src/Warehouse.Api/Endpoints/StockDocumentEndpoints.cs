@@ -38,7 +38,8 @@ public static class StockDocumentEndpoints
 {
     public static void MapStockDocumentEndpoints(this IEndpointRouteBuilder api)
     {
-        var docs = api.MapGroup("/stock/documents").RequireAuthorization(Policies.StockRead).AddEndpointFilter(JsonOnlyFilter.InvokeAsync);
+        var docs = api.MapGroup("/stock/documents").RequireAuthorization(Policies.StockRead)
+            .AddEndpointFilter(JsonOnlyFilter.InvokeAsync).AddEndpointFilter(SharedAccountWriteFilter.InvokeAsync);
 
         docs.MapGet("", (IStockDocumentService documents, StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId,
                 int? page, string? recipient, string? project, string? docNo, string? itemCode, string? creator,

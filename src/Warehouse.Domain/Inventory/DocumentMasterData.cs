@@ -172,3 +172,48 @@ public sealed class DocumentAttachment
 
     public bool IsActive { get; private set; }
 }
+
+/// <summary>
+/// 人員名單（公用帳號的操作人，使用者 2026-11-16 決定）：公用帳號送出進出倉動作時從這份名單選擇實際操作人。
+/// 姓名不可重複（不分大小寫、前後空白）；不刪除，只停用（停用後不能再選，已寫入的紀錄保留原姓名）。
+/// </summary>
+public sealed class OperatorName
+{
+    public const int NameMaxLength = 30;
+
+    private OperatorName()
+    {
+    }
+
+    public static OperatorName Create(Guid id, string name, int sortOrder)
+    {
+        var entry = new OperatorName
+        {
+            Id = id == Guid.Empty ? throw new DomainRuleException("必須指定 ID。") : id,
+            SortOrder = sortOrder,
+            IsActive = true,
+        };
+        entry.Update(name, sortOrder);
+        return entry;
+    }
+
+    public Guid Id { get; private set; }
+
+    public string Name { get; private set; } = string.Empty;
+
+    /// <summary>唯一索引用：去空白、轉大寫。</summary>
+    public string NormalizedName { get; private set; } = string.Empty;
+
+    public int SortOrder { get; private set; }
+
+    public bool IsActive { get; private set; }
+
+    public void Update(string name, int sortOrder)
+    {
+        Name = Rules.Required(name, NameMaxLength, "姓名");
+        NormalizedName = Name.ToUpperInvariant();
+        SortOrder = sortOrder;
+    }
+
+    public void SetActive(bool isActive) => IsActive = isActive;
+}

@@ -75,7 +75,7 @@
   function fields() {
     var values = {};
     if (checkout) checkout.querySelectorAll('input[id],select[id],textarea[id]').forEach(function (i) {
-      if (!i.closest('#quick-allocations') && i.id !== 'quick-select-all' && i.id !== 'quick-bulk-location'
+      if (!i.closest('#quick-allocations') && i.id !== 'quick-select-all' && i.id !== 'quick-bulk-location' && i.id !== 'operator-name'
         && (i.id !== 'Header_Note' || checkoutNoteEdited)) values[i.id] = i.value;
     });
     values['quick-checkout-warehouse'] = warehouseInput.value;
@@ -680,8 +680,11 @@
     $('quick-summary').textContent = cart.lines.length + ' 行' + (pending ? ' · 等待數量' : busy() ? ' · 處理中' : checkoutUnknown ? ' · 結帳結果待確認' : failures.length ? ' · 有待處理紀錄' : draftStale ? ' · 請先核對草稿' : problems ? ' · ' + problems + ' 項待補齊' : '');
     main.textContent = checkoutUnknown ? '重試確認原結帳結果' : !type ? '選作業' : problems ? '補齊 ' + problems + ' 項' :
       type === 'DraftTransfer' ? '轉移庫草稿' : type === 'DraftInbound' ? '轉進倉草稿' : type === 'DraftOutbound' ? '轉出倉草稿' :
-      checkout && checkout.dataset.approval === 'true' ? '送審（尚未入帳）' : type === 'Inbound' ? '確認入庫' : '確認出庫';
+      (checkout && checkout.dataset.approval === 'true' ? '送審（尚未入帳）' : type === 'Inbound' ? '確認入庫' : '確認出庫') + operatorSuffix();
   }
+  // 公用帳號（ADR-0030）：結帳按鈕附上操作人姓名
+  function operatorSuffix() { var n = window.WhOperator ? window.WhOperator.name() : ''; return n ? '（' + n + '）' : ''; }
+  document.addEventListener('operator-change', function () { updateAction(); });
   function prepareConvert(type, allocations) {
     var form = document.createElement('form');
     form.method = 'post'; form.action = $('quick-action-form').action + '?handler=Prepare';
@@ -724,6 +727,7 @@
       if (!checkoutRequest && (!checkout || checkout.hidden || (type !== 'Inbound' && type !== 'Outbound'))) return;
       var inspection = checkoutRequest ? null : inspectOperation();
       if (inspection && inspection.issues.length) { showIssue(inspection.issues[0]); return; }
+      if (!checkoutRequest && window.WhOperator && !window.WhOperator.id()) { showIssue({ target: window.WhOperator.element, text: '公用帳號請先選擇操作人' }); return; }
       var output = $('quick-checkout-result'), checkoutSent = false;
       requestInFlight = true; sync();
       try {
@@ -732,11 +736,13 @@
           if (type === 'Outbound') await precheck();
           var partnerId = value('Header_PartnerId'), partnerCode = value('Header_PartnerCode');
           if (partnerCode) { var matches = await json(base + '?handler=Partner&code=' + encodeURIComponent(partnerCode)); if (matches.length !== 1) throw new Error('往來對象代碼找不到或不唯一，請改用選單。'); partnerId = matches[0].id; }
-          checkoutRequest = { requestId: uuid(), expectedVersion: cart.version, type: type === 'Inbound' ? 1 : 2, warehouseId: warehouse, header: { purposeId: value('Header_PurposeId'), partnerId: partnerId, externalNo: value('Header_ExternalNo'), note: value('Header_Note') }, allocations: inspection.allocations, recipientUserId: type === 'Outbound' ? value('quick-recipient-id') : null, projectReference: value('quick-project'), expectedApprovalEnabled: checkout.dataset.approval === 'true' };
+          checkoutRequest = { requestId: uuid(), expectedVersion: cart.version, type: type === 'Inbound' ? 1 : 2, warehouseId: warehouse, header: { purposeId: value('Header_PurposeId'), partnerId: partnerId, externalNo: value('Header_ExternalNo'), note: value('Header_Note') }, allocations: inspection.allocations, recipientUserId: type === 'Outbound' ? value('quick-recipient-id') : null, projectReference: value('quick-project'), expectedApprovalEnabled: checkout.dataset.approval === 'true', operatorNameId: window.WhOperator ? window.WhOperator.id() : null };
         }
         requestInFlight = true; sync(); output.textContent = '正在確認，請勿重掃或離頁…';
         checkoutSent = true; checkoutUnknown = true; persist();
-        var result = await post(typeof checkoutRequest.expectedApprovalEnabled === 'boolean' ? 'CheckoutReviewed' : 'Checkout', checkoutRequest);
+        var handler = typeof checkoutRequest.expectedApprovalEnabled === 'boolean' ? 'CheckoutReviewed' : 'Checkout';
+        if (checkoutRequest.operatorNameId) handler += '&operatorNameId=' + encodeURIComponent(checkoutRequest.operatorNameId);
+        var result = await post(handler, checkoutRequest);
         showCompleted(result);
       } catch (e) {
         output.textContent = e.message;

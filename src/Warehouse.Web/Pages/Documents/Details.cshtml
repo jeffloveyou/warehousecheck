@@ -236,10 +236,14 @@
     </div>
 }
 
+@if (Model.CanConfirm || Model.CanSubmit || Model.CanApprove || Model.CanCancel || Model.CanReverse)
+{
+    @await Component.InvokeAsync("OperatorPicker", new { inForm = false })
+}
 <div class="doc-actions" id="document-actions">
     @if (Model.CanConfirm)
     {
-        <form method="post" asp-page-handler="Confirm">
+        <form method="post" asp-page-handler="Confirm" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-confirm">確認過帳</button>
@@ -247,7 +251,7 @@
     }
     @if (Model.CanSubmit)
     {
-        <form method="post" asp-page-handler="Submit">
+        <form method="post" asp-page-handler="Submit" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-submit">送審</button>
@@ -255,12 +259,12 @@
     }
     @if (Model.CanApprove)
     {
-        <form method="post" asp-page-handler="Approve">
+        <form method="post" asp-page-handler="Approve" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-approve">核准並過帳</button>
         </form>
-        <form method="post" asp-page-handler="Return">
+        <form method="post" asp-page-handler="Return" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="text" name="Comment" maxlength="@StockDocument.NoteMaxLength" placeholder="退回原因（必填）" aria-label="退回原因" />
             <button type="submit" class="secondary" id="document-return">退回修改</button>
@@ -277,7 +281,7 @@
     }
     @if (Model.CanCancel)
     {
-        <form method="post" asp-page-handler="Cancel">
+        <form method="post" asp-page-handler="Cancel" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <label class="inline-check"><input type="checkbox" required /> 確定取消 @d.DocNo（尚未入帳，釋放本單預留）</label>
             <button type="submit" class="danger" id="document-cancel">取消這張單</button>
@@ -285,7 +289,7 @@
     }
     @if (Model.CanReverse)
     {
-        <form method="post" asp-page-handler="Reverse">
+        <form method="post" asp-page-handler="Reverse" data-operator-required>
             <p class="muted">更正 @d.DocNo：建立方向相反的草稿，核對並過帳後才影響庫存；原單保留，不會直接刪除紀錄。</p>
             <button type="submit" class="secondary" id="document-reverse">建立沖銷草稿</button>
         </form>
