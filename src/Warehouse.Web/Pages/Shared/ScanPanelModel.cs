@@ -11,6 +11,10 @@ public sealed record ScanPanelModel(string Mode, Guid WarehouseId, string Resolv
     /// <summary>刪除明細（POST JSON，成功回傳重繪的明細表）：明細表的「刪除」不重新整理頁面，掃碼欄的輸入不受影響。</summary>
     public string? RemoveUrl { get; init; }
 
+    public string? QuantityUrl { get; init; }
+
+    public bool ScanNumericToQuantity { get; init; }
+
     public string? ItemSearchUrl { get; init; }
 
     public string? LocationsUrl { get; init; }

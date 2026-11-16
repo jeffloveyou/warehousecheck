@@ -2,6 +2,7 @@
 @model Warehouse.Web.Pages.Scan.IndexModel
 @using Warehouse.Application.Scanning
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "掃碼查料";
     ViewData["UsesPrefs"] = true; // 掃碼靜音（M8-06）
     var r = Model.Result;
@@ -27,7 +28,7 @@
 
 @* 常駐的朗讀區：結果區整塊替換後，scan-page.js 把摘要複製到這裡，報讀軟體才會唸出新結果 *@
 <p class="visually-hidden" role="status" id="scan-live">@Model.Summary</p>
-<div id="scan-result" data-scan-result data-kind="@(r?.Kind.ToString() ?? "")">
+<div id="scan-result" data-scan-result data-page-region data-kind="@(r?.Kind.ToString() ?? "")">
     <p class="visually-hidden" id="scan-summary">@Model.Summary</p>
     @if (TempData["Message"] is string message)
     {
@@ -87,7 +88,7 @@
             }
             @if (Model.CanRegister)
             {
-                <form method="post" asp-page-handler="Register" asp-route-code="@r.Value" class="panel" id="scan-register-form">
+                <form method="post" data-page-post asp-page-handler="Register" asp-route-code="@r.Value" class="panel" id="scan-register-form">
                     <h2>登錄為原廠條碼</h2>
                     <p class="muted">輸入（或掃描物料 QR）這個條碼所屬物料的正式料號。登錯會讓之後掃碼對到錯的物料，請先核對包裝與料號。</p>
                     <div class="form-grid">

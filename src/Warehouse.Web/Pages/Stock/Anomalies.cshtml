@@ -2,18 +2,20 @@
 @model Warehouse.Web.Pages.Stock.AnomaliesModel
 @using Warehouse.Application.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "庫存異常";
     var paging = Model.Paging;
     string TabClass(string tab) => Model.Tab == tab ? "chip tab-active" : "chip";
 }
 <h1>庫存異常</h1>
 <p class="muted">需要有人注意的情況：被拒絕的過帳嘗試、取消或退回的單據、久未處理的單據（草稿或待核准超過 @IStockAnomalyService.StaleDocumentDays 天）、需注意的預留（建立超過 @IStockAnomalyService.StaleReservationDays 天或 @IStockAnomalyService.ExpiringSoonDays 天內到期）。</p>
+<div id="query-results" data-page-region>
 <div class="tabs" id="anomaly-tabs" role="navigation" aria-label="異常分類">
-    <a class="@TabClass(AnomaliesModel.TabFailures)" href="/Stock/Anomalies?tab=failures">被拒嘗試</a>
-    <a class="@TabClass(AnomaliesModel.TabEvents)" href="/Stock/Anomalies?tab=events">單據事件</a>
-    <a class="@TabClass(AnomaliesModel.TabStaleDocuments)" href="/Stock/Anomalies?tab=stale-documents">久未處理單據</a>
-    <a class="@TabClass(AnomaliesModel.TabStaleReservations)" href="/Stock/Anomalies?tab=stale-reservations">需注意的預留</a>
-    <a class="@TabClass(AnomaliesModel.TabOverReserved)" href="/Stock/Anomalies?tab=over-reserved">預留大於庫存</a>
+    <a data-page-link class="@TabClass(AnomaliesModel.TabFailures)" href="/Stock/Anomalies?tab=failures">被拒嘗試</a>
+    <a data-page-link class="@TabClass(AnomaliesModel.TabEvents)" href="/Stock/Anomalies?tab=events">單據事件</a>
+    <a data-page-link class="@TabClass(AnomaliesModel.TabStaleDocuments)" href="/Stock/Anomalies?tab=stale-documents">久未處理單據</a>
+    <a data-page-link class="@TabClass(AnomaliesModel.TabStaleReservations)" href="/Stock/Anomalies?tab=stale-reservations">需注意的預留</a>
+    <a data-page-link class="@TabClass(AnomaliesModel.TabOverReserved)" href="/Stock/Anomalies?tab=over-reserved">預留大於庫存</a>
     <a class="chip" href="/Stock/Negative">負庫存</a>
 </div>
 
@@ -165,4 +167,5 @@
     {
         <a href="@Model.PageUrl(paging.Page + 1)">下一頁</a>
     }
+</div>
 </div>

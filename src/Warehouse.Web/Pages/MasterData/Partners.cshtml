@@ -2,11 +2,13 @@
 @model Warehouse.Web.Pages.MasterData.PartnersModel
 @using Warehouse.Domain.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "往來對象";
     var editing = Model.EditId is not null && Model.Result.Items.Any(p => p.Id == Model.EditId);
 }
 <h1>往來對象</h1>
 <p class="muted">進出倉單選用的廠商、客戶、部門。停用後新單據不能再選，已用過的單據保留原值；代碼與類型建立後不可修改。</p>
+<div id="master-feedback" data-page-region="query master-list" aria-live="polite">
 @if (TempData["Message"] is string message)
 {
     <div class="message info" id="page-message">@message</div>
@@ -15,6 +17,7 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
+</div>
 @* 寫入表單帶著目前的篩選條件，完成後回到同一個清單位置 *@
 @functions {
     private Microsoft.AspNetCore.Html.IHtmlContent FilterHidden() => new Microsoft.AspNetCore.Html.HtmlString(
@@ -23,7 +26,7 @@
         + $"<input type=\"hidden\" name=\"IncludeInactive\" value=\"{Model.IncludeInactive.ToString().ToLowerInvariant()}\" />"
         + $"<input type=\"hidden\" name=\"p\" value=\"{Model.PageNumber}\" />");
 }
-<form method="get" class="filters" id="partner-filter">
+<form method="get" data-page-search class="filters" id="partner-filter">
     <select name="Type" aria-label="類型">
         <option value="">全部類型</option>
         @foreach (var t in Enum.GetValues<PartnerType>())
@@ -35,9 +38,10 @@
     <label><input type="checkbox" name="IncludeInactive" value="true" checked="@Model.IncludeInactive" /> 含停用</label>
     <button type="submit">查詢</button>
 </form>
+<div id="master-editor" data-page-region="master-editor" data-page-keep-on-error>
 @if (Model.CanManage)
 {
-    <form method="post" asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="partner-form">
+    <form method="post" data-page-write="master-list master-editor" data-page-replace-url asp-page-handler="Save" asp-route-edit="@(editing ? Model.EditId : null)" class="panel" id="partner-form" data-page-context="Type q IncludeInactive p" data-page-edit="@(editing ? Model.EditId?.ToString() : "")">
         <h2>@(editing ? "修改名稱" : "新增往來對象")</h2>
         <input type="hidden" name="Version" value="@Model.Version" />
         @FilterHidden()
@@ -66,18 +70,20 @@
             <button type="submit" id="partner-save">@(editing ? "儲存" : "新增")</button>
             @if (editing)
             {
-                <a href="@Model.PageUrl(Model.Result.Page)">取消</a>
+                <a data-page-edit-link="master-list master-editor" data-page-context-cancel href="@Model.PageUrl(Model.Result.Page)">取消</a>
             }
         </div>
     </form>
 }
+</div>
+<div id="query-results" data-page-region data-page-group="master-list">
 <div class="table-wrap">
     <table id="partner-list">
         <thead><tr><th>類型</th><th>代碼</th><th>名稱</th><th>狀態</th><th></th></tr></thead>
         <tbody>
             @foreach (var p in Model.Result.Items)
             {
-                <tr>
+                <tr data-page-row="@p.Id">
                     <td>@Display.Of(p.Type)</td>
                     <td>@p.Code</td>
                     <td>@p.Name</td>
@@ -85,13 +91,13 @@
                     <td>
                         @if (Model.CanManage)
                         {
-                            <a href="@Model.EditUrl(p.Id)">改名</a>
-                            <form method="post" asp-page-handler="Toggle" class="inline">
+                            <a id="edit-@p.Id" data-page-edit-link="master-list master-editor" href="@Model.EditUrl(p.Id)">改名</a>
+                            <form method="post" data-page-write="master-list" data-page-keep-url asp-page-handler="Toggle" class="inline">
                                 <input type="hidden" name="id" value="@p.Id" />
                                 <input type="hidden" name="version" value="@p.Version" />
                                 <input type="hidden" name="isActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
                                 @FilterHidden()
-                                <button type="submit" class="link">@(p.IsActive ? "停用" : "啟用")</button>
+                                <button type="submit" id="toggle-@p.Id" class="link">@(p.IsActive ? "停用" : "啟用")</button>
                             </form>
                         }
                     </td>
@@ -114,4 +120,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

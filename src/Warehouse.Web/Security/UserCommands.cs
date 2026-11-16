@@ -13,6 +13,7 @@ namespace Warehouse.Web.Security;
 /// <code>
 /// dotnet Warehouse.Web.dll users create --user wang --display 王小明 --role Operator
 /// dotnet Warehouse.Web.dll users create --user lee --display 李主管 --role WarehouseManager,Operator
+/// dotnet Warehouse.Web.dll users create --user public01 --display 倉庫公用 --role Operator --shared
 /// dotnet Warehouse.Web.dll users reset-password --user wang
 /// dotnet Warehouse.Web.dll users disable --user wang
 /// dotnet Warehouse.Web.dll users list
@@ -42,7 +43,7 @@ public static class UserCommands
         {
             Environment.ExitCode = command switch
             {
-                "create" => await CreateAsync(admin, userName, Option(args, "--display"), Option(args, "--role")),
+                "create" => await CreateAsync(admin, userName, Option(args, "--display"), Option(args, "--role"), args.Contains("--shared")),
                 "reset-password" => await ResetPasswordAsync(admin, users, userName),
                 "disable" => await SetActiveAsync(admin, users, userName, false),
                 "enable" => await SetActiveAsync(admin, users, userName, true),
@@ -58,15 +59,15 @@ public static class UserCommands
         return true;
     }
 
-    private static async Task<int> CreateAsync(IUserAdminService admin, string? userName, string? displayName, string? role)
+    private static async Task<int> CreateAsync(IUserAdminService admin, string? userName, string? displayName, string? role, bool isShared)
     {
         if (userName is null || displayName is null || role is null)
         {
             return Help();
         }
         var roles = role.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var result = await admin.CreateAsync(new CreateUserRequest(userName, displayName, roles), CommandLineActor, CancellationToken.None);
-        Console.WriteLine($"已建立帳號 {result.UserName}（{displayName}，{string.Join(",", roles)}）。");
+        var result = await admin.CreateAsync(new CreateUserRequest(userName, displayName, roles, isShared), CommandLineActor, CancellationToken.None);
+        Console.WriteLine($"已建立{(isShared ? "公用" : "")}帳號 {result.UserName}（{displayName}，{string.Join(",", roles)}）。");
         Console.WriteLine($"初始密碼：{result.Password}");
         Console.WriteLine("密碼只顯示這一次，第一次登入時必須改密碼。");
         return 0;
@@ -102,7 +103,7 @@ public static class UserCommands
             var result = await admin.ListAsync(null, includeInactive: true, page, CancellationToken.None);
             foreach (var user in result.Items)
             {
-                Console.WriteLine($"{user.UserName}\t{user.DisplayName}\t{string.Join(",", user.Roles)}\t{(user.IsActive ? "啟用" : "停用")}");
+                Console.WriteLine($"{user.UserName}\t{user.DisplayName}\t{string.Join(",", user.Roles)}\t{(user.IsActive ? "啟用" : "停用")}{(user.IsShared ? "	公用" : "")}");
             }
             if (page >= result.TotalPages)
             {
@@ -134,7 +135,7 @@ public static class UserCommands
     {
         Console.Error.WriteLine($"""
             用法：
-              users create --user <帳號> --display <顯示名稱> --role <{string.Join("|", Roles.All)}>（多個角色用逗號分隔）
+              users create --user <帳號> --display <顯示名稱> --role <{string.Join("|", Roles.All)}>（多個角色用逗號分隔） [--shared 公用帳號]
               users reset-password --user <帳號>
               users disable --user <帳號>
               users enable --user <帳號>

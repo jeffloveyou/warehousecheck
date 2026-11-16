@@ -49,7 +49,7 @@ public sealed class InventoryPostingService(WarehouseDbContext db) : IInventoryP
         """;
 
     /// <summary>倉庫可用量（ADR-0004 公式＋ADR-0014 決策 7）：Available 結存且儲位有效 − Open 且未過期預留的剩餘量（到期日之後不計，背景工作稍後才改狀態）。</summary>
-    private const string AvailableSql = """
+    internal const string AvailableSql = """
         SELECT p.item_id, p.warehouse_id,
             COALESCE((SELECT SUM(b.quantity) FROM stock_balances b JOIN locations l ON l.id = b.location_id
                       WHERE b.item_id = p.item_id AND l.warehouse_id = p.warehouse_id

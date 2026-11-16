@@ -138,7 +138,7 @@ public partial class DocumentPagesTests
 
         async Task<HttpResponseMessage> AddAsync(WebSession who, object body, string? antiforgery)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, docUrl + "?handler=ScanAddLine") { Content = JsonContent.Create(body) };
+            using var request = new HttpRequestMessage(HttpMethod.Post, docUrl + "?handler=ScanAddLineOnce") { Content = JsonContent.Create(body) };
             if (antiforgery is not null)
             {
                 request.Headers.Add("RequestVerificationToken", antiforgery);
@@ -146,24 +146,32 @@ public partial class DocumentPagesTests
             return await who.Client.SendAsync(request, Ct);
         }
 
-        var line = new { locationCode = "A-01", itemCode, quantity = 2m, merge = true };
+        var line = new { locationCode = "A-01", itemCode, quantity = 2m, merge = true, operationId = Guid.NewGuid() };
         Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op, line, null)).StatusCode);   // 沒有 antiforgery
-        var first = await AddAsync(op, line, token);
+        var duplicateRequests = await Task.WhenAll(AddAsync(op, line, token), AddAsync(op, line, token));
+        var first = duplicateRequests[0];
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         var fragment = await first.Content.ReadAsStringAsync(Ct);
         Assert.Contains("data-scan-lines", fragment);
         Assert.Contains(itemCode, fragment);
         Assert.True(first.Headers.Contains("X-Line-Id"));
         // 逐件累加：同一行累加，不新增第二行；關閉累加時重複加入被拒
-        var second = await AddAsync(op, line with { quantity = 3m }, token);
+        var replay = duplicateRequests[1];
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(first.Headers.GetValues("X-Line-Id").Single(), replay.Headers.GetValues("X-Line-Id").Single());
+        Assert.Equal("2", replay.Headers.GetValues("X-Line-Quantity").Single());
+        var reused = await AddAsync(op, line with { quantity = 3m }, token);
+        Assert.Equal(HttpStatusCode.BadRequest, reused.StatusCode);
+        Assert.Contains("識別碼已用於", (await reused.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("message").GetString());
+        var second = await AddAsync(op, line with { quantity = 3m, operationId = Guid.NewGuid() }, token);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         var merged = await second.Content.ReadAsStringAsync(Ct);
         Assert.Contains("明細（1 行）", merged);
-        Assert.Contains(">5<", merged);
+        Assert.Contains("data-saved-quantity=\"5\"", merged);
         Assert.True(second.Headers.TryGetValues("X-Line-Merged", out var mergedFlag) && mergedFlag.Single() == "1");
         Assert.Equal("5", second.Headers.GetValues("X-Line-Quantity").Single());
         Assert.False(second.Headers.Contains("X-Line-Ignored"));
-        var duplicate = await AddAsync(op, line with { merge = false }, token);
+        var duplicate = await AddAsync(op, line with { merge = false, operationId = Guid.NewGuid() }, token);
         Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
         Assert.Contains("相同儲位", (await duplicate.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("message").GetString());
 
@@ -185,13 +193,35 @@ public partial class DocumentPagesTests
         }
         Assert.Contains("data-remove-url=", await op.GetStringAsync(docUrl));
         var lineId = second.Headers.GetValues("X-Line-Id").Single();
+        async Task<HttpResponseMessage> ChangeQuantityAsync(WebSession who, object body, string? antiforgery)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, docUrl + "?handler=ScanUpdateQuantity") { Content = JsonContent.Create(body) };
+            if (antiforgery is not null) request.Headers.Add("RequestVerificationToken", antiforgery);
+            return await who.Client.SendAsync(request, Ct);
+        }
+
+        var change = new { lineId, originalQuantity = "5", quantity = "7", operationId = Guid.NewGuid() };
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangeQuantityAsync(op, change, null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await ChangeQuantityAsync(viewer, change, viewerToken)).StatusCode);
+        var competing = change with { quantity = "8", operationId = Guid.NewGuid() };
+        var edits = await Task.WhenAll(ChangeQuantityAsync(op, change, token), ChangeQuantityAsync(op, competing, token));
+        Assert.Contains(edits, result => result.StatusCode == HttpStatusCode.NoContent);
+        Assert.Contains(edits, result => result.StatusCode == HttpStatusCode.Conflict);
+        var winner = edits[0].StatusCode == HttpStatusCode.NoContent ? change : competing;
+        Assert.Equal(HttpStatusCode.NoContent, (await ChangeQuantityAsync(op, winner, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await ChangeQuantityAsync(op, winner with { quantity = "9" }, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangeQuantityAsync(op, winner with
+        {
+            originalQuantity = winner.quantity, quantity = "0", operationId = Guid.NewGuid(),
+        }, token)).StatusCode);
+        Assert.Contains($"data-saved-quantity=\"{winner.quantity}\"", await op.GetStringAsync(docUrl));
         Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, null, lineId)).StatusCode);   // 沒有 antiforgery
         Assert.Equal(HttpStatusCode.Forbidden, (await RemoveAsync(viewer, viewerToken, lineId)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await RemoveAsync(op, token)).StatusCode);   // 沒有勾選
         var removed = await RemoveAsync(op, token, lineId);
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
         Assert.Contains("明細（0 行）", await removed.Content.ReadAsStringAsync(Ct));
-        Assert.Equal(HttpStatusCode.OK, (await AddAsync(op, line with { quantity = 5m }, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await AddAsync(op, line with { quantity = 5m, operationId = Guid.NewGuid() }, token)).StatusCode);
 
         // 過帳後不能再加
         var page = await op.GetStringAsync(docUrl);
@@ -199,7 +229,7 @@ public partial class DocumentPagesTests
         {
             ["Version"] = VersionPattern().Match(page).Groups[1].Value, ["IdempotencyKey"] = KeyPattern().Match(page).Groups[1].Value,
         })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op, line, token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await AddAsync(op, line with { operationId = Guid.NewGuid() }, token)).StatusCode);
         Assert.Contains(">5<", await op.GetStringAsync(docUrl));
     }
 

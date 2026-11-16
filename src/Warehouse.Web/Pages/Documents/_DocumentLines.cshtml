@@ -1,4 +1,5 @@
 @model Warehouse.Web.Pages.Documents.DetailsModel
+@using Warehouse.Domain.Items
 @using Warehouse.Domain.Inventory
 @*
     明細表（M5-03 從 Details.cshtml 拆出）：整頁顯示與掃碼面板「加入明細」後的重繪共用同一份。
@@ -8,11 +9,11 @@
     var isTransfer = d.DocType == StockDocumentType.Transfer;
 }
 <div id="document-lines-section" data-scan-lines data-version="@Model.Version">
-<h2>明細（@d.Lines.Count 行）</h2>
+<h2 tabindex="-1">明細（@d.Lines.Count 行）</h2>
 @if (Model.CanEdit && d.Lines.Count > 0)
 {
     @* 勾選多行一次刪除（M8-03）：勾選框用 form 屬性掛到這個表單，每行原本的「刪除」表單不受影響 *@
-    <form method="post" asp-page-handler="RemoveLines" id="lines-bulk-form" class="actions lines-bulk">
+    <form method="post" asp-page-handler="RemoveLines" id="lines-bulk-form" class="actions lines-bulk" data-remove-lines>
         <label><input type="checkbox" id="lines-select-all" /> 全選</label>
         <button type="submit" class="secondary" id="lines-remove-selected">刪除勾選的明細</button>
         <span class="muted" id="lines-selected-count"></span>
@@ -37,7 +38,7 @@
         <tbody>
             @foreach (var l in d.Lines)
             {
-                <tr>
+                <tr data-line-id="@l.Id">
                     @if (Model.CanEdit)
                     {
                         <td><input type="checkbox" name="lineIds" value="@l.Id" form="lines-bulk-form" class="line-select" aria-label="勾選第 @l.LineNo 行" /></td>
@@ -59,12 +60,26 @@
                     <td>@l.LotNo</td>
                     <td>@l.SerialNo</td>
                     <td>@(l.ExpiryDate?.ToString("yyyy-MM-dd"))</td>
-                    <td class="num">@Display.Qty(l.SignedQuantity)</td>
+                    @if (Model.CanEdit && l.TrackingMode != TrackingMode.Serial && l.SerialNo is null && !l.IsDecrease)
+                    {
+                        <td class="num">
+                            <input type="text" inputmode="decimal" maxlength="24" autocomplete="off" size="8"
+                                   data-line-quantity="@l.Id" data-saved-quantity="@l.Quantity.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)"
+                                   aria-label="第 @l.LineNo 行數量" value="@Display.Qty(l.Quantity)" readonly />
+                            <span data-line-quantity-status aria-live="polite"></span>
+                            <button type="button" class="secondary" data-line-quantity-retry hidden>重試</button>
+                            <button type="button" class="secondary" data-line-quantity-cancel hidden>取消修改</button>
+                        </td>
+                    }
+                    else
+                    {
+                        <td class="num">@Display.Qty(l.SignedQuantity)</td>
+                    }
                     <td>@l.UnitCode</td>
                     <td>
                         @if (Model.CanEdit)
                         {
-                            <form method="post" asp-page-handler="RemoveLine" class="inline">
+                            <form method="post" asp-page-handler="RemoveLine" class="inline" data-remove-lines>
                                 <input type="hidden" name="lineId" value="@l.Id" />
                                 <button type="submit" class="link">刪除</button>
                             </form>

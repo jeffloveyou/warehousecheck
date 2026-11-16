@@ -67,6 +67,9 @@ public interface IImportService
     /// <summary>檢視批次（建立者或系統管理員）；問題清單最多回傳前 <paramref name="maxIssues"/> 筆。</summary>
     Task<ImportBatchView?> GetAsync(Guid id, Actor viewer, bool viewerIsAdmin, int maxIssues, CancellationToken cancellationToken);
 
+    /// <summary>串流讀取完整錯誤與警告；只允許建立者或系統管理員，不讀原始資料列。</summary>
+    IAsyncEnumerable<ImportIssue> ReadIssuesAsync(Guid id, Actor viewer, bool viewerIsAdmin, CancellationToken cancellationToken);
+
     /// <summary>確認匯入（建立者本人）。重送同一批次不會重複匯入；確認時又出現錯誤則整批不匯入並更新問題清單。</summary>
     Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken);
 

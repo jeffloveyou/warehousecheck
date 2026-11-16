@@ -61,6 +61,8 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
 
     public DbSet<BusinessPartner> BusinessPartners => Set<BusinessPartner>();
 
+    public DbSet<OperatorName> OperatorNames => Set<OperatorName>();
+
     public DbSet<DocumentAttachment> DocumentAttachments => Set<DocumentAttachment>();
 
     public DbSet<ItemLocation> ItemLocations => Set<ItemLocation>();
@@ -108,6 +110,7 @@ public class WarehouseDbContext(DbContextOptions<WarehouseDbContext> options)
             b.Property(u => u.DisplayName).HasMaxLength(AppUser.DisplayNameMaxLength);
             b.Property(u => u.IsActive).HasDefaultValue(true).ValueGeneratedNever();
             b.Property(u => u.AllWarehouses).HasDefaultValue(true).ValueGeneratedNever();
+            b.Property(u => u.IsShared).HasDefaultValue(false);
             // Identity 預設索引名稱是 PascalCase（UserNameIndex），改成與其他表一致的 snake_case
             b.HasIndex(u => u.NormalizedUserName).HasDatabaseName("ix_users_normalized_user_name");
             b.HasIndex(u => u.NormalizedEmail).HasDatabaseName("ix_users_normalized_email");

@@ -1,14 +1,92 @@
 @page
 @model IndexModel
 @{
-    ViewData["Title"] = "系統狀態";
+    ViewData["Title"] = "作業首頁";
 }
-<h1>倉庫管理系統 – 系統狀態</h1>
-<dl class="status">
-    <dt>系統版本</dt><dd id="version">@Model.Info.Version</dd>
-    <dt>資料庫連線</dt>
-    <dd id="dbConnected" class="@(Model.Info.DatabaseConnected ? "ok" : "bad")">@(Model.Info.DatabaseConnected ? "已連線" : "無法連線")</dd>
-    <dt>伺服器時間 (UTC)</dt><dd id="serverTime">@Model.Info.ServerTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")</dd>
-</dl>
-@* 重新整理＝重新 GET 本頁；不輪詢，使用者按了才查詢 *@
-<form method="get"><button id="refresh" type="submit">重新整理</button></form>
+<link rel="stylesheet" href="~/css/usability.css" asp-append-version="true" />
+<h1>倉庫管理系統</h1>
+@if (User.Identity?.IsAuthenticated == true)
+{
+    <p><a href="/Scan">掃碼查料</a>　<a href="/Search">搜尋物料</a>　<a href="/Stock">查庫存</a></p>
+    @if (Model.CanWork)
+    {
+        <p><a href="/Quick" id="home-quick">開始／繼續快速進出</a>　<a href="/Documents">查詢單據與列印</a></p>
+    }
+    <div class="work-grid">
+        @if (Model.Carts is { } carts)
+        {
+            <section class="work-card" id="home-carts"><h2>繼續我的購物車（@carts.TotalCount）</h2>
+                <ul class="work-list">
+                    @foreach (var cart in carts.Items.Take(5))
+                    {
+                        <li><a href="/Quick/Cart/@cart.Id">@(cart.Note ?? "未填備註") · @cart.LineCount 行 · @(cart.WarehouseCode ?? "尚未指定倉庫")</a><small>@Display.Time(cart.UpdatedAt)</small></li>
+                    }
+                </ul>
+                @if (carts.TotalCount == 0) { <p>目前沒有未完成的購物車。</p> }
+                <a href="/Quick">查看全部／開始新作業</a>
+            </section>
+        }
+        @if (Model.Drafts is { } drafts)
+        {
+            <section class="work-card" id="home-drafts"><h2>我的草稿／退回單（@drafts.TotalCount）</h2>
+                <ul class="work-list">
+                    @foreach (var doc in drafts.Items.Take(5)) { <li><a href="/Documents/Details/@doc.Id">@doc.DocNo · @Display.Of(doc.DocType) · @doc.WarehouseCode</a></li> }
+                </ul>
+                @if (drafts.TotalCount == 0) { <p>目前沒有待完成草稿。</p> }
+                <a href="/Documents?Mine=true&amp;Status=Draft">查看我的草稿與退回原因</a>
+            </section>
+        }
+        @if (Model.Pending is { } pending)
+        {
+            <section class="work-card" id="home-approvals"><h2>可作業倉庫待核准（@pending.TotalCount）</h2>
+                <ul class="work-list">
+                    @foreach (var doc in pending.Items.Take(5)) { <li><a href="/Documents/Details/@doc.Id">@doc.DocNo · @doc.WarehouseCode · @doc.CreatedByName</a></li> }
+                </ul>
+                @if (pending.TotalCount == 0) { <p>目前沒有待核准單據。</p> }
+                <p class="muted">僅列有作業權限的倉庫；是否可自核仍依單據規則判斷。</p>
+            </section>
+        }
+        @if (Model.Returned is { } returned)
+        {
+            <section class="work-card" id="home-returned"><h2>我的退回待修正（@returned.TotalCount）</h2>
+                <ul class="work-list">
+                    @foreach (var doc in returned.Items.Take(5)) { <li><a href="/Documents/Details/@doc.Id">@doc.DocNo · @doc.WarehouseCode</a></li> }
+                </ul>
+                @if (returned.TotalCount == 0) { <p>目前沒有退回單據。</p> }
+                <a href="/Documents?Mine=true&amp;ReturnedOnly=true">查看退回原因並修正</a>
+            </section>
+        }
+        @if (Model.PendingItems is { } pendingItems)
+        {
+            <section class="work-card" id="home-items"><h2>物料待核准（@pendingItems.TotalCount）</h2>
+                <ul class="work-list">
+                    @foreach (var item in pendingItems.Items) { <li><a href="/Items/Details/@item.Id">@item.RequestNo · @item.Name</a></li> }
+                </ul>
+                <a href="/Items?Status=PendingApproval">查看待核准物料</a>
+            </section>
+        }
+        @if (Model.Posted is { } posted)
+        {
+            <section class="work-card" id="home-recent"><h2>我最近完成的單據</h2>
+                <ul class="work-list">
+                    @foreach (var doc in posted.Items.Take(5)) { <li><a href="/Documents/Details/@doc.Id">@doc.DocNo · @Display.Of(doc.DocType) · @doc.WarehouseCode</a><small>@Display.Time(doc.PostedAt)</small></li> }
+                </ul>
+                @if (posted.TotalCount == 0) { <p>目前沒有已入帳單據。</p> }
+                <a href="/Documents?Mine=true&amp;Status=Posted">查看我的完成紀錄</a>
+            </section>
+        }
+    </div>
+}
+else
+{
+    <p><a href="/Account/Login">登入後開始倉庫作業</a></p>
+}
+<details open="@(!Model.Info.DatabaseConnected)">
+    <summary>系統連線與版本</summary>
+    <dl class="status">
+        <dt>系統版本</dt><dd id="version">@Model.Info.Version</dd>
+        <dt>資料庫連線</dt><dd id="dbConnected" class="@(Model.Info.DatabaseConnected ? "ok" : "bad")">@(Model.Info.DatabaseConnected ? "已連線" : "無法連線")</dd>
+        <dt>伺服器時間 (UTC)</dt><dd id="serverTime">@Model.Info.ServerTimeUtc.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+    </dl>
+</details>
+<form method="get"><button id="refresh" type="submit">重新整理首頁</button></form>

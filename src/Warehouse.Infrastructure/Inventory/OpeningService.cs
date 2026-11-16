@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Warehouse.Application.Abstractions;
@@ -104,8 +105,12 @@ public sealed class OpeningService(
         return doc.Id;
     }
 
-    public async Task<(Guid LineId, bool Merged)> AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken)
+    public async Task<(Guid LineId, bool Merged)> AddLineAsync(Guid documentId, OpeningLineInput input, Actor actor, CancellationToken cancellationToken, Guid? operationId = null)
     {
+        if (operationId == Guid.Empty) throw new DomainRuleException("缺少加入明細的請求識別碼。");
+        const string command = "opening.line_write";
+        var key = operationId is { } op ? $"{command}:{documentId:N}:{op:N}" : null;
+        var hash = key is null ? null : DocumentSupport.Hash(JsonSerializer.Serialize(new { actor.Id, Input = input }));
         (Guid LineId, bool Merged) result = default;
         await MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
@@ -126,6 +131,7 @@ public sealed class OpeningService(
                 }
                 doc.AddEmptyLocation(lineId, location.Id);
                 result = (lineId, false);
+                if (key is not null) db.ProcessedCommands.Add(ProcessedCommand.Create(key, command, hash!, $"line:{lineId:N}", now));
                 return ("opening.line_add", new { Location = location.Code, Empty = true });
             }
 
@@ -147,14 +153,29 @@ public sealed class OpeningService(
             var line = doc.AddLine(lineId, item.Id, item.TrackingMode, item.DecimalPlaces, location.Id,
                 input.LotNo, input.SerialNo, input.ExpiryDate, input.Quantity, input.MergeIfSame);
             result = (line.Id, line.Id != lineId);
+            if (key is not null) db.ProcessedCommands.Add(ProcessedCommand.Create(key, command, hash!, $"line:{line.Id:N}", now));
             // 逐件累加併入既有行時稽核記為 line_merge，並記合併後數量（與進出倉單相同）
             return (line.Id != lineId ? "opening.line_merge" : "opening.line_add", new
             {
                 LineId = line.Id, LineQuantity = line.Quantity, Location = location.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
                 input.ExpiryDate, LineExpiryDate = line.ExpiryDate, // 累加時效期沿用該行（2026-11-02）
             });
+        }, key is null ? null : async () =>
+        {
+            if (!await DocumentSupport.AlreadyProcessedAsync(db, key, command, hash!, cancellationToken)) return false;
+            var prior = await db.ProcessedCommands.AsNoTracking().SingleAsync(c => c.Key == key, cancellationToken);
+            result = (Guid.ParseExact(prior.ResultRef[5..], "N"), false);
+            return true;
         });
         return result;
+    }
+
+    public Task UpdateLineQuantityAsync(Guid documentId, LineQuantityInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        var (key, hash) = DocumentSupport.LineQuantityRequest(documentId, input, actor);
+        return MutateAsync(documentId, null, actor, editorOnly: true, cancellationToken,
+            (doc, now) => DocumentSupport.UpdateLineQuantityAsync(db, doc, input, actor, key, hash, now, cancellationToken),
+            () => DocumentSupport.AlreadyProcessedAsync(db, key, DocumentSupport.LineQuantityCommand, hash, cancellationToken));
     }
 
     public Task RemoveLineAsync(Guid documentId, Guid lineId, Actor actor, CancellationToken cancellationToken) =>
@@ -347,7 +368,7 @@ public sealed class OpeningService(
     /// <summary>修改單據的共用流程（鎖單據 → 載入 → 版本 → 權限 → 動作 → 稽核 → 儲存）。</summary>
     private async Task MutateAsync(
         Guid documentId, uint? expectedVersion, Actor actor, bool editorOnly, CancellationToken cancellationToken,
-        Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action)
+        Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action, Func<Task<bool>>? replay = null)
     {
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         await LockDocumentAsync(documentId, cancellationToken);
@@ -357,6 +378,7 @@ public sealed class OpeningService(
             RequireEditor(doc, actor);
         }
         var now = clock.GetUtcNow();
+        if (replay is not null && await replay()) return;
         var (name, after) = await action(doc, now);
         AuditLog.Add(db, actor, now, name, "stock_document", doc.Id.ToString(), null, after);
         await SaveAsync(cancellationToken);

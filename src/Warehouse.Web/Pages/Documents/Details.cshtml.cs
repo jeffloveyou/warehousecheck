@@ -37,6 +37,8 @@ public class DetailsModel(
 
     private Guid? _redirectId;
     private bool _keepHeaderInput;
+    public uint? SavedHeaderVersion { get; private set; }
+    public bool ReviewHeaderVersion { get; private set; }
 
     public DocumentDetails Doc { get; private set; } = null!;
 
@@ -104,6 +106,7 @@ public class DetailsModel(
 
     public sealed class LineForm
     {
+        public Guid? OperationId { get; set; }
         public string? LocationCode { get; set; }
 
         public string? ItemCode { get; set; }
@@ -140,13 +143,25 @@ public class DetailsModel(
         {
             _keepHeaderInput = true;
             var header = await DocumentFormSupport.ToHeaderAsync(Header, master, cancellationToken);
-            await documents.UpdateHeaderAsync(id, Version, header, actor, cancellationToken);
+            var committedVersion = await documents.UpdateHeaderAsync(id, Version, header, actor, cancellationToken);
+            if (Request.Headers["X-Warehouse-Page-Update"] == "1")
+            {
+                SavedHeaderVersion = committedVersion;
+            }
             return "已儲存表頭。";
         }, cancellationToken);
 
     public Task<IActionResult> OnPostAddLineAsync(Guid id, CancellationToken cancellationToken) =>
+        AddLineFormAsync(id, requireOperationId: false, cancellationToken);
+
+    public Task<IActionResult> OnPostAddLineOnceAsync(Guid id, CancellationToken cancellationToken) =>
+        AddLineFormAsync(id, requireOperationId: true, cancellationToken);
+
+    private Task<IActionResult> AddLineFormAsync(Guid id, bool requireOperationId, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
+            if (requireOperationId && Line.OperationId.GetValueOrDefault() == Guid.Empty)
+                throw new DomainRuleException("缺少加入明細的請求識別碼，請重新整理後再試。");
             var doc = await documents.GetAsync(id, cancellationToken)
                 ?? throw new NotFoundException("document.not_found", "找不到單據。");
             Guid? reservationId = null;
@@ -165,7 +180,7 @@ public class DetailsModel(
                 isTransfer ? Line.TargetLocationCode : null,
                 reservationId,
                 MergeIfSame: true); // 相同的行累加數量（使用者 2026-11-02 決定，與掃碼面板一致）
-            var lineId = await documents.AddLineAsync(id, input, actor, cancellationToken);
+            var lineId = await documents.AddLineAsync(id, input, actor, cancellationToken, Line.OperationId);
             if (!doc.Lines.Any(l => l.Id == lineId)
                 || (await documents.GetAsync(id, cancellationToken))?.Lines.FirstOrDefault(l => l.Id == lineId) is not { } line)
             {
@@ -191,40 +206,44 @@ public class DetailsModel(
             return "已刪除明細。";
         }, cancellationToken);
 
+    /// <summary>公用帳號選的操作人（人員名單 ID，由 operator-picker.js 補進表單），見 <see cref="OperatorActor"/>。</summary>
+    [BindProperty(Name = OperatorActor.FieldName)]
+    public Guid? OperatorNameId { get; set; }
+
     public Task<IActionResult> OnPostConfirmAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.ConfirmAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已確認並過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostSubmitAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.SubmitAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已送審，等待倉庫主管核准。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostApproveAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentApprove, async actor =>
         {
             await documents.ApproveAsync(id, Version, IdempotencyKey ?? string.Empty, actor, cancellationToken);
             return "已核准並過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostReturnAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentApprove, async actor =>
         {
             await documents.ReturnAsync(id, Version, Comment ?? string.Empty, actor, cancellationToken);
             return "已退回給建立者修改。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostCancelAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
         {
             await documents.CancelAsync(id, Version, actor, cancellationToken);
             return "已取消。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     /// <summary>快速進出轉入的草稿：直接刪除、不留單據（ADR-0026；稽核紀錄保留），回快速進出。</summary>
     public async Task<IActionResult> OnPostDeleteScanCartDraftAsync(Guid id, CancellationToken cancellationToken)
@@ -256,7 +275,7 @@ public class DetailsModel(
         {
             _redirectId = await documents.CreateReversalAsync(id, actor, cancellationToken);
             return "已建立沖銷單草稿，請檢查明細後確認過帳。";
-        }, cancellationToken);
+        }, cancellationToken, requireOperator: true);
 
     public Task<IActionResult> OnPostUploadAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.DocumentEdit, async actor =>
@@ -290,8 +309,9 @@ public class DetailsModel(
         },
         Doc.WarehouseId,
         Url.Page("/Documents/Details", "ScanResolve", new { id = Doc.Id })!,
-        Url.Page("/Documents/Details", "ScanAddLine", new { id = Doc.Id })!)
+        Url.Page("/Documents/Details", "ScanAddLineOnce", new { id = Doc.Id })!)
     {
+        QuantityUrl = Url.Page("/Documents/Details", "ScanUpdateQuantity", new { id = Doc.Id }),
         RemoveUrl = Url.Page("/Documents/Details", "ScanRemoveLines", new { id = Doc.Id }),
         ItemSearchUrl = Url.Page("/Documents/Details", "ItemSearch", new { id = Doc.Id }),
         LocationsUrl = Url.Page("/Documents/Details", "Locations", new { id = Doc.Id }),
@@ -299,6 +319,7 @@ public class DetailsModel(
         WarehouseCode = Doc.WarehouseCode,
         TargetWarehouses = TargetWarehouses,
         LotSerialEnabled = Settings.LineLotSerialEnabled,
+        ScanNumericToQuantity = Settings.LineScanNumericToQuantity,
         ExpiryEnabled = Settings.LineExpiryEnabled,
         ReservationEnabled = Settings.LineReservationEnabled,
     };
@@ -398,12 +419,20 @@ public class DetailsModel(
     /// 掃碼面板加入明細（POST JSON，antiforgery 由 RequestVerificationToken 標頭驗證）。
     /// 成功回傳重繪的明細表（HTML）並在標頭帶新的單據版本；規則錯誤回 400 JSON。網路錯誤時畫面不自動重送（避免累加兩次）。
     /// </summary>
-    public async Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest request, CancellationToken cancellationToken)
+    public Task<IActionResult> OnPostScanAddLineAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, requireOperationId: false, cancellationToken);
+
+    public Task<IActionResult> OnPostScanAddLineOnceAsync(Guid id, [FromBody] ScanLineRequest? request, CancellationToken cancellationToken) =>
+        ScanAddLineAsync(id, request, requireOperationId: true, cancellationToken);
+
+    private async Task<IActionResult> ScanAddLineAsync(Guid id, ScanLineRequest? request, bool requireOperationId, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
         {
             return StatusCode(StatusCodes.Status403Forbidden);
         }
+        if (!ModelState.IsValid || request is null || (requireOperationId && request.OperationId.GetValueOrDefault() == Guid.Empty))
+            return BadRequest(new { message = "加入明細資料或請求識別碼不正確，請重新整理後再試。" });
         Guid lineId;
         DocumentDetails doc;
         try
@@ -418,7 +447,7 @@ public class DetailsModel(
                 isTransfer ? request.TargetWarehouseCode : null,
                 isTransfer ? request.TargetLocationCode : null,
                 doc.DocType == StockDocumentType.Outbound ? request.ReservationId : null,
-                request.Merge), User.ToActor(), cancellationToken);
+                request.Merge), User.ToActor(), cancellationToken, request.OperationId);
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
@@ -487,6 +516,32 @@ public class DetailsModel(
         return Partial("_DocumentLines", this);
     }
 
+    /// <summary>明細數量失焦儲存（JSON）。</summary>
+    public async Task<IActionResult> OnPostScanUpdateQuantityAsync(Guid id, [FromBody] LineQuantityInput? request, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+        if (request is null || !ModelState.IsValid)
+        {
+            return BadRequest(new { message = "明細數量資料不正確。" });
+        }
+        try
+        {
+            await documents.UpdateLineQuantityAsync(id, request, User.ToActor(), cancellationToken);
+            return new NoContentResult();
+        }
+        catch (ConflictException ex)
+        {
+            return new JsonResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status409Conflict };
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     /// <summary>明細表送出的刪除（JSON）。</summary>
     public sealed class ScanRemoveRequest
     {
@@ -496,6 +551,7 @@ public class DetailsModel(
     /// <summary>掃碼面板送出的明細（JSON）。</summary>
     public sealed class ScanLineRequest
     {
+        public Guid? OperationId { get; set; }
         public string? LocationCode { get; set; }
 
         public string? ItemCode { get; set; }
@@ -522,8 +578,9 @@ public class DetailsModel(
     public string CandidateUrl(string itemCode) => Url.Page("/Documents/Details", new { id = Doc.Id, ItemQuery = itemCode })!;
 
     /// <summary>執行動作：成功轉址（PRG）；已知錯誤重新載入並顯示訊息，保留使用者輸入。</summary>
+    /// <param name="requireOperator">進出倉狀態動作（確認、送審、核准、退回、取消、沖銷）：公用帳號必須選操作人（ADR-0030）。</param>
     private async Task<IActionResult> RunAsync(
-        Guid id, string policy, Func<Actor, Task<string>> action, CancellationToken cancellationToken)
+        Guid id, string policy, Func<Actor, Task<string>> action, CancellationToken cancellationToken, bool requireOperator = false)
     {
         if (!(await authorization.AuthorizeAsync(User, policy)).Succeeded)
         {
@@ -531,12 +588,38 @@ public class DetailsModel(
         }
         try
         {
-            TempData["Message"] = await action(User.ToActor());
+            var actor = requireOperator
+                ? await OperatorActor.ResolveAsync(User, OperatorNameId, master, cancellationToken)
+                : User.ToActor();
+            var message = await action(actor);
+            if (SavedHeaderVersion is { } committedVersion)
+            {
+                if (!await LoadAsync(id, fillHeaderFromDoc: true, cancellationToken))
+                {
+                    return NotFound();
+                }
+                ModelState.Clear();
+                if (Version != committedVersion || !CanEdit)
+                {
+                    SavedHeaderVersion = null;
+                    ReviewHeaderVersion = CanEdit;
+                    Error = "表頭已儲存，但讀取時單據已變更。請核對目前表頭與單據狀態。";
+                }
+                else
+                {
+                    TempData["Message"] = message;
+                }
+                return Page();
+            }
+            TempData["Message"] = message;
             return RedirectToPage(new { id = _redirectId ?? id });
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)
         {
-            Error = ex.Message;
+            SavedHeaderVersion = null;
+            ReviewHeaderVersion = _keepHeaderInput && Request.Headers["X-Warehouse-Page-Update"] == "1"
+                && ex is ConcurrencyConflictException;
+            Error = ReviewHeaderVersion ? "單據已被他人修改。請比對目前表頭與你的輸入。" : ex.Message;
         }
         if (!await LoadAsync(id, fillHeaderFromDoc: !_keepHeaderInput, cancellationToken))
         {

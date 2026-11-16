@@ -2,16 +2,18 @@
 @model Warehouse.Web.Pages.Search.IndexModel
 @using Warehouse.Application.Search
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "搜尋";
 }
 <h1>搜尋物料</h1>
-<form method="get" class="filters" id="search-form">
+<form method="get" data-page-query class="filters" id="search-form">
     <input type="text" name="Q" value="@Model.Q" maxlength="@ItemSearch.MaxTextLength" placeholder="料號、品名、型號、俗稱、用途…" aria-label="搜尋文字" autofocus data-camera-field="item-search" />
     <label><input type="checkbox" name="IncludeInactive" value="true" checked="@Model.IncludeInactive" /> 包含停用</label>
     <button type="submit" id="search-submit">搜尋</button>
 </form>
 <p class="muted">可用空白分隔多個詞（最多 @ItemSearch.MaxTerms 個），每個詞都要符合。結果依「料號 → 專屬別名 → 型號／品名 → 共用關鍵字 → 部分符合」排序；請確認料號與規格再使用。</p>
 
+<div id="query-results" data-page-region>
 @if (Model.Result is { } result)
 {
     @if (Model.IgnoredTerms.Count > 0)
@@ -66,6 +68,7 @@
         </div>
     }
 }
+</div>
 @section Scripts {
     @* 搜尋欄的相機按鈕（docs/04 §6.2）：物料碼換成正式料號再搜尋；不是物料碼只填原文 *@
     <script src="~/js/scan-input.js" asp-append-version="true"></script>

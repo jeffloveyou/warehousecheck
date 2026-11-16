@@ -12,7 +12,7 @@
 //  - 逐件累加：每掃一次物料就加入（相同的草稿行累加包裝數量）。
 //  - 序號物料一律每個序號一行、數量 1，欄位齊了自動加入。
 // 加入明細只是草稿，不影響庫存；過帳仍要按頁面上的「確認過帳」。
-// 網路錯誤不自動重送（避免累加兩次），改為重新讀取明細表讓人核對。
+// 新版單據與期初掃碼以原識別碼及原內容重試。
 (function () {
   'use strict';
 
@@ -25,6 +25,8 @@
   var warehouseCode = panel.getAttribute('data-warehouse-code');
   var resolveUrl = panel.getAttribute('data-resolve-url');
   var addUrl = panel.getAttribute('data-add-url');
+  var quantityUrl = panel.getAttribute('data-quantity-url');
+  var numericToQuantity = panel.getAttribute('data-scan-numeric-to-quantity') === 'true';
   var itemSearchUrl = panel.getAttribute('data-item-search-url');
   var locationsUrl = panel.getAttribute('data-locations-url');
   var lotsUrl = panel.getAttribute('data-lots-url');
@@ -44,8 +46,43 @@
   var pending = 0;          // 逐件累加：已掃但還沒加入的數量
   var lastLot = null;       // 同一物料連續掃時沿用批號 { itemId, lot }
   var busy = false;
+  var manualQuantity = null; // 操作員輸入的數量，第一次辨識物料後綁定該料號
+  var requireManualAdd = false;
+  var lastEntrySaved = false;
+  var prefilledLot = false;
+  var prefilledExpiry = false;
+  var fieldsItemId = null;  // 已套用欄位的物料，解析物料欄時 item 可能暫時為 null
   var confirmLarge = false; // 數量偏大時要再按一次 Enter
-  var uncertainKey = null;  // 上一筆「不確定是否已加入」的明細鍵：同一行再送要先確認（相同的行會累加，避免加兩次）
+  var uncertainKey = null;  // 舊掃碼入口及期初單的人工核對狀態
+  var keyedAdd = /[?&]handler=ScanAddLineOnce(?:&|$)/i.test(addUrl);
+  var pendingKey = 'wh.document.scan.pending:' + addUrl;
+  var pendingAdd = null;
+  if (keyedAdd) {
+    try { pendingAdd = JSON.parse(sessionStorage.getItem(pendingKey)); } catch (e) { }
+  }
+  var retryAdd = document.createElement('button');
+  retryAdd.type = 'button';
+  retryAdd.className = 'secondary';
+  retryAdd.textContent = '重試原加入明細';
+  retryAdd.hidden = !pendingAdd;
+  el.add.after(retryAdd);
+
+  function rememberAdd(data) {
+    pendingAdd = data;
+    retryAdd.hidden = !data;
+    try {
+      if (data) sessionStorage.setItem(pendingKey, JSON.stringify(data));
+      else sessionStorage.removeItem(pendingKey);
+    } catch (e) { }
+  }
+
+  function operationId() {
+    var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    var hex = Array.from(bytes).map(function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
 
   // ---- 偏好跟著帳號（prefs.js，M8-06）；沒有 prefs.js 時退回這台裝置的 localStorage ----
   var LOCAL_KEYS = { 'scan.addMode': 'wh.scan.addMode', 'scan.hiddenFields': 'wh.scan.hiddenFields' };
@@ -139,10 +176,10 @@
     el.next.textContent = '下一步：' + LABELS[s] + (addMode() === 'each' ? '（逐件累加中）' : addMode() === 'auto' ? '（齊了自動加入）' : '');
   }
 
-  function status(text, kind) {
+  function status(text, kind, silent) {
     el.status.textContent = text;
     el.status.className = 'scan-status scan-' + kind;
-    window.WhScan.feedback(kind);
+    if (!silent) window.WhScan.feedback(kind);
   }
   function ok(text) { status(text, 'ok'); }
   function fail(text) { status(text, 'bad'); }
@@ -157,6 +194,7 @@
 
   // 回到掃碼框。按鈕的 click 事件裡呼叫時，瀏覽器可能在事件之後才把焦點留在按鈕上，所以下一個 tick 再確認一次
   function focusScan() {
+    if (document.activeElement && document.activeElement.hasAttribute('data-line-quantity')) return;
     el.input.focus();
     setTimeout(function () {
       var active = document.activeElement;
@@ -165,6 +203,7 @@
   }
 
   function focusQuantity() {
+    if (document.activeElement && document.activeElement.hasAttribute('data-line-quantity')) return;
     el.quantity.focus();
     el.quantity.select();
   }
@@ -297,23 +336,36 @@
   function setItem(body) {
     var it = body.item;
     lastItemQuery = null;
-    var same = item && item.id === it.id;
+    var same = fieldsItemId === it.id;
+    var keepPrefill = !!manualQuantity && !manualQuantity.itemId;
+    lastEntrySaved = false;
+    if (manualQuantity && manualQuantity.itemId && manualQuantity.itemId !== it.id) manualQuantity = null;
+    fieldsItemId = it.id;
     item = it;
+    el.item.value = it.itemCode;
     hideResults();
     if (!same) {
-      el.item.value = it.itemCode;
       el.serial.value = '';
-      el.lot.value = lastLot && lastLot.itemId === it.id ? lastLot.lot : '';
-      if (el.expiry) el.expiry.value = '';
+      if (!(keepPrefill && prefilledLot && it.trackingMode === 'Lot')) {
+        el.lot.value = lastLot && lastLot.itemId === it.id ? lastLot.lot : '';
+      }
+      if (el.expiry && !(keepPrefill && prefilledExpiry && it.trackingMode === 'Lot')) el.expiry.value = '';
       pending = 0;
       showHints(body.extra);
     }
+    prefilledLot = false;
+    prefilledExpiry = false;
     el.itemInfo.textContent = it.name + (it.specification ? '　' + it.specification : '') + '（單位 ' + it.unitCode + '，'
       + (TRACKING[it.trackingMode] || it.trackingMode)
       + (it.matchedBy === 'Barcode' && it.packQuantity !== 1 ? '，此條碼每掃一次 ' + fmt(it.packQuantity) + ' ' + it.unitCode : '')
       + (it.isActive ? '' : '，已停用') + '）';
     if (it.trackingMode === 'Serial') {
+      manualQuantity = null;
       el.quantity.value = '1';
+    } else if (manualQuantity) {
+      manualQuantity.itemId = it.id;
+      manualQuantity.auto = true;
+      pending = 0;
     } else if (addMode() === 'each') {
       pending += it.packQuantity;
       el.quantity.value = fmt(pending);
@@ -428,6 +480,8 @@
 
   // 一筆掃碼或輸入：伺服器解析 → 依類型套用 → 欄位齊了就跳數量或自動加入
     async function onScan(value, source, extra) {
+        if (!quantityChoice.hidden) { fail('請先確認數量欄收到的內容，再掃下一筆。'); return; }
+        if (pendingAdd && !busy) { fail('請先重試原加入明細，再掃下一筆。這次掃碼尚未加入。'); return; }
         if (source === 'camera') {
             var statusTargetId =
                 (extra && extra.resultTargetId) || el.input.id;
@@ -495,8 +549,14 @@
       if (mayMove) focusScan();
       return;
     }
+    if (requireManualAdd) {
+      if (mayMove) focusQuantity();
+      return;
+    }
     if (tracking() === 'Serial') {
       el.quantity.value = '1';
+      await submit(false);
+    } else if (manualQuantity && manualQuantity.auto) {
       await submit(false);
     } else if (addMode() === 'each') {
       if (pending > 0) await submit(true);
@@ -540,21 +600,50 @@
     template.innerHTML = html.trim();
     var fresh = template.content.querySelector('[data-scan-lines]');
     if (!old || !fresh) return false;
+    var active = document.activeElement;
+    var inside = old.contains(active);
+    var focusedLine = inside && active.getAttribute('data-line-quantity');
+    var selection = focusedLine ? [active.selectionStart, active.selectionEnd] : null;
+    var row = inside && active.closest('[data-line-id]');
+    var rowIndex = row ? Array.from(old.querySelectorAll('[data-line-id]')).indexOf(row) : -1;
+    var checked = new Set(Array.from(old.querySelectorAll('.line-select:checked'), function (box) { return box.value; }));
+    fresh.querySelectorAll('.line-select').forEach(function (box) { box.checked = checked.has(box.value); });
+    var oldTable = old.querySelector('.table-wrap');
+    var left = oldTable ? oldTable.scrollLeft : 0;
     old.parentNode.replaceChild(fresh, old);
+    bindQuantityEditors(fresh);
+    if (window.WhTableCards) window.WhTableCards(fresh);
+    if (window.WhLines) window.WhLines.bind(fresh);
+    var table = fresh.querySelector('.table-wrap');
+    if (table) table.scrollLeft = left;
+    if (inside) {
+      var replacement = active.id ? $(active.id) : null;
+      if (row) {
+        var rows = fresh.querySelectorAll('[data-line-id]');
+        var sameRow = fresh.querySelector('[data-line-id="' + row.dataset.lineId + '"]');
+        var nearest = sameRow || rows[Math.min(rowIndex, rows.length - 1)];
+        if (focusedLine) replacement = quantityEditor(focusedLine);
+        if (!replacement && nearest) replacement = nearest.querySelector(active.matches('.line-select') ? '.line-select' : '[data-remove-lines] button');
+      }
+      if (replacement && replacement.disabled) replacement = null;
+      (replacement || fresh.querySelector('h2')).focus({ preventScroll: true });
+      if (focusedLine && replacement && replacement.hasAttribute('data-line-quantity')) {
+        replacement.setSelectionRange(selection[0], selection[1]);
+      }
+    }
     var version = fresh.getAttribute('data-version');
     var pageVersion = document.querySelector('input[name="Version"]');
     if (version && pageVersion && pageVersion.value !== version && stale) {
       stale.hidden = false;
     }
-    if (window.WhLines) window.WhLines.bind(fresh);
     return true;
   }
 
   async function reloadLines() {
     try {
-      var res = await fetch(window.location.pathname + window.location.search, { credentials: 'same-origin' });
-      if (res.ok) replaceLines(await res.text());
-    } catch (e) { /* 仍然離線：讓人自行重新整理 */ }
+      var res = await fetch(window.location.pathname + window.location.search, { credentials: 'same-origin', cache: 'no-store' });
+      return res.ok && !res.redirected && replaceLines(await res.text());
+    } catch (e) { return false; }
   }
 
   // 一次只送一筆：手動按「加入明細」與掃碼觸發的送出若同時發生，後到的等前一筆結束再送（PR 2 審查 S1）
@@ -562,14 +651,22 @@
   // 否則排在後面、內容相同的那一筆會再送一次（等於自動重送，M8-03 審查 1）
   var inflight = Promise.resolve();
   var epoch = 0;
-  function submit(each) {
+  var adding = 0;
+  function submit(each, manual) {
+    if (quantityNeedsReview()) { fail('請先確認數量欄收到的內容。'); return; }
+    if (requireManualAdd && !manual) return;
     var mine = epoch;
-    var run = inflight.then(function () { return mine === epoch ? submitNow(each) : undefined; });
+    adding++;
+    var run = inflight.then(function () { return mine === epoch ? submitNow(each, manual) : undefined; })
+      .finally(function () { adding--; });
     inflight = run.catch(function () { });
     return run;
   }
 
-  async function submitNow(each) {
+  async function submitNow(each, manual) {
+    if (quantityNeedsReview()) { fail('請先確認數量欄收到的內容。'); return; }
+    if (requireManualAdd && !manual) return;
+    if (pendingAdd) { fail('請先重試原加入明細，再加入下一筆。'); return; }
     var s = step();
     if (s !== 'quantity') {
       fail('還沒完成：' + LABELS[s]);
@@ -608,9 +705,19 @@
       return;
     }
     confirmLarge = false;
+    if (keyedAdd) {
+      data.operationId = operationId();
+      rememberAdd(data);
+    }
+    if (each) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
+    await sendLine(data, each, key, false);
+  }
+
+  async function sendLine(data, each, key, replaying) {
+    var origin = document.activeElement;
     busy = true;
     el.add.disabled = true;
-    if (each) pending -= data.quantity; // 送出中又掃到的件數留在 pending，下一次再送
+    retryAdd.disabled = true;
     try {
       var res = await fetch(addUrl, {
         method: 'POST',
@@ -623,14 +730,18 @@
         body: JSON.stringify(data)
       });
       var type = res.headers.get('Content-Type') || '';
-      if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+      if (res.ok && (!keyedAdd || res.headers.has('X-Line-Id')) && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+        if (keyedAdd) rememberAdd(null);
         // 相同的行會累加（標頭 X-Line-*，ScanLineHeaders.cs）：講清楚加到第幾行、現在共幾個；
         // 有效期限沿用該行時用警告色提醒這次填的值沒採用（預留不同會是另一行）
         var lineNo = res.headers.get('X-Line-No');
         var lineQty = res.headers.get('X-Line-Quantity');
         var ignored = (res.headers.get('X-Line-Ignored') || '').split(',').filter(Boolean)
           .map(function (k) { return k === 'expiry' ? '有效期限' : '預留'; });
-        if (res.headers.get('X-Line-Merged') === '1' && lineNo && lineQty) {
+        if (replaying) {
+          ok('已確認原加入操作，明細表已更新。');
+          log(data.itemCode, '已確認原加入操作', true);
+        } else if (res.headers.get('X-Line-Merged') === '1' && lineNo && lineQty) {
           var text = '已累加：' + data.itemCode + ' + ' + fmt(data.quantity) + '，第 ' + lineNo + ' 行現在共 ' + fmt(lineQty);
           if (ignored.length) {
             status(text + '。這次填的' + ignored.join('、') + '與該行不同，已沿用該行的值。', 'warn');
@@ -645,6 +756,7 @@
         afterSubmit();
       } else if (res.status === 400 && type.indexOf('json') >= 0) {
         // 400＝規則錯誤（伺服器在寫入前拒絕），這一筆沒有加入
+        if (keyedAdd) rememberAdd(null);
         epoch++;
         fail((await res.json()).message || '加入失敗');
         log(data.itemCode, '加入失敗', false);
@@ -652,36 +764,52 @@
       } else {
         // 其他錯誤（逾時登入、500 等）不能確定是否已寫入：重新讀取明細表讓人核對，不自動重送（PR 2 審查 S2）
         epoch++;
-        fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
+        fail(keyedAdd ? '加入結果待確認。請重試原加入明細，系統會使用同一筆請求。'
+          : res.redirected ? '登入已逾時，請重新整理頁面並登入。'
           : '不確定這一行是否已加入（HTTP ' + res.status + '），已重新讀取明細表，請核對後再繼續。');
         log(data.itemCode, '不確定是否已加入', false);
-        uncertainKey = key;
+        if (!keyedAdd) uncertainKey = key;
         if (each) pending = 0;
         await reloadLines();
       }
     } catch (e) {
       epoch++;
-      fail('網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
+      fail(keyedAdd ? '網路中斷，請重試原加入明細，系統會使用同一筆請求。'
+        : '網路中斷：不確定這一行是否已加入，已重新讀取明細表，請核對後再繼續（不會自動重送）。');
       log(data.itemCode, '不確定是否已加入', false);
-      uncertainKey = key;
+      if (!keyedAdd) uncertainKey = key;
       if (each) pending = 0;
       await reloadLines();
     } finally {
       busy = false;
       el.add.disabled = false;
+      retryAdd.disabled = false;
       showNext();
-      focusScan();
+      var active = document.activeElement;
+      if (active === origin || active === document.body && (origin === el.add || origin === retryAdd)) {
+        if (!active.hasAttribute('data-line-quantity')) el.input.focus();
+      }
     }
   }
 
   // 加入後：保留儲位；物料清空等下一個（逐件累加保留物料與批號，連續掃同一物料）
   function afterSubmit() {
     lastItemQuery = null;
+    quantityKeys = null;
+    confirmedQuantity = null;
+    requireManualAdd = false;
     if (item) lastLot = { itemId: item.id, lot: el.lot.value.trim() };
     el.serial.value = '';
+    var usedManualQuantity = !!manualQuantity;
+    lastEntrySaved = true;
+    prefilledLot = false;
+    prefilledExpiry = false;
+    manualQuantity = null;
+    if (usedManualQuantity) el.quantity.value = '';
     if (addMode() !== 'each' || tracking() === 'Serial') {
       if (tracking() !== 'Serial') {
         item = null;
+        fieldsItemId = null;
         el.item.value = '';
         el.itemInfo.textContent = '';
         el.lot.value = '';
@@ -698,6 +826,15 @@
   function clearLine() {
     uncertainKey = null;
     item = null;
+    fieldsItemId = null;
+    lastEntrySaved = false;
+    prefilledLot = false;
+    prefilledExpiry = false;
+    manualQuantity = null;
+    quantityKeys = null;
+    confirmedQuantity = null;
+    requireManualAdd = false;
+    clearQuantityChoice();
     lastItemQuery = null;
     pending = 0;
     ['item', 'lot', 'serial', 'quantity'].forEach(function (k) { el[k].value = ''; });
@@ -793,36 +930,185 @@
     window.WhPicker.attach(el.serial, lotPicker);
   }
 
-  // 數量欄：Enter 加入。若在數量欄收到條碼槍輸入（很長、或字元間隔極短），改交給掃碼佇列，不當成數量
-  var keyTimes = [];
-  el.quantity.addEventListener('focus', function () { keyTimes = []; });
+  // HID/PDA 會把字元鍵入目前欄位。用尾碼和字元間隔分出一段掃碼，保留該段之前的數量。
+  var quantityKeys = null;
+  var confirmedQuantity = null;
+  var quantityChoice = document.createElement('span');
+  quantityChoice.hidden = true;
+  el.quantity.after(quantityChoice);
+
+  function normalizeQuantity(text) {
+    return text.replace(/[０-９．]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).trim();
+  }
+
+  function clearQuantityChoice() {
+    quantityChoice.hidden = true;
+    quantityChoice.textContent = '';
+    el.quantity.readOnly = false;
+  }
+
+  function noteManualQuantity() {
+    var prior = manualQuantity;
+    manualQuantity = el.quantity.value.trim() ? {
+      itemId: lastEntrySaved ? null : fieldsItemId,
+      auto: !item || !!(prior && prior.auto)
+    } : null;
+    confirmLarge = false;
+  }
+
+  function routeQuantityScan(keys, toQuantity) {
+    quantityKeys = null;
+    requireManualAdd = false;
+    clearQuantityChoice();
+    if (toQuantity) {
+      el.quantity.value = keys.text;
+      confirmedQuantity = keys.text;
+      noteManualQuantity();
+      status('已填入數量 ' + keys.text + '，請掃物料或確認後加入。', 'warn');
+      return;
+    }
+    el.quantity.value = keys.before;
+    confirmedQuantity = keys.before;
+    manualQuantity = keys.manual;
+    if (manualQuantity) manualQuantity.auto = true;
+    focusScan();
+    scanner.enqueue(keys.text, 'item-field');
+  }
+
+  function showQuantityChoice(keys) {
+    var text = normalizeQuantity(el.quantity.value);
+    quantityKeys = null;
+    quantityChoice.hidden = false;
+    el.quantity.readOnly = true;
+    var options = [
+      { label: '「' + keys.text + '」是條碼', action: function () {
+        routeQuantityScan(keys, /^\d+$/.test(keys.text) && numericToQuantity);
+      } },
+      { label: '「' + text + '」是手填數量', action: function () {
+        clearQuantityChoice();
+        el.quantity.value = text;
+        confirmedQuantity = text;
+        noteManualQuantity();
+        requireManualAdd = true;
+        el.quantity.focus();
+      } }
+    ];
+    options.forEach(function (option) {
+      var choice = document.createElement('button');
+      choice.type = 'button';
+      choice.textContent = option.label;
+      choice.addEventListener('click', option.action);
+      quantityChoice.appendChild(choice);
+    });
+    status('數量欄的輸入可能是掃碼，請先確認用途。', 'warn');
+  }
+
+  function quantityNeedsReview() {
+    if (!quantityChoice.hidden) return true;
+    var text = normalizeQuantity(el.quantity.value);
+    var longNumber = /^\d{8,}$/.test(text);
+    var suspectKeys = quantityKeys && (quantityKeys.uncertain ||
+      (quantityKeys.fast && !/^\d+\.\d+$/.test(text) && (quantityKeys.text.length >= 4 || quantityKeys.before.trim())));
+    if (text !== confirmedQuantity && (suspectKeys || longNumber)) {
+      showQuantityChoice(longNumber ? longQuantityChoice(text, quantityKeys) : quantityKeys);
+      return true;
+    }
+    return false;
+  }
+
+  function longQuantityChoice(text, keys) {
+    if (keys && keys.fast && keys.text.length >= 4) return keys;
+    var start = keys && keys.start;
+    return { text: text, before: start ? start.before : '', manual: start ? start.manual : null };
+  }
+
+  el.quantity.addEventListener('paste', function (ev) {
+    var value = ev.clipboardData && normalizeQuantity(ev.clipboardData.getData('text'));
+    if (!value || !/^\d{2,}$/.test(value) && !/[^\d.]/.test(value)) return;
+    ev.preventDefault();
+    if (!quantityChoice.hidden) return;
+    var keys = { text: value, before: el.quantity.value, manual: manualQuantity };
+    el.quantity.setRangeText(value, el.quantity.selectionStart, el.quantity.selectionEnd, 'end');
+    showQuantityChoice(keys);
+  });
+  el.quantity.addEventListener('input', function () {
+    confirmedQuantity = null;
+    noteManualQuantity();
+  });
   el.quantity.addEventListener('keydown', function (ev) {
+    if (ev.isComposing) return;
+    if (!quantityChoice.hidden) {
+      if (ev.key === 'Enter') ev.preventDefault();
+      return;
+    }
     if (ev.key !== 'Enter' && ev.key !== 'Tab') {
-      if (ev.key && ev.key.length === 1) {
-        keyTimes.push(performance.now());
-        confirmLarge = false; // 改了數量就要重新確認
+      if (!ev.ctrlKey && !ev.altKey && !ev.metaKey && ev.key && ev.key.length === 1) {
+        var gap = quantityKeys ? ev.timeStamp - quantityKeys.last : Infinity;
+        if (!quantityKeys || gap >= 30) {
+          if (quantityKeys && quantityKeys.fast) {
+            quantityKeys.uncertain = true;
+          } else {
+            var start = quantityKeys ? quantityKeys.start : { before: el.quantity.value, manual: manualQuantity };
+            quantityKeys = { text: '', before: el.quantity.value, manual: manualQuantity, fast: false, start: start };
+          }
+        } else if (quantityKeys.text.length >= 1) {
+          quantityKeys.fast = true;
+        }
+        quantityKeys.text += ev.key;
+        quantityKeys.last = ev.timeStamp;
+      } else if (ev.key !== 'Shift') {
+        quantityKeys = null;
       }
       return;
     }
-    // 全形數字（中文輸入法全形模式）先轉半形，才不會被當成條碼
-    var text = el.quantity.value.replace(/[０-９．]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+    var keys = quantityKeys;
+    quantityKeys = null;
+    var text = normalizeQuantity(el.quantity.value);
     el.quantity.value = text;
-    var fast = keyTimes.length >= 4 && (keyTimes[keyTimes.length - 1] - keyTimes[0]) / (keyTimes.length - 1) < 30;
-    // 數量欄是文字欄（inputmode=decimal），英數條碼不會被瀏覽器吃掉；不是純數字就一定是掃到條碼（PR 2 審查 M3）
-    var looksLikeScan = fast || !/^[0-9.]*$/.test(text.trim()) || text.replace(/\D/g, '').length > 8;
-    if (ev.key === 'Tab' && !looksLikeScan) return; // 人按 Tab：照常移到下一欄
-    ev.preventDefault();
-    keyTimes = [];
-    if (looksLikeScan) {
-      el.quantity.value = item ? fmt(item.packQuantity) : '';
-      status('數量欄收到條碼，已改當成掃碼處理。', 'warn');
-      focusScan();
-      scanner.enqueue(text, 'keyboard');
+    var recent = keys && ev.timeStamp - keys.last < 80;
+    var numeric = keys && /^\d+$/.test(keys.text);
+    var barcode = keys && keys.text.length >= 4 && !/^\d+\.\d+$/.test(keys.text);
+    var longNumber = /^\d{8,}$/.test(text);
+    if (recent && !keys.uncertain && (barcode || /[^\d.]/.test(keys.text))) {
+      ev.preventDefault();
+      routeQuantityScan(keys, numeric && numericToQuantity);
       return;
     }
-    submit(false);
+    if (text !== confirmedQuantity && (keys && (keys.uncertain || (!recent && barcode) ||
+        (keys.fast && numeric && (keys.before.trim() || ev.key === 'Tab'))) || longNumber)) {
+      ev.preventDefault();
+      showQuantityChoice(longNumber ? longQuantityChoice(text, keys) : keys);
+      return;
+    }
+    if (ev.key === 'Tab') return;
+    ev.preventDefault();
+    if (!item) { focusScan(); return; }
+    submit(false, true);
   });
-  el.add.addEventListener('click', function () { submit(false); });
+  el.add.addEventListener('click', function () { submit(false, true); });
+  document.addEventListener('submit', function (event) {
+    if (!event.target.querySelector('#document-submit,#document-confirm,#opening-submit,#opening-confirm')) return;
+    var reviewingQuantity = quantityNeedsReview();
+    if (!pendingAdd && !lineEdits.size && !reviewingQuantity && !requireManualAdd && !scanWorkActive() && retryRemove.hidden) return;
+    event.preventDefault();
+    fail(pendingAdd ? '請先確認上一筆加入結果，再送審或過帳。' :
+      reviewingQuantity ? '請先確認數量欄的掃碼內容。' :
+      scanWorkActive() ? '正在處理明細，請等畫面更新後再送審或過帳。' :
+      requireManualAdd ? '請先加入已確認的手填數量，或清除本筆輸入。' :
+      !retryRemove.hidden ? '請先讀取最新明細，核對刪除結果。' : '請先儲存或取消明細數量的修改，再送審或過帳。');
+    if (pendingAdd && !busy) retryAdd.focus();
+    else if (!retryRemove.hidden && !removing) retryRemove.focus();
+  });
+  retryAdd.addEventListener('click', function () {
+    if (!pendingAdd || busy || retryAdd.disabled) return;
+    if (!navigator.onLine) { fail('目前離線，恢復連線後再重試原加入明細。'); return; }
+    retryAdd.disabled = true;
+    var run = inflight.then(function () {
+      if (pendingAdd) return sendLine(pendingAdd, false, null, true);
+      retryAdd.disabled = false;
+    });
+    inflight = run.catch(function () { });
+  });
   el.clear.addEventListener('click', clearLine);
   el.addMode.addEventListener('change', function () { save(ADD_MODE_KEY, el.addMode.value); pending = 0; showNext(); focusScan(); });
   if (el.targetWarehouse) {
@@ -857,6 +1143,8 @@
     applyFields();
     if (value) scanner.enqueue(value, 'item-field');
   });
+  el.lot.addEventListener('input', function () { prefilledLot = !fieldsItemId || lastEntrySaved; });
+  if (el.expiry) el.expiry.addEventListener('input', function () { prefilledExpiry = !fieldsItemId || lastEntrySaved; });
   // 手打儲位：不知道 id，批號清單改列整個倉庫
   el.location.addEventListener('input', function () { locationId = null; el.locationInfo.textContent = ''; });
   if (el.target) el.target.addEventListener('input', function () { if (el.targetInfo) el.targetInfo.textContent = ''; });
@@ -873,29 +1161,43 @@
   // 與加入明細排同一個佇列，一次只送一筆；不看 epoch（加入失敗不應讓排隊中的刪除消失）
   var removeUrl = panel.getAttribute('data-remove-url');
   var removing = 0; // 刪除送出中：離開頁面、PWA 換版重載前要知道
+  var retryRemove = document.createElement('button');
+  retryRemove.type = 'button';
+  retryRemove.className = 'secondary';
+  retryRemove.textContent = '讀取最新明細';
+  retryRemove.hidden = true;
+  retryAdd.after(retryRemove);
+  retryRemove.addEventListener('click', function () {
+    if (scanWorkActive()) return;
+    removing++;
+    var run = inflight.then(async function () {
+      if (await reloadAfterRemove()) ok('已讀取最新明細，請核對刪除結果。');
+      else fail('目前無法讀取最新明細，請稍後重試。');
+    }).finally(function () { removing--; });
+    inflight = run.catch(function () { });
+  });
+
+  async function reloadAfterRemove() {
+    retryRemove.hidden = await reloadLines();
+    return retryRemove.hidden;
+  }
+
   document.addEventListener('submit', function (ev) {
     var form = ev.target;
-    if (ev.defaultPrevented || !removeUrl || !form.closest || !form.closest('[data-scan-lines]')) return;
-    if (!/[?&]handler=RemoveLines?(&|$)/.test(form.getAttribute('action') || '')) return;
+    if (ev.defaultPrevented || !removeUrl || !form.matches('form[data-remove-lines]')) return;
     ev.preventDefault();
+    if (removing) return;
     var data = new FormData(form); // 包含用 form 屬性掛到勾選表單的勾選框
     var ids = data.getAll('lineIds').concat(data.getAll('lineId'));
     if (!ids.length) return;
-    var buttons = form.querySelectorAll('button');
-    buttons.forEach(function (b) { b.disabled = true; });
-    var run = inflight.then(function () { return removeNow(ids); });
-    inflight = run.catch(function () { });
-    run.then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
-  });
-
-  async function removeNow(ids) {
+    form.setAttribute('aria-busy', 'true');
     removing++;
-    try {
-      await removeCore(ids);
-    } finally {
+    var run = inflight.then(function () { return removeCore(ids); }).finally(function () {
       removing--;
-    }
-  }
+      form.removeAttribute('aria-busy');
+    });
+    inflight = run.catch(function () { });
+  });
 
   async function removeCore(ids) {
     if (!navigator.onLine) {
@@ -914,7 +1216,7 @@
         body: JSON.stringify({ lineIds: ids })
       });
       var type = res.headers.get('Content-Type') || '';
-      if (res.ok && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
+      if (res.ok && !res.redirected && type.indexOf('text/html') >= 0 && replaceLines(await res.text())) {
         ok('已刪除 ' + ids.length + ' 行明細。');
         log('明細', '刪除 ' + ids.length + ' 行', true);
       } else if (res.status === 400 && type.indexOf('json') >= 0) {
@@ -922,26 +1224,252 @@
         log('明細', '刪除失敗', false);
         await reloadLines(); // 例如別人已刪掉那一行：換成最新的明細表
       } else {
-        fail(res.redirected ? '登入已逾時，請重新整理頁面並登入。'
-          : '不確定是否已刪除（HTTP ' + res.status + '），已重新讀取明細表，請核對。');
-        await reloadLines();
+        fail('不確定是否已刪除（HTTP ' + res.status + '）。' +
+          (await reloadAfterRemove() ? '已重新讀取明細表，請核對。' : '目前無法讀取最新明細，請按「讀取最新明細」重試。'));
       }
     } catch (e) {
-      fail('網路中斷：不確定是否已刪除，已重新讀取明細表，請核對。');
-      await reloadLines();
+      fail('網路中斷：不確定是否已刪除。' +
+        (await reloadAfterRemove() ? '已重新讀取明細表，請核對。' : '目前無法讀取最新明細，請按「讀取最新明細」重試。'));
     }
     showNext();
-    focusScan();
+  }
+
+  // 失焦儲存與掃碼、刪除共用 inflight。保留其他列正在輸入的值，局部換表時不會清掉。
+  var lineEdits = new Map();
+  var lineKeyBursts = new WeakMap();
+  var savingLines = 0;
+  var quantityRecovery = document.createElement('div');
+  retryAdd.after(quantityRecovery);
+
+  function renderQuantityRecovery() {
+    quantityRecovery.textContent = '';
+    lineEdits.forEach(function (edit, id) {
+      if (!edit.request || quantityEditor(id)) return;
+      var retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'secondary';
+      retry.textContent = '重試明細數量（' + edit.request.originalQuantity + ' → ' + edit.request.quantity + '）';
+      retry.disabled = edit.saving;
+      retry.addEventListener('click', function () { enqueueQuantity(id, edit, true); });
+      quantityRecovery.appendChild(retry);
+    });
+  }
+
+  function quantityEditor(id) {
+    return document.querySelector('[data-line-quantity="' + id + '"]');
+  }
+
+  function renderQuantityEditor(input, edit) {
+    input.readOnly = !!(edit && edit.request);
+    input.value = edit ? edit.value : input.dataset.savedQuantity;
+    var cell = input.parentElement;
+    cell.querySelector('[data-line-quantity-status]').textContent = edit ? edit.message : '';
+    var retry = cell.querySelector('[data-line-quantity-retry]');
+    retry.hidden = !(edit && ((edit.request && !edit.saving) || edit.confirm));
+    retry.textContent = edit && edit.confirm ? '確認儲存' : '重試';
+    cell.querySelector('[data-line-quantity-cancel]').hidden = !(edit && !edit.request);
+    if (edit && edit.error) input.setAttribute('aria-invalid', 'true');
+    else input.removeAttribute('aria-invalid');
+  }
+
+  function bindQuantityEditors(root) {
+    if (!quantityUrl || !root) return;
+    root.querySelectorAll('[data-line-quantity]').forEach(function (input) {
+      renderQuantityEditor(input, lineEdits.get(input.dataset.lineQuantity));
+    });
+    lineEdits.forEach(function (edit, id) {
+      if (!quantityEditor(id) && !edit.request) {
+        lineEdits.delete(id);
+        fail('明細已不存在或目前無法編輯，請核對明細表。');
+      }
+    });
+    renderQuantityRecovery();
+  }
+
+  function cancelQuantity(input) {
+    var edit = lineEdits.get(input.dataset.lineQuantity);
+    if (edit && edit.request) return;
+    lineEdits.delete(input.dataset.lineQuantity);
+    lineKeyBursts.delete(input);
+    renderQuantityEditor(input, null);
+  }
+
+  function queueQuantity(input, explicit, confirmed) {
+    var id = input.dataset.lineQuantity;
+    var edit = lineEdits.get(id);
+    if (!edit || edit.saving || (!explicit && (edit.request || edit.error))) return;
+    var retrying = !!edit.request;
+    if (!edit.request) {
+      var burst = lineKeyBursts.get(input);
+      lineKeyBursts.delete(input);
+      var value = normalizeQuantity(edit.value);
+      if (canonicalQuantity(value) === input.dataset.savedQuantity) { cancelQuantity(input); return; }
+      if (!/^\d+(\.\d+)?$/.test(value)) {
+        edit.message = '請輸入數字。';
+        edit.error = true;
+        renderQuantityEditor(input, edit);
+        return;
+      }
+      if ((edit.confirm || /^\d{8,}$/.test(value) || (burst && burst.count >= 4)) && !confirmed) {
+        edit.message = '數量可能來自掃碼，請核對後按「確認儲存」。';
+        edit.confirm = true;
+        edit.error = true;
+        renderQuantityEditor(input, edit);
+        return;
+      }
+      edit.confirm = false;
+      edit.request = { lineId: id, originalQuantity: edit.original, quantity: value, operationId: operationId() };
+    }
+    enqueueQuantity(id, edit, retrying);
+  }
+
+  function canonicalQuantity(value) {
+    return value.replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  }
+
+  function enqueueQuantity(id, edit, retrying) {
+    edit.saving = true;
+    edit.error = false;
+    edit.message = '儲存中…';
+    var input = quantityEditor(id);
+    if (input) renderQuantityEditor(input, edit);
+    renderQuantityRecovery();
+    savingLines++;
+    var run = inflight.then(function () { return saveLineQuantity(id, edit, retrying); });
+    inflight = run.catch(function () { });
+  }
+
+  async function saveLineQuantity(id, edit, retrying) {
+    try {
+      var res = await fetch(quantityUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'RequestVerificationToken': tokenInput ? tokenInput.value : ''
+        },
+        body: JSON.stringify(edit.request)
+      });
+      var input = quantityEditor(id);
+      if (res.status === 204 && !res.redirected) {
+        if (retrying) {
+          if (!await reloadLines()) {
+            edit.message = '原修改已確認，尚未讀到目前數量，請重試確認。';
+            return;
+          }
+          lineEdits.delete(id);
+          input = quantityEditor(id);
+          if (input) renderQuantityEditor(input, null);
+          ok('已確認原修改，畫面顯示目前明細數量。');
+          return;
+        }
+        var saved = canonicalQuantity(edit.request.quantity);
+        lineEdits.delete(id);
+        if (input) {
+          input.dataset.savedQuantity = saved;
+          renderQuantityEditor(input, null);
+          input.parentElement.querySelector('[data-line-quantity-status]').textContent = '已儲存';
+        }
+        return;
+      }
+      if ([400, 403, 409].indexOf(res.status) >= 0 && !res.redirected) {
+        var error = (res.headers.get('Content-Type') || '').indexOf('json') >= 0 ? await res.json() : null;
+        edit.message = error && error.message ? error.message : '無法儲存數量，請核對權限或重新登入。';
+        edit.request = null;
+        if (res.status === 409 || res.status === 403) {
+          await reloadLines();
+          input = quantityEditor(id);
+          if (input) edit.original = input.dataset.savedQuantity;
+        }
+      } else {
+        edit.message = '儲存結果待確認，請重試原操作。';
+      }
+    } catch (error) {
+      edit.message = '連線中斷，請重試原操作。';
+    } finally {
+      savingLines--;
+      edit.saving = false;
+      if (lineEdits.has(id)) {
+        edit.error = true;
+        var current = quantityEditor(id);
+        if (current) renderQuantityEditor(current, edit);
+        else if (!edit.request) { lineEdits.delete(id); fail(edit.message); }
+        else fail(edit.message);
+      }
+      renderQuantityRecovery();
+    }
+  }
+
+  document.addEventListener('input', function (event) {
+    var input = event.target;
+    var id = input.getAttribute('data-line-quantity');
+    if (!id || !quantityUrl) return;
+    var edit = lineEdits.get(id) || { original: input.dataset.savedQuantity };
+    if (edit.request) return;
+    edit.value = input.value;
+    edit.error = false;
+    edit.confirm = false;
+    edit.message = '';
+    lineEdits.set(id, edit);
+    var cell = input.parentElement;
+    cell.querySelector('[data-line-quantity-status]').textContent = '';
+    cell.querySelector('[data-line-quantity-cancel]').hidden = false;
+    cell.querySelector('[data-line-quantity-retry]').hidden = true;
+    input.removeAttribute('aria-invalid');
+  });
+  document.addEventListener('focusout', function (event) {
+    if (!event.target.hasAttribute('data-line-quantity')) return;
+    queueQuantity(event.target, false);
+  });
+  document.addEventListener('keydown', function (event) {
+    var input = event.target;
+    if (event.isComposing || !input.hasAttribute('data-line-quantity')) return;
+    if (!event.ctrlKey && !event.altKey && !event.metaKey && /^\d$/.test(event.key)) {
+      var burst = lineKeyBursts.get(input);
+      lineKeyBursts.set(input, {
+        count: burst && event.timeStamp - burst.last < 35 ? burst.count + 1 : 1,
+        last: event.timeStamp
+      });
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      queueQuantity(input, true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelQuantity(input);
+    }
+  });
+  document.addEventListener('mousedown', function (event) {
+    if (event.target.hasAttribute('data-line-quantity-cancel')) event.preventDefault();
+  });
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    if (target.hasAttribute('data-line-quantity-retry')) {
+      queueQuantity(target.parentElement.querySelector('[data-line-quantity]'), true, true);
+    } else if (target.hasAttribute('data-line-quantity-cancel')) {
+      cancelQuantity(target.parentElement.querySelector('[data-line-quantity]'));
+    }
+  });
+  bindQuantityEditors(document.querySelector('[data-scan-lines]'));
+
+  function scanWorkActive() {
+    return scanner.pending() > 0 || adding > 0 || busy || removing > 0 || savingLines > 0;
   }
 
   // 頁面要離開時，面板上還有未加入的物料就提醒（PWA 更新提示也會呼叫）
-  window.WhScanDirty = function () { return scanner.pending() > 0 || busy || removing > 0 || !!el.item.value.trim(); };
+  var priorUpdateBlock = window.WhPageUpdateBlocked;
+  window.WhPageUpdateBlocked = function () {
+    return !!(priorUpdateBlock && priorUpdateBlock()) || scanWorkActive() || !!pendingAdd || lineEdits.size > 0 || !quantityChoice.hidden || !retryRemove.hidden;
+  };
+  window.WhScanDirty = function () { return scanWorkActive() || lineEdits.size > 0 || !!manualQuantity || !!el.item.value.trim(); };
   // 自動化實測（tools/ScanCheck）用：佇列是否還在處理
-  window.WhScanBusy = function () { return scanner.pending() > 0 || busy || removing > 0; };
+  window.WhScanBusy = function () { return scanWorkActive() || Array.from(lineEdits.values()).some(function (edit) { return !!edit.request; }); };
 
   // 初始化都成功後才收起沒有 JS 時的傳統表單（中途出錯時頁面仍有可用的輸入方式；同一頁只保留一套輸入）
   var fallback = document.querySelector('[data-entry-fallback]');
   if (fallback) fallback.hidden = true;
+  if (pendingAdd) status('上一筆加入結果待確認。請先重試原加入明細。', 'bad', true);
   applyFields();
   showNext();
   focusScan();

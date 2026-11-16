@@ -23,6 +23,12 @@ public class AppUser : IdentityUser<Guid>
     /// 只限制作業（建單、核准、預留、盤點、儲位維護），查詢不受限制。
     /// </summary>
     public bool AllWarehouses { get; set; } = true;
+
+    /// <summary>
+    /// 公用帳號（多人共用，使用者 2026-11-16）：送出進出倉動作時必須從人員名單選擇實際操作人，
+    /// 紀錄的姓名寫成「操作人（帳號顯示名稱）」，見 ADR-0030。
+    /// </summary>
+    public bool IsShared { get; set; }
 }
 
 /// <summary>帳號可作業的倉庫（<see cref="AppUser.AllWarehouses"/> 為 false 時才有作用）。</summary>

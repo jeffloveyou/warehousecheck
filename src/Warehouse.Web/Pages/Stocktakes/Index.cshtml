@@ -2,6 +2,7 @@
 @model Warehouse.Web.Pages.Stocktakes.IndexModel
 @using Warehouse.Domain.Inventory
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "盤點";
 }
 <h1>盤點</h1>
@@ -37,7 +38,7 @@
         <div class="actions"><button type="submit" id="stocktake-start">開始盤點（建立快照）</button></div>
     </form>
 }
-<form method="get" class="filters" id="stocktake-filter">
+<form method="get" data-page-query class="filters" id="stocktake-filter">
     <select name="WarehouseId" aria-label="倉庫">
         <option value="">全部倉庫</option>
         @foreach (var w in Model.Warehouses)
@@ -54,6 +55,7 @@
     </select>
     <button type="submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <div class="table-wrap">
     <table id="stocktake-list">
         <thead><tr><th>盤點單號</th><th>倉庫</th><th>範圍</th><th>狀態</th><th>已盤／行數</th><th>建立者</th><th>建立時間</th></tr></thead>
@@ -87,4 +89,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a>
     }
+</div>
 </div>

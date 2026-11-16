@@ -5,6 +5,7 @@ using Microsoft.Playwright;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Items;
 using Warehouse.Application.Warehousing;
+using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Items;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Inventory;
@@ -22,17 +23,21 @@ var baseUrl = "https://localhost:5447";
 var cs = Environment.GetEnvironmentVariable("WAREHOUSE_TEST_DB") ?? throw new InvalidOperationException("WAREHOUSE_TEST_DB");
 var root = FindRepoRoot();
 var webDll = Path.Combine(root, "src", "Warehouse.Web", "bin", "Debug", "net10.0", "Warehouse.Web.dll");
-var chrome = Path.Combine(root, "poc", ".browsers", "chromium-109", "chrome-win", "chrome.exe");
-var shots = args.Length > 0 ? args[0] : Path.Combine(root, "tools", "ScanCheck", "results");
+// SCANCHECK_CHROMIUM：在 git worktree 執行時指向主工作目錄的 poc\.browsers（瀏覽器檔案不進 Git）
+var chrome = Environment.GetEnvironmentVariable("SCANCHECK_CHROMIUM") is { Length: > 0 } chromeOverride
+    ? chromeOverride : Path.Combine(root, "poc", ".browsers", "chromium-109", "chrome-win", "chrome.exe");
+var shots = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? Path.Combine(root, "tools", "ScanCheck", "results");
+shots = Path.GetFullPath(shots); // Chromium 的假鏡頭檔案參數必須可從瀏覽器工作目錄解析。
 Directory.CreateDirectory(shots);
 var suffix = Guid.NewGuid().ToString("N")[..5];
 var failures = new List<string>();
+var pageUpdateOnly = args.Contains("--page-update-only", StringComparer.Ordinal);
 void Check(bool ok, string what) { Console.WriteLine((ok ? "  ✔ " : "  ✘ ") + what); if (!ok) failures.Add(what); }
 WarehouseDbContext Db() => new(new DbContextOptionsBuilder<WarehouseDbContext>().UseNpgsql(cs).Options);
 
-string CreateUser(string name, string role)
+string CreateUser(string name, string role, bool shared = false)
 {
-    var psi = new ProcessStartInfo("dotnet", $"\"{webDll}\" users create --user {name} --display {name} --role {role}")
+    var psi = new ProcessStartInfo("dotnet", $"\"{webDll}\" users create --user {name} --display {name} --role {role}{(shared ? " --shared" : "")}")
     { RedirectStandardOutput = true, RedirectStandardError = true };
     psi.Environment["ConnectionStrings__Warehouse"] = cs;
     psi.Environment["DOTNET_ENVIRONMENT"] = "Development";
@@ -49,11 +54,16 @@ var warehouseCode = "SC" + suffix.ToUpperInvariant();
 Guid warehouseId;
 var itemCodes = new List<string>();
 string serialCode;
+string lotCode;
 var unitBarcode = "471" + Random.Shared.NextInt64(1_000_000_000, 9_999_999_999);
 var boxBarcode = "472" + Random.Shared.NextInt64(1_000_000_000, 9_999_999_999);
 await using (var db = Db())
 {
     var manager = new Actor(Guid.NewGuid(), "腳本主管", false, IsWarehouseManager: true);
+    var settings = new SettingsService(db, TimeProvider.System);
+    var initial = await settings.GetAsync(default);
+    if (initial.LineScanNumericToQuantity)
+        await settings.UpdateAsync(initial, initial with { LineScanNumericToQuantity = false }, manager, default);
     var warehouses = new WarehouseService(db, TimeProvider.System);
     warehouseId = await warehouses.CreateWarehouseAsync(new WarehouseInput(warehouseCode, "掃碼實測倉"), manager, default);
     var empty = new LocationDetails(null, null, null, null, null, null, null, null, false, false);
@@ -68,13 +78,14 @@ await using (var db = Db())
         return (item.ItemId, await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync());
     }
     var ids = new List<Guid>();
-    for (var n = 0; n < 10; n++)
+    for (var n = 0; n < (pageUpdateOnly ? 23 : 10); n++)
     {
         var (id, code) = await NewItemAsync("掃碼實測零件" + n, TrackingMode.None);
         ids.Add(id);
         itemCodes.Add(code);
     }
     serialCode = (await NewItemAsync("掃碼實測序號件", TrackingMode.Serial)).Code;
+    lotCode = (await NewItemAsync("掃碼實測批號件", TrackingMode.Lot)).Code;
     var index = new ItemIndexService(db, TimeProvider.System);
     await index.AddAsync(ids[0], ItemIndexKind.Barcode, unitBarcode, itemManager, default);
     await index.AddAsync(ids[1], ItemIndexKind.Barcode, boxBarcode, itemManager, default, 12m);
@@ -136,6 +147,36 @@ async Task WaitIdleAsync(IPage page)
     }
 }
 
+Task<bool> DocumentActionBlockedAsync(IPage page) => page.EvaluateAsync<bool>("""
+    () => {
+      const button = document.querySelector('#document-confirm,#document-submit,#opening-confirm,#opening-submit');
+      return button && !button.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }
+    """);
+
+async Task ScanWhileActionWaitsAsync(IPage page, string code, string name)
+{
+    var resolving = new Regex("[?&]handler=ScanResolve(?:&|$)", RegexOptions.IgnoreCase);
+    var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    await page.RouteAsync(resolving, async route =>
+    {
+        reached.TrySetResult();
+        await release.Task;
+        await route.ContinueAsync();
+    });
+    try
+    {
+        await ScanAsync(page, code);
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Check(await DocumentActionBlockedAsync(page), $"{name}：解析未完成時攔截送審或過帳");
+    }
+    finally { release.TrySetResult(); }
+    await WaitIdleAsync(page);
+    await page.UnrouteAsync(resolving);
+    Check(!await DocumentActionBlockedAsync(page), $"{name}：解析及明細更新完成後可重新送出");
+}
+
 async Task<Dictionary<string, decimal>> LinesAsync(Guid docId, string location)
 {
     await using var db = Db();
@@ -149,7 +190,108 @@ async Task<Dictionary<string, decimal>> LinesAsync(Guid docId, string location)
 }
 
 var page = await LoginAsync(1280);
+if (args.Contains("--maintenance-only", StringComparer.Ordinal))
+{
+    async Task<IPage> LoginAsAsync(string role)
+    {
+        user = "sc" + role.ToLowerInvariant() + suffix;
+        password = CreateUser(user, role);
+        return await LoginAsync(1280);
+    }
+    await MaintenanceCheck.RunAsync(page, browser, LoginAsAsync, baseUrl, cs, warehouseId, itemCodes, suffix, Check);
+    Check(consoleErrors.Count == 0, "維護表單沒有瀏覽器錯誤：" + string.Join(" | ", consoleErrors));
+    return failures.Count == 0 ? 0 : 1;
+}
+if (args.Contains("--shared-only", StringComparer.Ordinal))
+{
+    var sharedUser = "scsh" + suffix;
+    var sharedPassword = CreateUser(sharedUser, "Operator", shared: true);
+    var storageErrors = new List<string>();
+    async Task<(IPage Page, string User)> LoginSharedAsync(bool blockStorage)
+    {
+        var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 }, IgnoreHTTPSErrors = true });
+        if (blockStorage)
+            await context.AddInitScriptAsync("Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage blocked'); } });");
+        var p = await context.NewPageAsync();
+        var sink = blockStorage ? storageErrors : consoleErrors;
+        p.Console += (_, m) => { if (m.Type == "error") sink.Add($"{p.Url}: {m.Text}"); };
+        p.PageError += (_, e) => sink.Add($"{p.Url}: {e}");
+        await p.GotoAsync(baseUrl + "/Account/Login");
+        await p.FillAsync("input[name='Input.UserName']", sharedUser);
+        await p.FillAsync("input[name='Input.Password']", sharedPassword);
+        await p.ClickAsync("form button[type=submit]");
+        await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        if (p.Url.Contains("ChangePassword", StringComparison.OrdinalIgnoreCase))
+        {
+            var changed = "Shared-check-pass-" + suffix;
+            await p.FillAsync("input[name='Input.CurrentPassword']", sharedPassword);
+            await p.FillAsync("input[name='Input.NewPassword']", changed);
+            await p.FillAsync("input[name='Input.ConfirmPassword']", changed);
+            await p.Locator("input[name='Input.NewPassword']").Locator("xpath=ancestor::form").Locator("button[type=submit]").ClickAsync();
+            await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            sharedPassword = changed;
+            if (p.Url.Contains("Login", StringComparison.OrdinalIgnoreCase))
+            {
+                await p.FillAsync("input[name='Input.UserName']", sharedUser);
+                await p.FillAsync("input[name='Input.Password']", changed);
+                await p.ClickAsync("form button[type=submit]");
+                await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            }
+        }
+        return (p, sharedUser);
+    }
+    await SharedAccountCheck.RunAsync(page, LoginSharedAsync, browser, baseUrl, cs, warehouseCode, warehouseId, itemCodes, suffix, Check, shots);
+    Check(storageErrors.All(e => !e.Contains("operator-picker", StringComparison.Ordinal)), "localStorage 不可用：operator-picker.js 沒有錯誤");
+    Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
+    Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
+    return failures.Count == 0 ? 0 : 1;
+}
+if (pageUpdateOnly)
+{
+    await page.GotoAsync(baseUrl + "/Search");
+    await page.EvaluateAsync("() => { window.__noReload = true; }");
+    var query = page.Locator("input[name='Q']");
+    await query.FillAsync(suffix);
+    await query.PressAsync("Enter");
+    var next = page.GetByRole(AriaRole.Link, new() { Name = "下一頁", Exact = true });
+    await next.WaitForAsync();
+    Check(await query.EvaluateAsync<bool>("input => input === document.activeElement"), "物料搜尋：Enter 查詢保留輸入焦點");
+    await next.PressAsync("Enter");
+    await page.WaitForFunctionAsync("() => new URLSearchParams(location.search).get('p') === '2'");
+    Check(await page.EvaluateAsync<bool>("() => window.__noReload && document.activeElement.textContent === '上一頁'"), "搜尋分頁：保留文件，最後一頁可用鍵盤返回");
+    await page.GoBackAsync();
+    await page.WaitForFunctionAsync("() => document.querySelector('.pager').textContent.includes('1 / 2')");
+    Check(await page.EvaluateAsync<bool>("() => window.__noReload"), "瀏覽器返回：原地恢復搜尋結果");
+
+    await page.RouteAsync(new Regex(@"/Search\?"), route => route.FulfillAsync(new() { Status = 503, Body = "Unavailable" }));
+    await query.FillAsync("尚未送達的關鍵字");
+    await query.PressAsync("Enter");
+    await page.GetByText("查詢失敗，已保留目前畫面。", new() { Exact = false }).WaitForAsync();
+    Check(await query.InputValueAsync() == "尚未送達的關鍵字" && await next.IsVisibleAsync()
+        && await query.EvaluateAsync<bool>("input => input === document.activeElement"), "查詢失敗：保留舊結果、輸入值和焦點");
+    await page.UnrouteAsync(new Regex(@"/Search\?"));
+
+    await page.GotoAsync(baseUrl + "/Items?q=" + suffix + "&PageSize=5");
+    await page.EvaluateAsync("() => { window.__noReload = true; }");
+    await page.Locator("#next-page").ClickAsync();
+    await page.WaitForFunctionAsync("() => new URLSearchParams(location.search).get('p') === '2'");
+    Check(await page.EvaluateAsync<bool>("() => window.__noReload && document.activeElement.id === 'next-page'"), "物料清單：下一頁不重新載入並保留分頁焦點");
+}
+if (args.Contains("--quick-only", StringComparer.Ordinal))
+{
+    await page.Context.RouteAsync(new Regex(@"/js/camera-scan\.js"), route => route.FulfillAsync(new() { ContentType = "text/javascript", Body = QuickCheckoutCheck.CameraStub }));
+    await QuickCheckoutCheck.RunAsync(page, baseUrl, cs, user, warehouseCode, warehouseId, itemCodes, Check, shots);
+    Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
+    Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
+    return failures.Count == 0 ? 0 : 1;
+}
 await page.GotoAsync(baseUrl + "/Documents");
+if (await page.Locator("select[name='Create.Type']").CountAsync() == 0)
+{
+    Console.WriteLine("建立單據入口未出現：URL=" + page.Url + "，標題=" + await page.TitleAsync());
+    Console.WriteLine("頁面提示：" + string.Join(" | ", await page.Locator("h1,.message.error,.validation-summary-errors").AllTextContentsAsync()));
+    await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "document-entry-failure.png"), FullPage = true });
+}
 await page.SelectOptionAsync("select[name='Create.Type']", "Inbound");
 await page.SelectOptionAsync("select[name='Create.WarehouseId']", warehouseId.ToString());
 await page.SelectOptionAsync("select[name='Header.PurposeId']", SeedData.Purposes.First(p => p.Code == "PURCHASE").Id.ToString());
@@ -278,11 +420,27 @@ await WaitIdleAsync(page);
 var typedItem = await page.InputValueAsync("#scan-item");
 var rowCount = "() => document.querySelectorAll('#document-lines tbody tr').length";
 var rows = await page.EvaluateAsync<int>(rowCount);
-await page.Locator("#document-lines tbody tr").Filter(new() { HasText = "A-01" }).Filter(new() { HasText = itemCodes[0] })
-    .First.Locator("button:has-text('刪除')").ClickAsync();
+var deleteLine = page.Locator("#document-lines tbody tr").Filter(new() { HasText = "A-01" }).Filter(new() { HasText = itemCodes[0] })
+    .First.Locator("button:has-text('刪除')");
+var deleteResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var removeRequest = new Regex("handler=ScanRemoveLines", RegexOptions.IgnoreCase);
+await page.RouteAsync(removeRequest, async route =>
+{
+    await deleteResponse.Task;
+    await route.ContinueAsync();
+});
+try
+{
+    await deleteLine.ClickAsync();
+    Check(await DocumentActionBlockedAsync(page), "單行刪除：尚未取得刪除結果時攔截送審或過帳");
+    await page.Locator("#scan-item").FocusAsync();
+}
+finally { deleteResponse.TrySetResult(); }
 await page.WaitForFunctionAsync($"n => document.querySelectorAll('#document-lines tbody tr').length === n", rows - 1);
+await page.UnrouteAsync(removeRequest);
 await WaitIdleAsync(page);
 Check(await page.EvaluateAsync<bool>("() => window.__noReload === true"), "單行刪除：頁面沒有重新整理");
+Check(await page.EvaluateAsync<bool>("() => document.activeElement.id === 'scan-item'"), "單行刪除：背景回應保留操作員切換後的欄位焦點");
 Check(typedItem != "" && await page.InputValueAsync("#scan-item") == typedItem, "單行刪除：輸入區的物料欄保留（" + typedItem + "）");
 Check(!(await LinesAsync(docId, "A-01")).Keys.Any(k => k.StartsWith(itemCodes[0])), "單行刪除：資料庫已移除那一行");
 Check((await page.InnerTextAsync("#scan-status")).Contains("已刪除"), "單行刪除：訊息顯示已刪除");
@@ -304,8 +462,189 @@ page.Dialog -= Accept;
 await WaitIdleAsync(page);
 Check(await page.EvaluateAsync<bool>("() => window.__noReload === true"), "勾選刪除：頁面沒有重新整理");
 Check(await page.InputValueAsync("#scan-item") == typedItem, "勾選刪除：輸入區的物料欄保留");
+Check(await page.EvaluateAsync<bool>("() => document.activeElement.matches('[data-scan-lines] h2')"), "勾選刪除：刪除按鈕消失或停用時將焦點留在明細區");
+if (pageUpdateOnly)
+{
+    Check(consoleErrors.Count == 1 && consoleErrors[0].Contains("503"), "除模擬查詢 503 外無瀏覽器錯誤");
+    return failures.Count == 0 ? 0 : 1;
+}
 await page.ScreenshotAsync(new() { Path = Path.Combine(shots, "1b-merge-delete.png"), FullPage = true });
 await page.ClickAsync("#scan-clear");
+
+// 8a-2. 模擬單據明細已提交、回應遺失。重新整理後仍可用原操作鍵確認。
+var beforeRetry = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]);
+const string documentAddPattern = "**/*?handler=ScanAddLineOnce";
+await page.RouteAsync(documentAddPattern, async route =>
+{
+    _ = await route.FetchAsync();
+    await route.FulfillAsync(new() { Status = 200, ContentType = "text/html", Body = "" });
+});
+await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
+await WaitIdleAsync(page);
+await ScanAsync(page, "WH:ITEM:" + itemCodes[0].ToLowerInvariant());
+await WaitIdleAsync(page);
+await page.FillAsync("#scan-quantity", "2");
+await page.PressAsync("#scan-quantity", "Enter");
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('結果待確認')");
+await page.UnrouteAsync(documentAddPattern);
+Check(await DocumentActionBlockedAsync(page), "一般單據：加入結果未確認前，攔截過帳或送審");
+await page.ReloadAsync();
+await page.GetByRole(AriaRole.Button, new() { Name = "重試原加入明細", Exact = true }).ClickAsync();
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('已確認原加入操作')");
+Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]) == beforeRetry + 2,
+    "一般單據：回應遺失後重新整理並重試，原明細只加一次");
+await ScanWhileActionWaitsAsync(page, "WH:ITEM:" + itemCodes[0], "進倉");
+await page.ClickAsync("#scan-clear");
+
+// 8a. 數量先填：三種模式、直接在數量欄接掃碼、批號與失焦儲存。
+foreach (var mode in new[] { "manual", "auto", "each" })
+{
+    await page.SelectOptionAsync("#scan-add-mode", mode);
+    await page.FillAsync("#scan-location", "A-01");
+    var original = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[1]);
+    await page.FillAsync("#scan-quantity", "5");
+    await ScanAsync(page, boxBarcode);
+    await WaitIdleAsync(page);
+    Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[1]) == original + 5,
+        $"先填 5 再在數量欄掃外箱碼，{mode} 直接加入 5 而非 12");
+}
+await page.FillAsync("#scan-quantity", "6");
+await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
+await WaitIdleAsync(page);
+Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[8]) == 6,
+    "逐件累加保留上一料時，先填數量可用於下一個物料");
+await page.SelectOptionAsync("#scan-add-mode", "manual");
+await page.ClickAsync("#scan-clear");
+await page.FillAsync("#scan-lot", "LOT-PREFILL");
+await page.FillAsync("#scan-quantity", "4");
+await ScanAsync(page, "WH:ITEM:" + lotCode);
+await WaitIdleAsync(page);
+var lotRow = page.Locator("#document-lines tbody tr").Filter(new() { HasText = "LOT-PREFILL" });
+var lotQuantity = lotRow.Locator("[data-line-quantity]");
+Check(await lotRow.CountAsync() == 1 && await lotQuantity.InputValueAsync() == "4", "先填批號與數量後掃物料，欄位齊全自動加入");
+await lotQuantity.FillAsync("9");
+await lotQuantity.PressAsync("Tab");
+await WaitIdleAsync(page);
+Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(lotCode) == 9 &&
+    await lotRow.Locator("[data-line-quantity-status]").InnerTextAsync() == "已儲存", "明細修改數量，失焦後儲存到同一行");
+Check(await page.Locator("#document-lines tbody tr").Filter(new() { HasText = serialCode }).Locator("[data-line-quantity]").CountAsync() == 0,
+    "序號物料明細沒有數量編輯欄");
+await lotQuantity.PressAsync("Control+a");
+await ScanAsync(page, "96385074");
+Check(await lotRow.GetByRole(AriaRole.Button, new() { Name = "確認儲存" }).IsVisibleAsync() &&
+    (await LinesAsync(docId, "A-01")).GetValueOrDefault(lotCode) == 9, "明細數量欄收到 EAN-8 時不自動儲存");
+await lotQuantity.PressAsync("Escape");
+
+const string quantityRoute = "**/*?handler=ScanUpdateQuantity";
+var consoleBeforeQuantityAbort = consoleErrors.Count;
+await page.RouteAsync(quantityRoute, async route =>
+{
+    await route.FetchAsync();
+    await route.AbortAsync();
+});
+await lotQuantity.FillAsync("11");
+await lotQuantity.PressAsync("Tab");
+var retryQuantity = lotRow.GetByRole(AriaRole.Button, new() { Name = "重試", Exact = true });
+await retryQuantity.WaitForAsync();
+Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(lotCode) == 11, "失焦改量回應遺失時保留重試入口");
+await page.UnrouteAsync(quantityRoute);
+var competingPage = await page.Context.NewPageAsync();
+await competingPage.GotoAsync(page.Url);
+var competingQuantity = competingPage.Locator("#document-lines tbody tr").Filter(new() { HasText = "LOT-PREFILL" }).Locator("[data-line-quantity]");
+await competingQuantity.FillAsync("13");
+await competingQuantity.PressAsync("Enter");
+await WaitIdleAsync(competingPage);
+await competingPage.CloseAsync();
+await retryQuantity.ClickAsync();
+await WaitIdleAsync(page);
+Check(await lotQuantity.InputValueAsync() == "13" && (await LinesAsync(docId, "A-01")).GetValueOrDefault(lotCode) == 13,
+    "改量以原識別碼重試並顯示最新值，未覆蓋另一頁的修改");
+// 只排除本案例刻意中斷請求造成的 Chromium 網路訊息。
+var expectedAbort = consoleErrors.FindIndex(consoleBeforeQuantityAbort,
+    error => error == $"{page.Url}: Failed to load resource: net::ERR_FAILED");
+if (expectedAbort >= 0) consoleErrors.RemoveAt(expectedAbort);
+
+
+// 全公司設定的兩種去向。恢復原設定後再繼續後面的案例。
+await using (var db = Db())
+{
+    var settingActor = new Actor(Guid.NewGuid(), "掃碼設定測試", false);
+    var settings = new SettingsService(db, TimeProvider.System);
+    var original = await settings.GetAsync(default);
+    try
+    {
+        foreach (var mode in new[] { false, true })
+        {
+            var current = await settings.GetAsync(default);
+            await settings.UpdateAsync(current, current with { LineScanNumericToQuantity = mode }, settingActor, default);
+            foreach (var terminator in new[] { "Enter", "Tab" })
+            {
+                await page.ReloadAsync();
+                await page.SelectOptionAsync("#scan-add-mode", "manual");
+                await page.FillAsync("#scan-location", "A-01");
+                await ScanAsync(page, "WH:ITEM:" + itemCodes[0]);
+                await WaitIdleAsync(page);
+                var prior = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]);
+                await page.FillAsync("#scan-quantity", "");
+                await page.Keyboard.TypeAsync("001", new() { Delay = 10 });
+                await Task.Delay(270);
+                await ScanAsync(page, "2", terminator);
+                var splitChoice = page.GetByRole(AriaRole.Button, new() { Name = "「0012」是條碼", Exact = true });
+                Check(await splitChoice.IsVisibleAsync() && await DocumentActionBlockedAsync(page)
+                    && (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[0]) == prior,
+                    $"數量欄：0012 中途停頓，{terminator}／數字填量 {mode} 須確認完整條碼，未加入");
+                if (mode)
+                {
+                    await splitChoice.ClickAsync();
+                    Check(await page.InputValueAsync("#scan-quantity") == "0012", "停頓條碼：確認後以完整內容填入數量欄");
+                }
+            }
+        }
+        await page.ReloadAsync();
+        await page.FillAsync("#scan-location", "A-01");
+        await page.FillAsync("#scan-quantity", "5");
+        await ScanAsync(page, "12");
+        var choice = page.GetByRole(AriaRole.Button, new() { Name = "「12」是條碼", Exact = true });
+        Check(await choice.IsVisibleAsync(), "短純數字進入確認，可用鍵盤選擇用途");
+        await page.ClickAsync("#scan-add");
+        Check((await page.InnerTextAsync("#scan-status")).Contains("請先確認"), "數字待確認時不能直接加入串接後的數量");
+        await choice.ClickAsync();
+        Check(await page.InputValueAsync("#scan-quantity") == "12", "數量去向：純數字覆蓋原數量，只填欄位");
+        var originalLine = (await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[7]);
+        await page.FocusAsync("#scan-quantity");
+        await ScanAsync(page, "WH:ITEM:" + itemCodes[7], "Tab");
+        await WaitIdleAsync(page);
+        Check((await LinesAsync(docId, "A-01")).GetValueOrDefault(itemCodes[7]) == originalLine + 12,
+            "數量去向：英數條碼仍交給物料欄，保留已填的 12");
+    }
+    finally
+    {
+        var current = await settings.GetAsync(default);
+        await settings.UpdateAsync(current, original, settingActor, default);
+    }
+}
+
+foreach (var type in new[] { "Outbound", "Transfer" })
+{
+    await page.GotoAsync(baseUrl + "/Documents");
+    await page.SelectOptionAsync("select[name='Create.Type']", type);
+    await page.SelectOptionAsync("select[name='Create.WarehouseId']", warehouseId.ToString());
+    if (type == "Outbound")
+        await page.SelectOptionAsync("select[name='Header.PurposeId']", SeedData.Purposes.First(p => p.Code == "REPAIR").Id.ToString());
+    await page.ClickAsync("#document-create");
+    await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+    var movementId = Guid.Parse(page.Url.Split('/').Last().Split('?')[0]);
+    await page.FillAsync("#scan-location", "A-01");
+    await page.FillAsync("#scan-quantity", "4");
+    await ScanWhileActionWaitsAsync(page, "WH:ITEM:" + itemCodes[4], type);
+    if (type == "Transfer")
+    {
+        Check((await LinesAsync(movementId, "A-01")).Count == 0, "移庫目的儲位未填時暫不加入");
+        await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-02");
+        await WaitIdleAsync(page);
+    }
+    Check((await LinesAsync(movementId, "A-01")).GetValueOrDefault(itemCodes[4]) == 4, $"{type} 欄位齊全時自動加入先填的數量");
+}
 
 // 8b. 期初單：同一個面板（物料 → 儲位 → 數量）；「查建議儲位」欄 Enter 先解析成正式料號，不直接送出
 await page.GotoAsync(baseUrl + "/Opening");
@@ -313,20 +652,45 @@ await page.SelectOptionAsync("#opening-create-form select[name='WarehouseId']", 
 await page.ClickAsync("#opening-create");
 await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 Check(await page.IsVisibleAsync("#scan-panel"), "期初單顯示連續掃碼面板");
-await ScanAsync(page, "WH:ITEM:" + itemCodes[4]);
-await WaitIdleAsync(page);
-await ScanAsync(page, $"WH:LOC:{warehouseCode}:A-01");
-await WaitIdleAsync(page);
+await page.FillAsync("#scan-location", "A-01");
 await page.FillAsync("#scan-quantity", "7");
-await page.PressAsync("#scan-quantity", "Enter");
+await ScanWhileActionWaitsAsync(page, "WH:ITEM:" + itemCodes[4], "期初單");
+var openingId = Guid.Parse(new Uri(page.Url).AbsolutePath.Split('/').Last());
+var openingRow = page.Locator("#opening-lines tbody tr").Filter(new() { HasText = itemCodes[4] });
+var openingQuantity = openingRow.Locator("[data-line-quantity]");
+Check(await openingRow.CountAsync() == 1 && await openingQuantity.InputValueAsync() == "7", "期初單掃碼加入明細（頁面沒有重新載入）");
+var openingSaveReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var openingSaveRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+await page.RouteAsync(quantityRoute, async route =>
+{
+    openingSaveReached.TrySetResult();
+    await openingSaveRelease.Task;
+    await route.ContinueAsync();
+});
+try
+{
+    await openingQuantity.FillAsync("0");
+    await openingQuantity.PressAsync("Tab");
+    await openingSaveReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    Check(await DocumentActionBlockedAsync(page), "期初單：改量尚未確認時攔截送審或過帳");
+}
+finally { openingSaveRelease.TrySetResult(); }
 await WaitIdleAsync(page);
-var openingLines = await page.InnerTextAsync("#opening-lines");
-Check(openingLines.Contains(itemCodes[4]) && openingLines.Contains("7"), "期初單掃碼加入明細（頁面沒有重新載入）");
+await page.UnrouteAsync(quantityRoute);
+Check(await openingQuantity.GetAttributeAsync("data-saved-quantity") == "0", "期初非序號明細失焦可儲存零數量");
 await page.FillAsync("input[name='Suggest']", "wh:item:" + itemCodes[4].ToLowerInvariant());
 await page.PressAsync("input[name='Suggest']", "Enter");
 await page.WaitForTimeoutAsync(800);
 Check(await page.InputValueAsync("input[name='Suggest']") == itemCodes[4] && page.Url.Contains("/Opening/Details/") && !page.Url.Contains("Suggest="),
     "單欄掃碼：Enter 先解析成正式料號、沒有送出表單");
+var openingSubmit = await page.IsVisibleAsync("#opening-submit");
+await page.ClickAsync(openingSubmit ? "#opening-submit" : "#opening-confirm");
+await using (var db = Db())
+{
+    var opening = await db.StockDocuments.Include(d => d.Lines).SingleAsync(d => d.Id == openingId);
+    Check(opening.Status == (openingSubmit ? StockDocumentStatus.Submitted : StockDocumentStatus.Posted)
+        && opening.Lines.Single().Quantity == 0, "期初單：明細更新後可實際送出，資料庫保留最後核對的零數量");
+}
 
 // 8c. 掃碼查料頁：連掃物料、儲位，結果區換成對應內容，網址同步
 await page.GotoAsync(baseUrl + "/Scan");
@@ -531,21 +895,7 @@ Check(await WaitForAsync(camBlank, "() => document.body.dataset.trackState === '
 
 // 12f. 多步驟流程：camera-scan.js 換成測試替身（window.__fakeScan(文字) 等於鏡頭讀到一個碼），驗證當前欄、跳欄、放錯欄、數量方式、送出後自動重開。
 // 解碼本身由 12a～12e 與 tools/DecodeCheck 驗證。
-const string StubModule = """
-    let h = null, running = false;
-    export async function start(video, handlers, options) {
-      if (h && h !== handlers && h.onStop) { const o = h; h = null; o.onStop(); }
-      h = handlers; running = true; window.__stubContinuous = !!(options && options.continuous);
-      document.body.dataset.cameraState = '掃描中'; if (handlers.onState) handlers.onState('掃描中');
-    }
-    export function stop() {
-      running = false; const o = h; h = null;
-      document.body.dataset.cameraState = '停止'; document.body.dataset.trackState = 'ended';
-      if (o && o.onState) o.onState('停止'); if (o && o.onStop) o.onStop();
-    }
-    export function isRunning() { return running; }
-    window.__fakeScan = (text, format) => { if (h) h.onResult(text, 0, format || 'ean_13'); };
-    """;
+const string StubModule = QuickCheckoutCheck.CameraStub;
 Guid stocktakeId;
 await using (var db = Db())
 {
@@ -657,13 +1007,14 @@ Check(await stub.InputValueAsync("input[name='IndexText']") == "", "物料明細
 await FakeScanAsync(newCode1);
 Check(await stub.InputValueAsync("input[name='IndexText']") == newCode1 && await stub.InputValueAsync("#index-kind") == "Barcode", "物料明細：未登錄條碼填原文、類型改原廠條碼");
 
-// 搜尋：物料碼 → 以正式料號搜尋（重新載入後相機自動重開）；不是物料碼只填原文
+// 搜尋：物料碼 → 以正式料號搜尋，原相機工作階段保留；不是物料碼只填原文
 await stub.GotoAsync(baseUrl + "/Search");
+await stub.EvaluateAsync("() => { window.__noReload = true; }");
 await stub.ClickAsync("#search-form .camera-field-open");
 await stub.EvaluateAsync("(t) => window.__fakeScan(t)", Ean);
 Check(await WaitForAsync(stub, $"() => location.search.indexOf('Q={eanItem}') >= 0"), "搜尋：相機掃到物料條碼，以正式料號搜尋");
 await stub.WaitForLoadStateAsync(LoadState.NetworkIdle);
-Check(await WaitForAsync(stub, Running, 5000), "搜尋：搜尋後相機自動重開");
+Check(await WaitForAsync(stub, Running, 5000) && await stub.EvaluateAsync<bool>("() => window.__noReload"), "搜尋：局部更新後原相機持續開啟");
 var unknownText = "NOTREG" + suffix;
 await FakeScanAsync(unknownText);
 Check(await stub.InputValueAsync("input[name='Q']") == unknownText && !stub.Url.Contains(unknownText), "搜尋：不是物料碼只填原文，不自動搜尋");
@@ -705,7 +1056,7 @@ Check(await page.EvaluateAsync<bool>("() => document.getElementById('scan-status
 await page.SelectOptionAsync("#quick-add-mode", "manual");
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[7]);
-await WaitIdleAsync(page);
+await page.WaitForSelectorAsync("#quick-qty", new() { State = WaitForSelectorState.Visible });
 Check(await page.IsVisibleAsync("#quick-qty") && await page.EvaluateAsync<string>("() => document.activeElement.id") == "quick-qty", "快速進出（手動）：掃到物料後跳到數量欄");
 await page.FillAsync("#quick-qty", "5");
 await page.PressAsync("#quick-qty", "Enter");
@@ -722,7 +1073,7 @@ var savedCookies = await quickContext.CookiesAsync();
 await quickContext.ClearCookiesAsync();
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
-await WaitIdleAsync(page);
+await page.WaitForFunctionAsync("() => document.getElementById('scan-status').textContent.includes('登入已逾時')");
 var expiredStatus = await page.InnerTextAsync("#scan-status");
 Check(!expiredStatus.Contains("已加入") && (await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]) && !(await page.InnerTextAsync("#quick-line-table")).Contains(itemCodes[8]),
     "快速進出：登入逾時時不顯示已加入（" + expiredStatus + "）");
@@ -734,7 +1085,9 @@ await otherDevice.GotoAsync(quickCartUrl);
 Check((await otherDevice.InnerTextAsync("#quick-line-table")).Contains(itemCodes[7]), "快速進出：換裝置登入，購物車內容還在");
 Check(!await otherDevice.EvaluateAsync<bool>("() => document.documentElement.scrollWidth > window.innerWidth + 1"), "手機寬 390 無水平捲動：購物車");
 
-await page.ClickAsync("#quick-inbound");
+if (await page.Locator("#quick-failures li").CountAsync() > 0) await page.Locator("#quick-failures li button").Nth(1).ClickAsync();
+await page.SelectOptionAsync("#quick-checkout-type", "DraftInbound");
+await page.ClickAsync("#quick-checkout");
 await page.WaitForSelectorAsync("#quick-convert-form");
 Check(await page.InputValueAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location") == "A-01", "快速進出：補齊畫面帶入掃碼時的儲位");
 await page.SelectOptionAsync("#quick-purpose", SeedData.Purposes.First(p => p.Code == "PURCHASE" && p.Direction == Warehouse.Domain.Inventory.PurposeDirection.In).Id.ToString());
@@ -765,9 +1118,13 @@ await page.SelectOptionAsync("#quick-add-mode", "auto");
 await page.FocusAsync("#scan-input");
 await ScanAsync(page, "WH:ITEM:" + itemCodes[8]);
 await WaitIdleAsync(page);
-await page.ClickAsync("#quick-outbound");
+await page.SelectOptionAsync("#quick-checkout-type", "DraftOutbound");
+await page.ClickAsync("#quick-checkout");
 await page.WaitForSelectorAsync("#quick-convert-form");
-await page.SelectOptionAsync("#quick-warehouse", warehouseId.ToString());
+if (await page.Locator("select#quick-warehouse").CountAsync() > 0)
+    await page.SelectOptionAsync("#quick-warehouse", warehouseId.ToString());
+else
+    Check(await page.InputValueAsync("#quick-warehouse") == warehouseId.ToString(), "快速進出：補齊頁保留準備時已選的倉庫");
 await page.FillAsync("#quick-convert-lines tbody tr:nth-child(1) input.quick-location", "A-02");
 await page.ClickAsync("h1");
 await page.ClickAsync("#quick-convert");
@@ -781,6 +1138,8 @@ await using (var db = Db())
     Check(page.Url.EndsWith("/Quick", StringComparison.Ordinal) && !await db.StockDocuments.AnyAsync(d => d.Id == draftId),
         "快速進出：購物車轉入的出倉草稿可刪除（不留單據），回快速進出");
 }
+
+await QuickCheckoutCheck.RunAsync(stub, baseUrl, cs, user, warehouseCode, warehouseId, itemCodes, Check, shots);
 
 Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
 Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");

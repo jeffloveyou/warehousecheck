@@ -30,6 +30,10 @@
     warned = false;
     if (note) note.textContent = '';
     button.onclick = function () {
+      if (window.WhPageUpdateBlocked && window.WhPageUpdateBlocked()) {
+        if (note) note.textContent = '請先完成草稿補齊作業，再更新網頁。';
+        return;
+      }
       // 送出中：不能放棄（請求可能已被伺服器接受，重新載入後會以為沒加入而重掃），請等它完成（PR 4 審查 5）
       if (window.WhScanBusy && window.WhScanBusy()) {
         if (note) note.textContent = '正在送出明細，請等完成後再按更新。';
@@ -52,7 +56,12 @@
 
   // 新版 Service Worker 接手後才重新載入，而且只在使用者按了更新時（第一次安裝也會觸發 controllerchange，不重新載入）
   navigator.serviceWorker.addEventListener('controllerchange', function () {
-    if (accepted) window.location.reload();
+    if (!accepted) return;
+    if (window.WhPageUpdateBlocked && window.WhPageUpdateBlocked()) {
+      if (note) note.textContent = '新版已就緒，請完成草稿補齊作業後再重新整理。';
+      return;
+    }
+    window.location.reload();
   });
 
   window.addEventListener('load', function () {

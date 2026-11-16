@@ -1,0 +1,62 @@
+@page
+@model Warehouse.Web.Pages.Items.LabelsModel
+@{
+    Layout = null;
+    var sheets = Model.Labels.Chunk(24).ToList();
+}
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>物料標籤補印</title>
+    <link rel="stylesheet" href="~/css/print.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/usability.css" asp-append-version="true" />
+</head>
+<body>
+    <div class="print-toolbar">
+        <h1>物料標籤補印</h1>
+        <a href="/Items">回物料</a>
+        <form method="get" data-page-query class="label-filters" id="label-filter">
+            <input type="search" name="q" value="@Model.Keyword" maxlength="100" aria-label="料號、品名或型號" placeholder="料號、品名或型號" />
+            <button type="submit">搜尋</button>
+        </form>
+        <p>只列已啟用物料。勾選本頁要補印的物料，產生後核對標籤，再按列印。換頁前請先完成本頁列印。</p>
+<div id="label-toolbar-results" data-page-region>
+        @if (Model.Error is not null) { <p role="alert">@Model.Error</p> }
+        <form method="post" data-page-post asp-page-handler="Print" class="item-label-select">
+            <input type="hidden" name="q" value="@Model.Keyword" />
+            <input type="hidden" name="p" value="@Model.PageNumber" />
+            @foreach (var item in Model.Result.Items)
+            {
+                <label><input type="checkbox" name="SelectedIds" value="@item.Id" checked="@Model.SelectedIds.Contains(item.Id)" /> <strong>@item.ItemCode</strong> @item.Name @item.Brand @item.ManufacturerPartNo <span>（@item.UnitCode）</span></label>
+            }
+            @if (Model.Result.Items.Count == 0) { <p>沒有符合條件的已啟用物料。</p> }
+            else { <button type="submit" id="item-label-generate">產生勾選標籤</button> }
+        </form>
+        <span class="label-pages">共 @Model.Result.TotalCount 筆，第 @Model.Result.Page／@Model.Result.TotalPages 頁
+            @if (Model.Result.Page > 1) { <a data-page-link href="@Model.PageUrl(Model.Result.Page - 1)">上一頁</a> }
+            @if (Model.Result.Page < Model.Result.TotalPages) { <a data-page-link href="@Model.PageUrl(Model.Result.Page + 1)">下一頁</a> }
+        </span>
+        @if (Model.Labels.Count > 0) { <button type="button" id="item-label-print" onclick="window.print()">列印 @Model.Labels.Count 個（@sheets.Count 張）</button> }
+        <p>列印設定：A4、實際大小 100%、關閉頁首頁尾；先用一般紙核對尺寸。</p>
+</div>
+    </div>
+<div id="label-sheets" data-page-region>
+    @foreach (var sheet in sheets)
+    {
+        <div class="label-sheet label-small" style="grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(8,1fr)">
+            @foreach (var (item, svg) in sheet)
+            {
+                <div class="label">
+                    <div class="label-qr">@Html.Raw(svg)</div>
+                    <div class="label-text"><div class="label-code">@item.ItemCode</div><div class="label-name">@item.Name</div><div class="label-name">@item.Specification</div><div class="label-company">@item.UnitCode　@Model.CompanyName</div></div>
+                </div>
+            }
+        </div>
+    }
+</div>
+    <script src="~/js/page-update.js" asp-append-version="true"></script>
+</body>
+</html>

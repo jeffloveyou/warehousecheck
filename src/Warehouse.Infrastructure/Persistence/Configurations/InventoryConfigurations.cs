@@ -56,6 +56,11 @@ public class StockDocumentConfiguration : IEntityTypeConfiguration<StockDocument
         builder.Property(d => d.DocType).HasConversion<string>().HasMaxLength(20);
         builder.Property(d => d.Status).HasConversion<string>().HasMaxLength(20);
         builder.Property(d => d.Note).HasMaxLength(StockDocument.NoteMaxLength);
+        builder.Property(d => d.RecipientName).HasMaxLength(100);
+        builder.Property(d => d.ProjectReference).HasMaxLength(100);
+        builder.HasIndex(d => d.RecipientUserId);
+        builder.HasIndex(d => d.ProjectReference);
+        builder.HasOne<Warehouse.Infrastructure.Identity.AppUser>().WithMany().HasForeignKey(d => d.RecipientUserId).OnDelete(DeleteBehavior.Restrict);
         builder.Property(d => d.CreatedByName).HasMaxLength(100);
         builder.Property(d => d.ApprovedByName).HasMaxLength(100);
         builder.Property(d => d.ReturnComment).HasMaxLength(StockDocument.NoteMaxLength);

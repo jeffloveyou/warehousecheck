@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Warehouse.Application.Abstractions;
@@ -22,7 +23,7 @@ namespace Warehouse.Infrastructure.Inventory;
 /// 修改草稿：開交易 → 鎖單據列 → 版本與權限 → 修改 → 稽核 → commit（同期初）。
 /// 過帳（確認或核准）的步驟見 <see cref="PostCoreAsync"/>；結存只經 <see cref="IInventoryPostingService"/> 改變。
 /// </summary>
-public sealed class StockDocumentService(
+public sealed partial class StockDocumentService(
     WarehouseDbContext db, IInventoryPostingService posting, ISettingsService settings, TimeProvider clock,
     IPostingFailureLog? failures = null) : IStockDocumentService
 {
@@ -34,7 +35,8 @@ public sealed class StockDocumentService(
     private const string ApproveCommand = "document.approve";
 
     public async Task<PagedResult<DocumentRow>> ListAsync(
-        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken)
+        StockDocumentType? type, StockDocumentStatus? status, Guid? warehouseId, int page, CancellationToken cancellationToken,
+        string? recipient = null, string? project = null, DocumentListFilter? filter = null)
     {
         page = Paging.ClampPage(page);
         var docs = db.StockDocuments.AsNoTracking().Where(d => d.DocType != StockDocumentType.Opening);
@@ -50,9 +52,41 @@ public sealed class StockDocumentService(
         {
             docs = docs.Where(d => d.WarehouseId == w);
         }
+        static string Text(string value) => value.Trim()[..Math.Min(value.Trim().Length, Paging.MaxKeywordLength)];
+        if (!string.IsNullOrWhiteSpace(recipient))
+        {
+            var text = Text(recipient);
+            docs = docs.Where(d => d.RecipientName != null && d.RecipientName.Contains(text));
+        }
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            var text = Text(project);
+            docs = docs.Where(d => d.ProjectReference != null && d.ProjectReference.Contains(text));
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.DocNo))
+        {
+            var number = Text(filter.DocNo).ToUpperInvariant();
+            docs = docs.Where(d => d.DocNo == number);
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.ItemCode))
+        {
+            var code = TextNormalizer.Normalize(Text(filter.ItemCode));
+            docs = docs.Where(d => d.Lines.Any(l => db.Items.Any(i => i.Id == l.ItemId && i.ItemCode == code)));
+        }
+        if (!string.IsNullOrWhiteSpace(filter?.CreatorName))
+        {
+            var name = Text(filter.CreatorName);
+            docs = docs.Where(d => d.CreatedByName.Contains(name));
+        }
+        if (filter?.CreatedById is { } creator) docs = docs.Where(d => d.CreatedById == creator);
+        if (filter?.ReturnedOnly == true) docs = docs.Where(d => d.Status == StockDocumentStatus.Draft && d.ReturnComment != null);
+        if (filter?.AllowedWarehouseIds is { } allowed) docs = docs.Where(d => allowed.Contains(d.WarehouseId));
+        if (filter?.From is { } from) docs = docs.Where(d => d.CreatedAt >= from.ToUniversalTime());
+        if (filter?.To is { } to) docs = docs.Where(d => d.CreatedAt < to.ToUniversalTime());
         var total = await docs.CountAsync(cancellationToken);
         var rows = await docs
             .OrderByDescending(d => d.CreatedAt)
+            .ThenBy(d => d.Id)
             .Skip((page - 1) * Paging.DefaultPageSize)
             .Take(Paging.DefaultPageSize)
             .Select(d => new DocumentRow(
@@ -60,7 +94,7 @@ public sealed class StockDocumentService(
                 db.Warehouses.Where(x => x.Id == d.WarehouseId).Select(x => x.Code).First(),
                 db.DocumentPurposes.Where(p => p.Id == d.PurposeId).Select(p => p.Name).FirstOrDefault(),
                 db.BusinessPartners.Where(p => p.Id == d.PartnerId).Select(p => p.Name).FirstOrDefault(),
-                d.ExternalNo, d.Lines.Count, d.CreatedByName, d.CreatedAt, d.PostedAt))
+                d.ExternalNo, d.Lines.Count, d.CreatedByName, d.CreatedAt, d.PostedAt, d.RecipientName, d.ProjectReference))
             .ToListAsync(cancellationToken);
         return new PagedResult<DocumentRow>(rows, page, Paging.DefaultPageSize, total);
     }
@@ -77,6 +111,8 @@ public sealed class StockDocumentService(
                 PurposeName = db.DocumentPurposes.Where(p => p.Id == d.PurposeId).Select(p => p.Name).FirstOrDefault(),
                 PartnerName = db.BusinessPartners.Where(p => p.Id == d.PartnerId).Select(p => p.Name).FirstOrDefault(),
                 ReversalOfDocNo = db.StockDocuments.Where(o => o.Id == d.ReversalOfDocumentId).Select(o => o.DocNo).FirstOrDefault(),
+                RelatedReversal = db.StockDocuments.Where(o => o.ReversalOfDocumentId == d.Id && o.Status != StockDocumentStatus.Cancelled)
+                    .Select(o => new DocumentReversalLink(o.Id, o.DocNo, o.Status)).FirstOrDefault(),
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (head is null)
@@ -103,7 +139,7 @@ public sealed class StockDocumentService(
             d.Id, d.DocNo, d.DocType, d.Status, d.WarehouseId, head.WarehouseCode, d.PurposeId, head.PurposeName,
             d.PartnerId, head.PartnerName, d.ExternalNo, d.Note, d.ReversalOfDocumentId, head.ReversalOfDocNo,
             d.CreatedById, d.CreatedByName, d.CreatedAt, d.SubmittedAt, d.ApprovedByName, d.PostedAt, d.ReturnComment,
-            head.Version, lines, d.FromScanCart);
+            head.Version, lines, d.FromScanCart, d.RecipientUserId, d.RecipientName, d.ProjectReference, head.RelatedReversal);
     }
 
     public async Task<Guid> CreateAsync(
@@ -164,7 +200,7 @@ public sealed class StockDocumentService(
         return doc.Id;
     }
 
-    public Task UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken) =>
+    public Task<uint> UpdateHeaderAsync(Guid id, uint expectedVersion, StockDocumentHeader header, Actor actor, CancellationToken cancellationToken) =>
         MutateAsync(id, expectedVersion, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
             var current = await settings.GetAsync(cancellationToken);
@@ -173,8 +209,12 @@ public sealed class StockDocumentService(
             return ("document.header_update", new { effective.PurposeId, effective.PartnerId, doc.ExternalNo, doc.Note });
         });
 
-    public async Task<Guid> AddLineAsync(Guid id, DocumentLineInput input, Actor actor, CancellationToken cancellationToken)
+    public async Task<Guid> AddLineAsync(Guid id, DocumentLineInput input, Actor actor, CancellationToken cancellationToken, Guid? operationId = null)
     {
+        if (operationId == Guid.Empty) throw new DomainRuleException("缺少加入明細的請求識別碼。");
+        const string command = "document.line_write";
+        var key = operationId is { } op ? $"{command}:{id:N}:{op:N}" : null;
+        var hash = key is null ? null : DocumentSupport.Hash(JsonSerializer.Serialize(new { ActorId = actor.Id, Input = input }));
         var lineId = Guid.NewGuid();
         await MutateAsync(id, null, actor, editorOnly: true, cancellationToken, async (doc, now) =>
         {
@@ -182,6 +222,7 @@ public sealed class StockDocumentService(
             var (line, source, target, code) = await AddLineCoreAsync(doc, input, actor, current, lineId, cancellationToken);
             var merged = line.Id != lineId;
             lineId = line.Id;
+            if (key is not null) db.ProcessedCommands.Add(ProcessedCommand.Create(key, command, hash!, $"line:{lineId:N}", now));
             return (merged ? "document.line_merge" : "document.line_add", new
             {
                 LineId = lineId, LineQuantity = line.Quantity, Location = source.Code, Target = target?.Code, ItemCode = code, input.LotNo, input.SerialNo, input.Quantity,
@@ -189,6 +230,12 @@ public sealed class StockDocumentService(
                 // 累加時效期沿用該行（2026-11-02）：記下該行實際的效期，查帳時才不會把這次填的值當成已採用
                 input.ExpiryDate, LineExpiryDate = line.ExpiryDate,
             });
+        }, key is null ? null : async () =>
+        {
+            if (!await DocumentSupport.AlreadyProcessedAsync(db, key, command, hash!, cancellationToken)) return false;
+            var prior = await db.ProcessedCommands.AsNoTracking().SingleAsync(c => c.Key == key, cancellationToken);
+            lineId = Guid.ParseExact(prior.ResultRef[5..], "N");
+            return true;
         });
         return lineId;
     }
@@ -262,35 +309,61 @@ public sealed class StockDocumentService(
 
     public async Task<Guid> CreateFromScanCartAsync(Guid cartId, ScanCartConvertInput input, Actor actor, CancellationToken cancellationToken)
     {
+        if (input.RequestId == Guid.Empty) throw new DomainRuleException("缺少轉草稿的請求識別碼。");
         if (input.Type is not (StockDocumentType.Inbound or StockDocumentType.Outbound or StockDocumentType.Transfer))
         {
             throw new DomainRuleException("購物車只能轉成進倉、出倉或移庫單。");
         }
-        if (await SameRequestAsync(input.RequestId, actor, cancellationToken))
-        {
-            return input.RequestId; // 重送（例如按兩次、網路逾時後重送）：購物車已在第一次轉單時刪除
-        }
+        const string command = "cart.convert";
+        var key = $"{command}:{input.RequestId:N}";
+        var hash = input.ExpectedVersion is null ? null : DocumentSupport.Hash(JsonSerializer.Serialize(new { CartId = cartId, ActorId = actor.Id, Input = input }));
         try
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await ExecuteAsync(db, "SELECT pg_advisory_xact_lock(hashtextextended(@key, 0))", cancellationToken, Param("key", key));
+            if (hash is not null && await DocumentSupport.AlreadyProcessedAsync(db, key, command, hash, cancellationToken))
+            {
+                if (await SameRequestAsync(input.RequestId, actor, cancellationToken)) return input.RequestId;
+                throw new NotFoundException("document.not_found", "這次轉入的草稿已被刪除。");
+            }
+            if (hash is null && await db.ProcessedCommands.AnyAsync(c => c.Key == key, cancellationToken))
+                throw new ConflictException("idempotency.key_reused", "這個請求識別碼已用於其他操作，請重新整理頁面後再試。");
+            if (await SameRequestAsync(input.RequestId, actor, cancellationToken))
+            {
+                if (hash is null) return input.RequestId; // 相容不帶版本的舊單列請求。
+                throw new ConflictException("idempotency.key_reused", "這個請求識別碼已用於其他操作，請重新整理頁面後再試。");
+            }
             // 鎖購物車：同一台在別的裝置同時轉單或修改時，後到的等前一個完成（之後找不到購物車）
             await ExecuteAsync(db, "SELECT 1 FROM scan_carts WHERE id = @id FOR UPDATE", cancellationToken, Param("id", cartId));
             var cart = await db.ScanCarts.Include(c => c.Lines).SingleOrDefaultAsync(c => c.Id == cartId && c.OwnerId == actor.Id, cancellationToken);
             if (cart is null)
             {
-                // 同一個轉單請求送了兩次：後到的等鎖結束後購物車已刪除，回傳先到的那張（審查 4）
-                if (await SameRequestAsync(input.RequestId, actor, cancellationToken))
-                {
-                    return input.RequestId;
-                }
+                if (hash is null && await SameRequestAsync(input.RequestId, actor, cancellationToken)) return input.RequestId;
                 throw new NotFoundException("scan_cart.not_found", "找不到購物車（可能已在其他裝置轉成單據或放棄）。");
             }
             if (cart.Lines.Count == 0)
             {
                 throw new DomainRuleException("購物車是空的。");
             }
-            var byLine = input.Lines.GroupBy(l => l.LineId).ToDictionary(g => g.Key, g => g.Last());
-            var missing = cart.Lines.Where(l => !byLine.ContainsKey(l.Id)).OrderBy(l => l.LineNo).Select(l => l.LineNo).ToList();
+            if (input.ExpectedVersion is { } expected && db.Entry(cart).Property<uint>("Version").CurrentValue != expected)
+            {
+                throw new ConcurrencyConflictException("scan_cart.concurrency_conflict", "購物車已被修改，請回購物車核對後再轉草稿。");
+            }
+            if (input.Lines.Count > StockDocument.MaxLines || input.Lines.Sum(l => (long)Math.Max(1, l.SerialNos?.Count ?? 0)) > StockDocument.MaxLines)
+            {
+                throw new DomainRuleException($"轉草稿最多 {StockDocument.MaxLines} 筆明細（含展開的序號），請分批作業。");
+            }
+            if (input.ExpectedVersion is null && input.Lines.Any(l => l.Quantity is not null))
+            {
+                throw new DomainRuleException("儲位分配缺少購物車版本，請回購物車重新選擇作業。");
+            }
+            var cartLineIds = cart.Lines.Select(l => l.Id).ToHashSet();
+            if (input.Lines.Any(l => !cartLineIds.Contains(l.LineId)))
+            {
+                throw new DomainRuleException("轉草稿包含不在購物車的明細，請回購物車重新核對。");
+            }
+            var byLine = input.Lines.ToLookup(l => l.LineId);
+            var missing = cart.Lines.Where(l => !byLine.Contains(l.Id)).OrderBy(l => l.LineNo).Select(l => l.LineNo).ToList();
             if (missing.Count > 0)
             {
                 throw new DomainRuleException($"第 {string.Join("、", missing)} 行還沒補齊資料（購物車可能在其他裝置被修改），請重新整理。");
@@ -303,54 +376,77 @@ public sealed class StockDocumentService(
             var warehouseCode = await WarehouseLock.LockUsableAsync(db, input.WarehouseId, "倉庫已停用，不能建立單據。", cancellationToken);
             await WarehouseAccess.EnsureAsync(db, actor, input.WarehouseId, cancellationToken);
             var current = await settings.GetAsync(cancellationToken);
-            var effective = await EffectiveHeaderAsync(input.Type, new StockDocumentHeader(input.PurposeId, null, null, null), null, current, cancellationToken);
+            var effective = await EffectiveHeaderAsync(input.Type, new StockDocumentHeader(input.PurposeId, null, null, input.Note ?? cart.Note), null, current, cancellationToken);
             var now = clock.GetUtcNow();
             var doc = StockDocument.CreateMovement(
                 input.RequestId, await NextDocNoAsync(input.Type, cancellationToken), input.Type, input.WarehouseId, effective, null, actor.Id, actor.Name, now);
             doc.MarkFromScanCart();
-            var codes = await db.Items.AsNoTracking().Where(i => cart.Lines.Select(l => l.ItemId).Contains(i.Id))
-                .ToDictionaryAsync(i => i.Id, i => i.ItemCode!, cancellationToken);
+            var items = await db.Items.AsNoTracking().Where(i => cart.Lines.Select(l => l.ItemId).Contains(i.Id))
+                .Select(i => new { i.Id, i.ItemCode, i.TrackingMode }).ToDictionaryAsync(i => i.Id, cancellationToken);
             foreach (var cartLine in cart.Lines.OrderBy(l => l.LineNo))
             {
-                var spec = byLine[cartLine.Id];
+                var specs = byLine[cartLine.Id];
+                var item = items[cartLine.ItemId];
                 try
                 {
-                    // 序號物料：每個序號一行（數量 1）；其他：一行
-                    var serials = spec.SerialNos is { Count: > 0 } list ? list : null;
-                    IEnumerable<string?> perLine = serials is null ? new string?[] { null } : serials.Select(s => (string?)s);
-                    if (serials is not null && serials.Count != cartLine.Quantity)
+                    var split = specs.Count() > 1;
+                    if (split && (input.ExpectedVersion is null || item.TrackingMode != TrackingMode.None || specs.Any(s => s.Quantity is null)))
                     {
-                        throw new DomainRuleException($"數量 {cartLine.Quantity:0.####}，但填了 {serials.Count} 個序號。");
+                        throw new DomainRuleException("只有不追蹤物料可以依版本及分配量拆成多筆明細。");
                     }
-                    foreach (var serial in perLine)
+                    // 逐筆扣除，避免輸入過大的 decimal 在加總時溢位。
+                    var remaining = cartLine.Quantity;
+                    foreach (var spec in specs)
                     {
-                        var newId = Guid.NewGuid();
-                        var (line, _, _, _) = await AddLineCoreAsync(doc, new DocumentLineInput(
-                            spec.LocationCode, codes[cartLine.ItemId], serial is null ? cartLine.Quantity : 1m,
-                            spec.LotNo, serial, spec.ExpiryDate, spec.TargetWarehouseCode, spec.TargetLocationCode, null, MergeIfSame: true),
-                            actor, current, newId, cancellationToken);
-                        // 轉單沒有畫面提示：相同的行效期不同時不沿用（否則新批號默默帶錯效期），整張不轉
-                        if (line.Id != newId && line.ExpiryDate != spec.ExpiryDate)
+                        var quantity = spec.Quantity ?? cartLine.Quantity;
+                        if (quantity <= 0 || quantity > remaining)
+                            throw new DomainRuleException("分配數量必須大於 0，且合計必須等於購物車數量。");
+                        remaining -= quantity;
+                    }
+                    if (remaining != 0)
+                        throw new DomainRuleException("分配合計必須等於購物車數量。");
+
+                    foreach (var spec in specs)
+                    {
+                        var quantity = spec.Quantity ?? cartLine.Quantity;
+                        var serials = spec.SerialNos is { Count: > 0 } list ? list : null;
+                        if (serials is not null && serials.Count != quantity)
+                            throw new DomainRuleException($"數量 {quantity:0.####}，但填了 {serials.Count} 個序號。");
+
+                        // 序號物料每個序號一行，其他物料每筆分配一行。
+                        var perLine = serials?.Select(s => (string?)s) ?? new string?[] { null };
+                        foreach (var serial in perLine)
                         {
-                            throw new DomainRuleException(
-                                $"和前面的明細是同一儲位、物料、批號，但有效期限不同（{line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}／{spec.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}），請改成相同的效期。");
+                            var newId = Guid.NewGuid();
+                            var (line, _, _, _) = await AddLineCoreAsync(doc, new DocumentLineInput(
+                                spec.LocationCode, item.ItemCode!, serial is null ? quantity : 1m,
+                                spec.LotNo, serial, spec.ExpiryDate, spec.TargetWarehouseCode, spec.TargetLocationCode, null, MergeIfSame: true),
+                                actor, current, newId, cancellationToken);
+                            // 轉單沒有畫面提示，相同的行效期不同時整張不轉。
+                            if (line.Id != newId && line.ExpiryDate != spec.ExpiryDate)
+                            {
+                                throw new DomainRuleException(
+                                    $"和前面的明細是同一儲位、物料、批號，但有效期限不同（{line.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}／{spec.ExpiryDate?.ToString("yyyy-MM-dd") ?? "未填"}），請改成相同的效期。");
+                            }
                         }
                     }
                 }
                 catch (DomainRuleException ex)
                 {
-                    throw new DomainRuleException($"第 {cartLine.LineNo} 行（{codes[cartLine.ItemId]}）：{ex.Message}");
+                    throw new DomainRuleException($"第 {cartLine.LineNo} 行（{item.ItemCode}）：{ex.Message}");
                 }
             }
             db.StockDocuments.Add(doc);
             db.ScanCarts.Remove(cart);
+            // 轉入草稿仍可按既有規則刪除。這筆紀錄以來源車為參照，不是單據審核紀錄。
+            if (hash is not null) db.ProcessedCommands.Add(ProcessedCommand.Create(key, command, hash, $"cart:{cartId:N}", now));
             AuditLog.Add(db, actor, now, "document.create_from_scan_cart", "stock_document", doc.Id.ToString(), null,
                 new { doc.DocNo, DocType = input.Type.ToString(), WarehouseCode = warehouseCode, effective.PurposeId, CartId = cart.Id, Lines = doc.Lines.Count });
             await SaveAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return doc.Id;
         }
-        catch (ConflictException ex) when (ex.ErrorCode == "document.request_id_conflict")
+        catch (ConflictException ex) when (hash is null && ex.ErrorCode == "document.request_id_conflict")
         {
             // 同一個請求同時送兩次：後到的撞主鍵（或等鎖後找不到購物車前就撞），回傳先到的那張
             if (await SameRequestAsync(input.RequestId, actor, cancellationToken))
@@ -404,6 +500,14 @@ public sealed class StockDocumentService(
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public Task UpdateLineQuantityAsync(Guid id, LineQuantityInput input, Actor actor, CancellationToken cancellationToken)
+    {
+        var (key, hash) = DocumentSupport.LineQuantityRequest(id, input, actor);
+        return MutateAsync(id, null, actor, editorOnly: true, cancellationToken,
+            (doc, now) => DocumentSupport.UpdateLineQuantityAsync(db, doc, input, actor, key, hash, now, cancellationToken),
+            () => DocumentSupport.AlreadyProcessedAsync(db, key, DocumentSupport.LineQuantityCommand, hash, cancellationToken));
+    }
+
     public Task RemoveLineAsync(Guid id, Guid lineId, Actor actor, CancellationToken cancellationToken) =>
         MutateAsync(id, null, actor, editorOnly: true, cancellationToken, (doc, now) =>
         {
@@ -441,6 +545,13 @@ public sealed class StockDocumentService(
             }
             RequireEditor(doc, actor);
             RequireHeaderFields(doc, current);
+            var created = await SubmitCoreAsync(doc, actor, now, cancellationToken);
+            return ("document.submit", (object?)new { Reservations = created });
+        });
+
+    // 呼叫端持有交易；普通送審與購物車結帳共用預留規則。
+    private async Task<int> SubmitCoreAsync(StockDocument doc, Actor actor, DateTimeOffset now, CancellationToken cancellationToken)
+    {
             doc.Submit(now);
             // 出倉單送審即預留（D-26）：依料號合計；指定手動預留的行只補預留「超出手動預留剩餘量」的部分（M4-02 審查 #6）。
             // 可用量不足就無法送審；允許負庫存的物料只預留有的部分（使用者 2026-10-22）
@@ -466,8 +577,8 @@ public sealed class StockDocumentService(
                     .ToList();
                 created = (await posting.ReserveManyAsync(requests, actor, now, cancellationToken, forDocument: true)).Count;
             }
-            return ("document.submit", (object?)new { Reservations = created });
-        });
+        return created;
+    }
 
     public Task ConfirmAsync(Guid id, uint expectedVersion, string idempotencyKey, Actor actor, CancellationToken cancellationToken) =>
         IdempotentAsync(ConfirmCommand, id, expectedVersion, idempotencyKey, actor, cancellationToken, async (doc, current, now) =>
@@ -558,6 +669,7 @@ public sealed class StockDocumentService(
         var header = new StockDocumentHeader(null, original.PartnerId, original.ExternalNo, $"沖銷 {original.DocNo}");
         var reversal = StockDocument.CreateMovement(
             Guid.NewGuid(), await NextDocNoAsync(type, cancellationToken), type, warehouseId, header, original.Id, actor.Id, actor.Name, now);
+        reversal.SetRecipient(original.RecipientUserId, original.RecipientName, original.ProjectReference);
         var itemIds = original.Lines.Select(l => l.ItemId!.Value).Distinct().ToList();
         var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
             .Select(i => new { i.Id, i.TrackingMode, DecimalPlaces = db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => (int)u.DecimalPlaces).First() })
@@ -728,9 +840,9 @@ public sealed class StockDocumentService(
     }
 
     /// <summary>修改單據的共用流程（鎖單據 → 載入 → 版本 → 權限 → 動作 → 稽核 → 儲存）。</summary>
-    private async Task MutateAsync(
+    private async Task<uint> MutateAsync(
         Guid id, uint? expectedVersion, Actor actor, bool editorOnly, CancellationToken cancellationToken,
-        Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action)
+        Func<StockDocument, DateTimeOffset, Task<(string Action, object? After)>> action, Func<Task<bool>>? replay = null)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await LockDocumentAsync(id, cancellationToken);
@@ -739,11 +851,14 @@ public sealed class StockDocumentService(
         {
             RequireEditor(doc, actor);
         }
+        if (replay is not null && await replay()) return db.Entry(doc).Property<uint>("Version").CurrentValue;
         var now = clock.GetUtcNow();
         var (name, after) = await action(doc, now);
         AuditLog.Add(db, actor, now, name, "stock_document", doc.Id.ToString(), null, after);
         await SaveAsync(cancellationToken);
+        var committedVersion = db.Entry(doc).Property<uint>("Version").CurrentValue;
         await transaction.CommitAsync(cancellationToken);
+        return committedVersion;
     }
 
     /// <summary>

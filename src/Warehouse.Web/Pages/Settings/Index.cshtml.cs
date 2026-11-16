@@ -47,6 +47,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
 
         public bool StocktakeApprovalEnabled { get; set; }
 
+        public bool QuickCheckoutEnabled { get; set; } = true;
         public bool DocumentApprovalEnabled { get; set; }
 
         public bool AllowSelfApproveDocuments { get; set; }
@@ -80,6 +81,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         public bool LineCrossTransferEnabled { get; set; }
 
         public bool LineLotSerialEnabled { get; set; }
+        public bool LineScanNumericToQuantity { get; set; }
 
         public bool AllowItemUnitTrackingChangeWithActivity { get; set; }
 
@@ -106,6 +108,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 ItemApprovalEnabled = ItemApprovalEnabled,
                 OpeningApprovalEnabled = OpeningApprovalEnabled,
                 StocktakeApprovalEnabled = StocktakeApprovalEnabled,
+                QuickCheckoutEnabled = QuickCheckoutEnabled,
                 DocumentApprovalEnabled = DocumentApprovalEnabled,
                 AllowSelfApproveDocuments = AllowSelfApproveDocuments,
                 DocumentPurposeEnabled = DocumentPurposeEnabled,
@@ -123,6 +126,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
                 LineReservationEnabled = LineReservationEnabled,
                 LineCrossTransferEnabled = LineCrossTransferEnabled,
                 LineLotSerialEnabled = LineLotSerialEnabled,
+                LineScanNumericToQuantity = LineScanNumericToQuantity,
                 AllowItemUnitTrackingChangeWithActivity = AllowItemUnitTrackingChangeWithActivity,
                 AllowItemCodeChange = AllowItemCodeChange,
                 PrintCompanyName = (PrintCompanyName ?? string.Empty).Trim(),
@@ -143,6 +147,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             ItemApprovalEnabled = s.ItemApprovalEnabled,
             OpeningApprovalEnabled = s.OpeningApprovalEnabled,
             StocktakeApprovalEnabled = s.StocktakeApprovalEnabled,
+            QuickCheckoutEnabled = s.QuickCheckoutEnabled,
             DocumentApprovalEnabled = s.DocumentApprovalEnabled,
             AllowSelfApproveDocuments = s.AllowSelfApproveDocuments,
             DocumentPurposeEnabled = s.DocumentPurposeEnabled,
@@ -160,6 +165,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
             LineReservationEnabled = s.LineReservationEnabled,
             LineCrossTransferEnabled = s.LineCrossTransferEnabled,
             LineLotSerialEnabled = s.LineLotSerialEnabled,
+            LineScanNumericToQuantity = s.LineScanNumericToQuantity,
             AllowItemUnitTrackingChangeWithActivity = s.AllowItemUnitTrackingChangeWithActivity,
             AllowItemCodeChange = s.AllowItemCodeChange,
             PrintCompanyName = s.PrintCompanyName,
@@ -196,6 +202,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.ItemApprovalEnabled => "物料建檔需要審核",
         SettingKeys.OpeningApprovalEnabled => "期初單需要審核",
         SettingKeys.StocktakeApprovalEnabled => "盤點需要審核",
+        SettingKeys.QuickCheckoutEnabled => "快速進出一次結帳",
         SettingKeys.DocumentApprovalEnabled => "單據需要審核",
         SettingKeys.AllowSelfApproveDocuments => "進出倉單允許自核",
         SettingKeys.DocumentPurposeEnabled => "表頭：用途啟用",
@@ -214,6 +221,7 @@ public class IndexModel(ISettingsService settings, Warehouse.Application.Audit.I
         SettingKeys.LineReservationEnabled => "明細：指定預留",
         SettingKeys.LineCrossTransferEnabled => "明細：跨倉移庫",
         SettingKeys.LineLotSerialEnabled => "明細：批號序號欄",
+        SettingKeys.LineScanNumericToQuantity => "在數量欄掃碼時",
         SettingKeys.AllowItemUnitTrackingChangeWithActivity => "有異動的物料可改單位／追蹤模式",
         SettingKeys.AllowItemCodeChange => "已核准的物料可改料號",
         SettingKeys.RememberMeDays => "記住登入天數",

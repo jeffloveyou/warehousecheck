@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Warehouse.Api.Authorization;
@@ -15,7 +16,7 @@ namespace Warehouse.Web.Pages.Import;
 /// </summary>
 public class DetailsModel(IImportService imports, IAuthorizationService authorization) : PageModel
 {
-    /// <summary>畫面最多列出的問題筆數（其餘請修正後重新上傳）。</summary>
+    /// <summary>畫面最多列出的問題筆數；完整問題以 CSV 串流下載。</summary>
     public const int MaxIssues = 500;
 
     public ImportBatchView Batch { get; private set; } = null!;
@@ -24,6 +25,29 @@ public class DetailsModel(IImportService imports, IAuthorizationService authoriz
 
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken) =>
         await LoadAsync(id, cancellationToken) ? Page() : NotFound();
+
+    public async Task<IActionResult> OnGetIssuesAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var batch = await imports.GetAsync(id, User.ToActor(), User.IsInRole(Roles.SystemAdmin), 0, cancellationToken);
+        if (batch is null) return NotFound();
+        Response.ContentType = "text/csv; charset=utf-8";
+        Response.Headers.ContentDisposition = $"attachment; filename=import-issues-{id:N}.csv";
+        Response.Headers.CacheControl = "no-store";
+        await using var writer = new StreamWriter(Response.Body, new UTF8Encoding(true), 4096, leaveOpen: true);
+        await writer.WriteLineAsync("來源列,類型,說明".AsMemory(), cancellationToken);
+        await foreach (var issue in imports.ReadIssuesAsync(id, User.ToActor(), User.IsInRole(Roles.SystemAdmin), cancellationToken))
+            await writer.WriteLineAsync($"{issue.RowNo},{(issue.IsError ? "錯誤" : "警告")},{CsvCell(issue.Message)}".AsMemory(), cancellationToken);
+        await writer.FlushAsync(cancellationToken);
+        return new EmptyResult();
+    }
+
+    /// <summary>引號與公式前綴都處理，避免用試算表開啟報告時執行公式。</summary>
+    internal static string CsvCell(string value)
+    {
+        var trimmed = value.TrimStart();
+        if (trimmed.Length > 0 && ("=+-@".Contains(trimmed[0]) || value[0] is '\t' or '\r' or '\n')) value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
 
     public async Task<IActionResult> OnPostCommitAsync(Guid id, [FromServices] ImportGate gate, CancellationToken cancellationToken)
     {

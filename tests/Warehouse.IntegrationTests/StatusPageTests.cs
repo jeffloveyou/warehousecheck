@@ -17,7 +17,7 @@ public class StatusPageTests
         var html = await response.Content.ReadAsStringAsync(ct);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("系統狀態", html);
+        Assert.Contains("作業首頁", html);
         Assert.Contains("已連線", html);
         Assert.Contains("id=\"version\"", html);
         // 只有全站共用的 pwa.js（M5-02，約 3 KB：Service Worker 註冊、離線與新版提示），沒有其他程式

@@ -1,0 +1,12 @@
+/* 作業首頁與補印入口；Chrome／Edge 109。 */
+.work-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:16px 0; }
+.work-card { border:1px solid #ccd5df;border-radius:6px;padding:16px;background:#fff;min-width:0; }
+.work-card h2 { margin-top:0; }
+.work-list { list-style:none;padding:0;margin:0; }
+.work-list li { border-top:1px solid #e1e6ed;padding:10px 0;overflow-wrap:anywhere; }
+.work-list a { display:inline-block;min-height:44px;padding-top:10px; }
+.item-label-select { width:100%;display:flex;flex-direction:column;gap:4px; }
+.item-label-select label { display:block;min-height:44px;padding:8px;border-bottom:1px solid #ccd5df; }
+.item-label-select input { width:20px;height:20px;vertical-align:middle; }
+.print-toolbar input,.print-toolbar select,.print-toolbar button { min-height:44px;max-width:100%; }
+@media(max-width:600px) { .work-grid { grid-template-columns:1fr; } .print-toolbar { align-items:stretch; } .label-filters { width:100%; } }

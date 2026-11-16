@@ -13,13 +13,17 @@ public sealed record UserSummary(
     bool MustChangePassword,
     bool AllWarehouses,
     IReadOnlyList<Guid> WarehouseIds,
-    string ConcurrencyStamp);
+    string ConcurrencyStamp,
+    bool IsShared = false);
 
 /// <summary>新增帳號：初始密碼由系統產生，只在回傳結果出現一次。</summary>
-public sealed record CreateUserRequest(string UserName, string DisplayName, IReadOnlyList<string> Roles);
+/// <param name="IsShared">公用帳號：送出進出倉動作時必須選操作人（ADR-0030）。</param>
+public sealed record CreateUserRequest(string UserName, string DisplayName, IReadOnlyList<string> Roles, bool IsShared = false);
 
 /// <summary>修改顯示名稱與角色。<paramref name="ConcurrencyStamp"/> 是開表單時讀到的值，被別人改過就拒絕。</summary>
-public sealed record UpdateUserRequest(Guid Id, string DisplayName, IReadOnlyList<string> Roles, string ConcurrencyStamp);
+/// <param name="IsShared">null＝不變更公用帳號設定。</param>
+public sealed record UpdateUserRequest(
+    Guid Id, string DisplayName, IReadOnlyList<string> Roles, string ConcurrencyStamp, bool? IsShared = null);
 
 /// <summary>新增帳號或重設密碼的結果：密碼只顯示這一次，不寫入任何紀錄。</summary>
 public sealed record UserPasswordResult(Guid UserId, string UserName, string Password);

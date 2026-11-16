@@ -25,6 +25,16 @@ public sealed class ScanCart
 
     public string? Note { get; private set; }
 
+    /// <summary>核對畫面的帳號草稿；只保存輸入，不預留或異動庫存。</summary>
+    public string? DraftJson { get; private set; }
+
+    public void SetDraft(string? json, DateTimeOffset now)
+    {
+        if (json is { Length: > 200000 }) throw new DomainRuleException("核對草稿過大，請減少分配行。");
+        DraftJson = json;
+        UpdatedAt = now;
+    }
+
     /// <summary>購物車裡有儲位時的倉庫（所有有儲位的行都在這個倉庫）；沒有任何儲位時為 null。</summary>
     public Guid? WarehouseId { get; private set; }
 

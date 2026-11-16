@@ -1,0 +1,17 @@
+@model Warehouse.Web.Security.OperatorPickerView
+@* 公用帳號的操作人選單（ADR-0030）：伺服器端會再檢查，沒選或已停用的人員一律拒絕 *@
+<div class="message warn operator-picker">
+    <label for="operator-name"><strong>操作人</strong>（公用帳號必選，紀錄會寫成「姓名（@User.ToActor().Name）」）</label>
+    <select id="operator-name" name="@(Model.InForm ? OperatorActor.FieldName : null)" required data-operator-select>
+        <option value="">— 請選擇你的名字 —</option>
+        @foreach (var person in Model.Names)
+        {
+            <option value="@person.Id">@person.Name</option>
+        }
+    </select>
+    @if (Model.Names.Count == 0)
+    {
+        <p>人員名單是空的，請倉庫主管或物料管理員到「人員名單」新增後再操作。</p>
+    }
+</div>
+<script src="~/js/operator-picker.js" asp-append-version="true"></script>

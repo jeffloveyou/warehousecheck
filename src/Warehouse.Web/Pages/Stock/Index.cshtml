@@ -1,11 +1,13 @@
 @page
 @model Warehouse.Web.Pages.Stock.IndexModel
 @{
+    ViewData["MobileCards"] = true;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "庫存";
 }
 <h1>庫存查詢</h1>
 <p><a href="/Stock/Movements" id="link-movements">異動歷史</a>　<a href="/Stock/Negative" id="link-negative">待補帳</a>　<a href="/Stock/Anomalies" id="link-anomalies">庫存異常</a></p>
-<form method="get" class="filters" id="stock-filters">
+<form method="get" data-page-query class="filters" id="stock-filters">
     <select name="WarehouseId" aria-label="倉庫" id="stock-warehouse">
         <option value="">選擇倉庫</option>
         @foreach (var w in Model.Warehouses)
@@ -17,6 +19,7 @@
     <input type="text" name="ItemCode" value="@Model.ItemCode" placeholder="料號" aria-label="料號" data-camera-field="item" data-camera-allow-pack data-camera-allow-inactive />
     <button type="submit" id="stock-submit">查詢</button>
 </form>
+<div id="query-results" data-page-region>
 <partial name="_ExportLink" model="Model.ExportUrl" />
 @if (Model.Notice is not null)
 {
@@ -24,6 +27,27 @@
 }
 @if (Model.Balances is { } balances)
 {
+    @if (Model.Summary is { } summary)
+    {
+        <h2>倉庫物料摘要（共 @summary.TotalCount 筆）</h2>
+        <p class="muted">摘要涵蓋整個倉庫。可出量＝有效儲位的可用狀態結存－未到期預留；下方儲位數量是帳面結存，未扣預留。正式出庫仍會重新檢查。</p>
+        <div class="table-wrap">
+            <table id="stock-summary">
+                <thead><tr><th>倉庫</th><th>料號／品名</th><th>整倉結存</th><th>有效可用結存</th><th>預留</th><th>可出量</th></tr></thead>
+                <tbody>
+                    @foreach (var row in summary.Items)
+                    {
+                        <tr><td>@row.WarehouseCode</td><td>@row.ItemCode @row.ItemName</td><td>@Display.Qty(row.Balance) @row.UnitCode</td><td>@Display.Qty(row.EligibleBalance)</td><td>@Display.Qty(row.Reserved)</td><td>@Display.Qty(row.Available)</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="pager">
+            @if (summary.Page > 1) { <a href="@Model.SummaryPageUrl(summary.Page - 1)">摘要上一頁</a> }
+            <span>摘要第 @summary.Page / @summary.TotalPages 頁</span>
+            @if (summary.Page < summary.TotalPages) { <a href="@Model.SummaryPageUrl(summary.Page + 1)">摘要下一頁</a> }
+        </div>
+    }
     <h2>結存（共 @balances.TotalCount 筆）</h2>
     <div class="table-wrap">
         <table id="balance-list">
@@ -101,6 +125,7 @@
     <h2>尚未清點的儲位（@uncounted.TotalCount）</h2>
     <p>@string.Join("、", uncounted.Items.Select(u => u.LocationCode))@(uncounted.TotalCount > uncounted.Items.Count ? "…" : "")</p>
 }
+</div>
 @section Scripts {
     @* 儲位、料號欄的相機按鈕（docs/04 §6.2）：儲位 QR 連同倉庫一起帶入 *@
     <script src="~/js/scan-input.js" asp-append-version="true"></script>

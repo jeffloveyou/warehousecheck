@@ -4,6 +4,7 @@
 @using Warehouse.Application.Warehousing
 @{
     var d = Model.Doc;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = d.DocNo;
     ViewData["UsesPrefs"] = true; // 明細輸入區的常用設定（M8-06）
 }
@@ -66,9 +67,10 @@
         </div>
         <div class="actions"><button type="submit" id="opening-add-line">加入</button></div>
     </form>
-    <form method="get" class="filters" id="suggest-form">
+    <form method="get" data-page-query class="filters" id="suggest-form">
         <input type="text" name="Suggest" value="@Model.Suggest" maxlength="200" placeholder="料號（可掃碼）" aria-label="查建議儲位的料號" data-scan-field data-camera-field="item" autocomplete="off" />
         <button type="submit" class="secondary" id="suggest-submit">查建議儲位</button>
+        <div id="suggestion-results" data-page-region>
         @if (Model.Suggestions is { } suggestions)
         {
             <span id="suggestions">
@@ -82,6 +84,7 @@
                 }
             </span>
         }
+        </div>
     </form>
     @if (Model.Uncounted.Count > 0)
     {

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Inventory;
+using Warehouse.Domain.Inventory;
 using Warehouse.Domain.Warehousing;
 using Warehouse.Infrastructure.Persistence;
 
@@ -116,6 +117,20 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
             var pattern = LikePattern.Contains(actor);
             movements = movements.Where(m => EF.Functions.ILike(m.ActorName, pattern, LikePattern.Escape));
         }
+        if (!string.IsNullOrWhiteSpace(q.Recipient))
+        {
+            var text = q.Recipient.Trim();
+            text = text[..Math.Min(text.Length, Paging.MaxKeywordLength)];
+            movements = movements.Where(m => db.StockDocuments.Any(d => d.Id == m.DocumentId
+                && d.RecipientName != null && d.RecipientName.Contains(text)));
+        }
+        if (!string.IsNullOrWhiteSpace(q.Project))
+        {
+            var text = q.Project.Trim();
+            text = text[..Math.Min(text.Length, Paging.MaxKeywordLength)];
+            movements = movements.Where(m => db.StockDocuments.Any(d => d.Id == m.DocumentId
+                && d.ProjectReference != null && d.ProjectReference.Contains(text)));
+        }
         if (q.From is { } from)
         {
             var utc = from.ToUniversalTime();
@@ -130,10 +145,14 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
     }
 
     public async Task<PagedResult<MovementRow>> GetMovementsAsync(
-        Guid? itemId, Guid? locationId, Guid? documentId, int page, CancellationToken cancellationToken)
+        Guid? itemId, Guid? locationId, Guid? documentId, int page, CancellationToken cancellationToken, Guid? warehouseId = null)
     {
         page = Paging.ClampPage(page);
         var movements = db.StockMovements.AsNoTracking();
+        if (warehouseId is { } warehouse)
+        {
+            movements = movements.Where(m => db.Locations.Any(l => l.Id == m.LocationId && l.WarehouseId == warehouse));
+        }
         if (itemId is { } i)
         {
             movements = movements.Where(m => m.ItemId == i);
@@ -148,6 +167,50 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
         }
 
         return await PageMovementsAsync(movements, page, cancellationToken);
+    }
+
+    public async Task<PagedResult<WarehouseStockSummaryRow>> GetWarehouseSummaryAsync(
+        Guid? warehouseId, Guid? locationId, Guid? itemId, int page, CancellationToken cancellationToken)
+    {
+        page = Paging.ClampPage(page);
+        // 只依目前篩選到的物料＋倉庫分頁；摘要數量始終涵蓋整倉，不把預留分攤到個別儲位。
+        if (warehouseId is null && locationId is null && itemId is null)
+            return new([], page, Paging.DefaultPageSize, 0);
+        var now = (clock ?? TimeProvider.System).GetUtcNow();
+        var balances = db.StockBalances.AsNoTracking();
+        var reservations = db.StockReservations.AsNoTracking().Where(r => r.Status == ReservationStatus.Open
+            && (r.ExpiresAt == null || r.ExpiresAt > now));
+        var keys = (from b in balances
+                    join l in db.Locations on b.LocationId equals l.Id
+                    where (warehouseId == null || l.WarehouseId == warehouseId)
+                        && (locationId == null || b.LocationId == locationId)
+                        && (itemId == null || b.ItemId == itemId)
+                    select new { b.ItemId, l.WarehouseId })
+            .Union(reservations.Where(r => locationId == null
+                    && (warehouseId == null || r.WarehouseId == warehouseId)
+                    && (itemId == null || r.ItemId == itemId))
+                .Select(r => new { r.ItemId, r.WarehouseId }));
+        var total = await keys.CountAsync(cancellationToken);
+        var query = from key in keys
+                    join item in db.Items on key.ItemId equals item.Id
+                    join unit in db.Units on item.BaseUnitId equals unit.Id
+                    join wh in db.Warehouses on key.WarehouseId equals wh.Id
+                    let balance = (from b in balances
+                                   join l in db.Locations on b.LocationId equals l.Id
+                                   where b.ItemId == key.ItemId && l.WarehouseId == key.WarehouseId
+                                   select (decimal?)b.Quantity).Sum() ?? 0m
+                    let eligible = (from b in balances
+                                    join l in db.Locations on b.LocationId equals l.Id
+                                    where b.ItemId == key.ItemId && l.WarehouseId == key.WarehouseId
+                                        && b.StockStatus == StockStatus.Available && l.Status == LocationStatus.Available
+                                    select (decimal?)b.Quantity).Sum() ?? 0m
+                    let reserved = reservations.Where(r => r.ItemId == key.ItemId && r.WarehouseId == key.WarehouseId)
+                        .Sum(r => (decimal?)r.RemainingQuantity) ?? 0m
+                    orderby wh.Code, item.ItemCode, item.Id
+                    select new WarehouseStockSummaryRow(item.Id, item.ItemCode, item.Name, unit.Code, wh.Code,
+                        balance, eligible, reserved, eligible - reserved);
+        var rows = await query.Skip((page - 1) * Paging.DefaultPageSize).Take(Paging.DefaultPageSize).ToListAsync(cancellationToken);
+        return new(rows, page, Paging.DefaultPageSize, total);
     }
 
     /// <summary>異動列的共用投影與分頁（單據、物料、儲位、倉庫、批號、序號）。</summary>
@@ -173,7 +236,8 @@ public sealed class StockQueryService(WarehouseDbContext db, TimeProvider? clock
         orderby m.OccurredAt descending, m.Id
         select new MovementRow(
             m.OccurredAt, doc.DocNo, doc.DocType, item.ItemCode, item.Name, wh.Code, loc.Code, lot.LotNo,
-            serial.SerialNo, m.StockStatus, m.QuantityDelta, m.BalanceAfter, m.ActorName, m.DocumentId, m.IsNegative);
+            serial.SerialNo, m.StockStatus, m.QuantityDelta, m.BalanceAfter, m.ActorName, m.DocumentId, m.IsNegative,
+            doc.RecipientName, doc.ProjectReference);
 
     public async Task<PagedResult<UncountedLocationRow>> GetUncountedLocationsAsync(
         Guid warehouseId, int page, CancellationToken cancellationToken)

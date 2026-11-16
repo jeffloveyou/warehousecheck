@@ -149,3 +149,74 @@ input[type=file] { max-width: 100%; }
 .banner button { margin-left: 8px; }
 .inline-check { margin-right: 1em; white-space: nowrap; display: inline-block; }
 code.json { white-space: pre-wrap; word-break: break-all; }
+
+/* 快速進出：手機常駐結帳摘要與分配卡片。 */
+.quick-location-controls { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+.quick-location-entry { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.quick-location-entry > input, .quick-location-entry > .picker { flex: 1 1 220px; min-width: 0; }
+.quick-location-controls input, .quick-location-controls select, .quick-location-controls button { min-height: 44px; }
+.quick-allocation > label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.quick-allocation .picker { min-width: 0; max-width: 100%; }
+.quick-total-label { display: inline-flex; flex-direction: column; gap: 4px; vertical-align: bottom; margin-right: 8px; }
+.quick-split-details, .quick-bulk-details { margin: 12px 0; }
+.quick-split-details > summary, .quick-bulk-details > summary { padding: 8px 0; cursor: pointer; }
+.quick-allocation [hidden] { display: none; }
+.quick-location-controls select { min-width: 0; }
+@media (max-width: 600px) {
+  .quick-location-controls { grid-template-columns: minmax(0, 1fr); }
+  .quick-location-entry > input, .quick-location-entry > .picker { flex-basis: 100%; }
+}
+.quick-checkout-bar { position: sticky; bottom: 0; background: #fff; border-top: 2px solid #243447; padding: 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; z-index: 5; }
+.quick-checkout-bar button, .quick-allocation-card button, .quick-failures button { min-height: 44px; }
+.quick-allocation-card { padding: 12px; border: 1px solid #ccd; margin: 10px 0; }
+.quick-allocation { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.quick-allocation input { min-height: 44px; max-width: 100%; width: 10em; }
+.quick-failures { color: #b3261e; padding-left: 24px; }
+.quick-failures:empty { display: none; }
+.quick-failures li { margin: 10px 0; }
+@media (max-width: 600px) {
+  #quick-line-table, #quick-line-table tbody, #quick-line-table tr, #quick-line-table td { display: block; }
+  #quick-line-table thead { display: none; }
+  #quick-line-table tr { border: 1px solid #ccd; margin: 8px 0; padding: 8px; }
+  #quick-line-table form { display: flex; flex-wrap: wrap; gap: 8px; }
+  #quick-line-table input { max-width: 100%; min-height: 44px; }
+  .quick-checkout-bar { margin: 0 -8px; }
+}
+
+@media (max-width: 600px) {
+  .quick-has-checkout main { padding-bottom: 140px; }
+  .quick-checkout-bar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; }
+}
+
+.quick-checkout-bar[hidden] { display: none; }
+.quick-line-edit, .quick-line-summary, .quick-allocation-card > .allocation-select { display: none; }
+.quick-bulk-mode .quick-allocation-card > .allocation-select { display: inline-block; }
+.quick-line-editor[hidden], #quick-lines tr[hidden] { display: none; }
+@media (max-width: 600px) {
+  .quick-allocation-card h4 { margin: 4px 0; }
+  .quick-line-summary { display: block; margin: 4px 0; }
+  .quick-allocation-card .quick-line-edit { display: inline-block; }
+  #quick-cart .scan-bar { flex-wrap: wrap; }
+  #quick-cart .scan-bar input { min-width: 0; }
+}
+#quick-cart :disabled, #quick-checkout-form :disabled, #quick-line-table :disabled { opacity: .65; cursor: default; }
+#quick-checkout-result:not(:empty) { margin: 12px 0; padding: 12px; border: 1px solid #243447; font-size: 17px; }
+.allocation-error { border: 2px solid #b3261e; }
+.allocation-summary { font-weight: bold; margin: 8px 0; }
+.line-total { width: 7em; min-height: 44px; max-width: 100%; }
+.quick-allocation-card, #quick-search-results { overflow-wrap: anywhere; }
+.quick-allocation-card .allocation-select { min-height: 24px; min-width: 24px; }
+#quick-search input, #quick-bulk-location { max-width: 100%; min-height: 44px; }
+#quick-cart button, #quick-save-draft, #quick-bulk-apply, #quick-review-draft { min-height: 44px; }
+#quick-lines[hidden], #quick-note-form[hidden] { display: none; }
+.count-save-state { display: block; white-space: normal; font-size: .85em; }
+@media (max-width: 600px) {
+  .mobile-cards, .mobile-cards tbody, .mobile-cards tr, .mobile-cards td { display: block; width: auto; }
+  .mobile-cards thead { display: none; }
+  .mobile-cards tr { border: 1px solid #ccd; margin: 8px 0; padding: 8px; }
+  .mobile-cards td { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .mobile-cards td[data-label]::before { content: attr(data-label) '：'; font-weight: bold; margin-right: 6px; }
+  .mobile-cards input, .mobile-cards select, .mobile-cards button { min-height: 44px; max-width: 100%; }
+  #stocktake-lines td { padding: 8px; }
+  #stocktake-lines button, #stocktake-lines input[name="quantity"] { min-height: 44px; }
+}

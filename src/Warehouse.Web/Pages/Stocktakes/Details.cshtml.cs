@@ -61,6 +61,7 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
     public bool ApprovalEnabled { get; private set; } = true;
 
     public string? Error { get; private set; }
+    public Guid ActorId => User.ToActor().Id;
 
     public sealed class CountForm
     {
@@ -105,6 +106,18 @@ public class DetailsModel(IStocktakeService stocktakes, IAuthorizationService au
             await stocktakes.CountLineAsync(id, lineId, quantity ?? throw new DomainRuleException("請輸入實盤量（沒有庫存請填 0）。"), actor, cancellationToken);
             return "已更新實盤量。";
         }, cancellationToken);
+
+    public async Task<IActionResult> OnPostSaveLineAsync(Guid id, Guid lineId, decimal? quantity, CancellationToken cancellationToken)
+    {
+        if (!(await authorization.AuthorizeAsync(User, Policies.StocktakeCount)).Succeeded) return Forbid();
+        if (!ModelState.IsValid || quantity is null) return BadRequest(new { message = "請輸入實盤量；沒有庫存請填 0。" });
+        try
+        {
+            await stocktakes.CountLineAsync(id, lineId, quantity.Value, User.ToActor(), cancellationToken);
+            return new JsonResult(new { message = "已儲存實盤量；重新整理後可核對最新差異。" });
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException) { return BadRequest(new { message = ex.Message }); }
+    }
 
     public Task<IActionResult> OnPostSubmitAsync(Guid id, CancellationToken cancellationToken) =>
         RunAsync(id, Policies.StocktakeCount, async actor =>

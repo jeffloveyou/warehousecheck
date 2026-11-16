@@ -4,15 +4,18 @@
 @using Warehouse.Application.Warehousing
 @using Warehouse.Web.Pages.Documents
 @{
+    ViewData["MobileCards"] = true;
     var d = Model.Doc;
     var s = Model.Settings;
     var isTransfer = d.DocType == StockDocumentType.Transfer;
     var isInbound = d.DocType == StockDocumentType.Inbound;
     var isOutbound = d.DocType == StockDocumentType.Outbound;
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = d.DocNo;
     ViewData["UsesPrefs"] = true; // 明細輸入區的常用設定（M8-06）
 }
 <h1>@d.DocNo <span class="muted">@Display.Of(d.DocType) @d.WarehouseCode</span> @Display.Of(d.Status)</h1>
+<div id="document-feedback" data-page-region="attachments" data-page-group="header" aria-live="polite">
 @if (TempData["Message"] is string message)
 {
     <div class="message info" id="page-message">@message</div>
@@ -21,14 +24,32 @@
 {
     <div class="message error" id="page-error">@Model.Error</div>
 }
+@if (Model.SavedHeaderVersion is { } savedHeaderVersion)
+{
+    <span data-saved-header-version="@savedHeaderVersion" hidden></span>
+}
+@if (Model.ReviewHeaderVersion && Model.CanEdit)
+{
+    <details id="document-header-review">
+        <summary>查看最新表頭</summary>
+        <p>請比對下方目前的表頭與你的輸入。確定要使用目前版本時，再儲存你的修改。</p>
+        <button type="button" class="secondary" data-review-header-version="@Model.Version">採用目前版本並保留輸入</button>
+    </details>
+}
+</div>
 @if (d.ReturnComment is not null && d.Status == StockDocumentStatus.Draft)
 {
     <div class="message warn">退回原因：@d.ReturnComment</div>
 }
 @if (d.ReversalOfDocumentId is { } originalId)
 {
-    <div class="message info">這是 <a href="/Documents/Details/@originalId">@d.ReversalOfDocNo</a> 的沖銷單（方向相反，過帳後抵銷原單）。</div>
+    <div class="message info">這是 <a href="/Documents/Details/@originalId">@d.ReversalOfDocNo</a> 的沖銷單。此單方向與原單相反，仍需核對明細及完成過帳才會抵銷；原單與異動紀錄會保留。</div>
 }
+@if (d.RelatedReversal is { } reversal)
+{
+    <div class="message info">關聯沖銷單：<a href="/Documents/Details/@reversal.Id">@reversal.DocNo</a>（@Display.Of(reversal.Status)）。請查看沖銷單狀態確認是否已完成更正。</div>
+}
+<div id="document-header-summary" data-page-region="header">
 <dl class="status">
     <dt>類型</dt><dd>@Display.Of(d.DocType)</dd>
     <dt>倉庫</dt><dd>@d.WarehouseCode</dd>
@@ -48,14 +69,18 @@
     {
         <dt>備註</dt><dd>@d.Note</dd>
     }
+    @if (d.RecipientName is not null) { <dt>實際領用人</dt><dd>@d.RecipientName</dd> }
+    @if (d.ProjectReference is not null) { <dt>專案／工單</dt><dd>@d.ProjectReference</dd> }
     <dt>建立</dt><dd>@d.CreatedByName @Display.Time(d.CreatedAt)</dd>
     <dt>送審</dt><dd>@(d.SubmittedAt is { } submittedAt ? Display.Time(submittedAt) : "")</dd>
     <dt>核准／過帳</dt><dd>@d.ApprovedByName @(d.PostedAt is { } postedAt ? Display.Time(postedAt) : "")</dd>
 </dl>
+</div>
 
+<div id="document-header-editor" data-page-region="header" data-page-keep-on-error>
 @if (Model.CanEdit && Model.HeaderOptions is { } headerOptions)
 {
-    <form method="post" asp-page-handler="UpdateHeader" class="panel" id="document-header-form">
+    <form method="post" asp-page-handler="UpdateHeader" class="panel" id="document-header-form" data-page-write="header">
         <h2>修改表頭</h2>
         <input type="hidden" name="Version" value="@Model.Version" />
         <div class="form-grid">
@@ -64,6 +89,8 @@
         <div class="actions"><button type="submit" class="secondary" id="document-save-header">儲存表頭</button></div>
     </form>
 }
+</div>
+<p id="document-header-wait" class="message warn" role="status" hidden>表頭儲存中，請等候完成再繼續。</p>
 
 @* 掃碼面板放在明細表上面：明細很多時（尤其手機）不必捲到最下面才能掃 *@
 @if (Model.CanEdit)
@@ -158,7 +185,8 @@
                 <p class="muted">本倉共 @balances.TotalCount 筆結存，只列前 @balances.Items.Count 筆；其他請至<a href="/Stock?WarehouseId=@d.WarehouseId" target="_blank" rel="noopener">庫存查詢</a>，再手動輸入儲位、批號、序號。</p>
             }
         }
-        <form method="post" asp-page-handler="AddLine" id="document-line-form">
+        <form method="post" asp-page-handler="AddLineOnce" id="document-line-form">
+            <input type="hidden" name="Line.OperationId" value="@(Model.Line.OperationId ?? Guid.NewGuid())" />
             <div class="form-grid">
                 <label for="Line_LocationCode">@(isInbound ? "入庫儲位碼" : "來源儲位碼") <span class="required-mark">*</span></label>
                 <input type="text" id="Line_LocationCode" name="Line.LocationCode" value="@Model.Line.LocationCode" required maxlength="200" placeholder="掃描儲位 QR 或輸入，例 W1-A-01" />
@@ -208,10 +236,14 @@
     </div>
 }
 
+@if (Model.CanConfirm || Model.CanSubmit || Model.CanApprove || Model.CanCancel || Model.CanReverse)
+{
+    @await Component.InvokeAsync("OperatorPicker", new { inForm = false })
+}
 <div class="doc-actions" id="document-actions">
     @if (Model.CanConfirm)
     {
-        <form method="post" asp-page-handler="Confirm">
+        <form method="post" asp-page-handler="Confirm" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-confirm">確認過帳</button>
@@ -219,7 +251,7 @@
     }
     @if (Model.CanSubmit)
     {
-        <form method="post" asp-page-handler="Submit">
+        <form method="post" asp-page-handler="Submit" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-submit">送審</button>
@@ -227,12 +259,12 @@
     }
     @if (Model.CanApprove)
     {
-        <form method="post" asp-page-handler="Approve">
+        <form method="post" asp-page-handler="Approve" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="hidden" name="IdempotencyKey" value="@Model.IdempotencyKey" />
             <button type="submit" id="document-approve">核准並過帳</button>
         </form>
-        <form method="post" asp-page-handler="Return">
+        <form method="post" asp-page-handler="Return" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
             <input type="text" name="Comment" maxlength="@StockDocument.NoteMaxLength" placeholder="退回原因（必填）" aria-label="退回原因" />
             <button type="submit" class="secondary" id="document-return">退回修改</button>
@@ -249,15 +281,17 @@
     }
     @if (Model.CanCancel)
     {
-        <form method="post" asp-page-handler="Cancel">
+        <form method="post" asp-page-handler="Cancel" data-operator-required>
             <input type="hidden" name="Version" value="@Model.Version" />
+            <label class="inline-check"><input type="checkbox" required /> 確定取消 @d.DocNo（尚未入帳，釋放本單預留）</label>
             <button type="submit" class="danger" id="document-cancel">取消這張單</button>
         </form>
     }
     @if (Model.CanReverse)
     {
-        <form method="post" asp-page-handler="Reverse">
-            <button type="submit" class="secondary" id="document-reverse">建立沖銷單</button>
+        <form method="post" asp-page-handler="Reverse" data-operator-required>
+            <p class="muted">更正 @d.DocNo：建立方向相反的草稿，核對並過帳後才影響庫存；原單保留，不會直接刪除紀錄。</p>
+            <button type="submit" class="secondary" id="document-reverse">建立沖銷草稿</button>
         </form>
     }
     <a href="/Documents/Print/@d.Id" target="_blank" rel="noopener" id="document-print">列印</a>
@@ -280,9 +314,10 @@
 }
 
 @* 關閉附件功能後，既有附件仍可檢視（唯讀），只是不能新增或移除（M6-05） *@
+<div id="document-attachments" data-page-region="attachments">
 @if (s.DocumentAttachmentsEnabled || Model.Attachments.Count > 0)
 {
-    <h2>附件（@Model.Attachments.Count）</h2>
+    <h2 id="document-attachments-heading" tabindex="-1">附件（@Model.Attachments.Count）</h2>
     @if (Model.Attachments.Count == 0)
     {
         <p class="muted" id="attachment-empty">沒有附件。</p>
@@ -306,9 +341,9 @@
                     <span class="muted">@a.UploadedByName @Display.Time(a.UploadedAt)</span>
                     @if (Model.CanEdit && s.DocumentAttachmentsEnabled)
                     {
-                        <form method="post" asp-page-handler="RemoveAttachment" class="inline">
+                        <form method="post" data-page-post="attachments" asp-page-handler="RemoveAttachment" class="inline">
                             <input type="hidden" name="attachmentId" value="@a.Id" />
-                            <button type="submit" class="link">移除</button>
+                            <button type="submit" class="link" id="remove-attachment-@a.Id">移除</button>
                         </form>
                     }
                 </figcaption>
@@ -317,13 +352,14 @@
     </div>
     @if (Model.CanUpload)
     {
-        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data" class="panel filters" id="attachment-upload-form">
+        <form method="post" data-page-post="attachments" asp-page-handler="Upload" enctype="multipart/form-data" class="panel filters" id="attachment-upload-form">
             <input type="file" name="Attachment" accept="image/jpeg,image/png,image/webp,application/pdf" aria-label="選擇附件" required />
             <button type="submit" id="attachment-upload">上傳</button>
             <span class="muted">JPEG／PNG／WebP／PDF，每檔 10 MB 以內，每張單最多 10 個；過帳後只能新增、不能移除。</span>
         </form>
     }
 }
+</div>
 <p><a href="/Documents">回進出倉單清單</a></p>
 @section Scripts {
     <script src="~/js/documents.js" asp-append-version="true"></script>

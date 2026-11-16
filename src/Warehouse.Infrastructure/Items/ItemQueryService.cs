@@ -12,6 +12,16 @@ namespace Warehouse.Infrastructure.Items;
 /// </summary>
 public sealed class ItemQueryService(WarehouseDbContext db) : IItemQueryService
 {
+    public async Task<IReadOnlyList<ItemLabelRow>> LabelsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count is 0 or > 100) return [];
+        var selected = ids.Distinct().ToArray();
+        return await db.Items.AsNoTracking().Where(i => selected.Contains(i.Id) && i.Status == ItemStatus.Active && i.ItemCode != null)
+            .OrderBy(i => i.ItemCode).Select(i => new ItemLabelRow(i.Id, i.ItemCode!, i.Name, i.Specification,
+                db.Units.Where(u => u.Id == i.BaseUnitId).Select(u => u.Code).First()))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<PagedResult<ItemListRow>> SearchAsync(ItemSearchQuery query, CancellationToken cancellationToken)
     {
         var page = Paging.ClampPage(query.Page);

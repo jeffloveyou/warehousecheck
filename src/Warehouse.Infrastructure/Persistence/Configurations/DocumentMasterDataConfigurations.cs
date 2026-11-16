@@ -39,6 +39,21 @@ public class BusinessPartnerConfiguration : IEntityTypeConfiguration<BusinessPar
     }
 }
 
+/// <summary>operator_names：公用帳號的人員名單，正規化姓名唯一。</summary>
+public class OperatorNameConfiguration : IEntityTypeConfiguration<OperatorName>
+{
+    public void Configure(EntityTypeBuilder<OperatorName> builder)
+    {
+        builder.ToTable("operator_names");
+        builder.HasKey(o => o.Id);
+        builder.Property(o => o.Id).ValueGeneratedNever();
+        builder.Property(o => o.Name).HasMaxLength(OperatorName.NameMaxLength);
+        builder.Property(o => o.NormalizedName).HasMaxLength(OperatorName.NameMaxLength);
+        builder.Property<uint>("Version").HasColumnName("xmin").HasColumnType("xid").IsRowVersion();
+        builder.HasIndex(o => o.NormalizedName).IsUnique();
+    }
+}
+
 /// <summary>stock_document_attachments：依單據查有效附件；刪除與送出後的移除由 trigger 禁止（M4_03）。</summary>
 public class DocumentAttachmentConfiguration : IEntityTypeConfiguration<DocumentAttachment>
 {

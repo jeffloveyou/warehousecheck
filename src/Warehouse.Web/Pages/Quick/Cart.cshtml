@@ -17,28 +17,56 @@
 }
 
 @* 掃碼階段（quick-cart.js）：結果訊息在掃碼框正下方；沒有 JS 時只能用下方每行的表單修改 *@
-<div class="panel scan-panel" id="quick-cart" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })"
+<div class="panel scan-panel" id="quick-cart" data-actor-id="@Model.ActorId" data-cart-id="@c.Id" data-base-url="/Quick/Cart/@c.Id" data-add-url="@Url.Page("/Quick/Cart", "Add", new { id = c.Id })"
      data-lines-url="@Url.Page("/Quick/Cart", "Lines", new { id = c.Id })">
+    <div class="quick-location-controls">
+        <label for="quick-checkout-warehouse">倉庫</label>
+        <select id="quick-checkout-warehouse" aria-describedby="quick-location-help">
+            <option value="">選擇倉庫（可稍後選）</option>
+            @foreach (var w in Model.WarehouseOptions)
+            {
+                <option value="@w.Id" data-code="@w.Code" selected="@(c.WarehouseId == w.Id || (c.WarehouseId is null && Model.WarehouseOptions.Count == 1))">@w.Code @w.Name</option>
+            }
+        </select>
+        <label for="quick-location-input">接下來使用的儲位</label>
+        <div class="quick-location-entry">
+            <input type="text" id="quick-location-input" maxlength="200" autocomplete="off" placeholder="輸入儲位碼、名稱搜尋，或掃儲位 QR" />
+            <button type="button" id="quick-location-apply" class="secondary">套用儲位</button>
+            <button type="button" id="quick-location-clear" class="secondary" hidden>清除儲位</button>
+        </div>
+    </div>
+    <p id="quick-location-help" class="muted">選定後只用於接下來加入的物料，不改先前紀錄；留空可先記料、稍後補齊。</p>
+    <p>目前儲位：<strong id="quick-location" role="status" aria-live="polite">（未指定）</strong></p>
     <div class="scan-bar">
         <input type="text" id="scan-input" class="scan-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
                enterkeyhint="done" maxlength="200" placeholder="掃物料或儲位 QR，或輸入料號後按 Enter" aria-label="掃碼輸入" />
         <button type="button" class="secondary" id="scan-camera" hidden>相機掃碼</button>
+        <button type="button" class="secondary" id="quick-find-item" aria-controls="quick-search" aria-expanded="false" hidden>查料</button>
     </div>
     <div class="scan-status" id="scan-status" role="status" aria-live="polite"></div>
+    <ul id="quick-failures" class="quick-failures" aria-label="待處理掃碼紀錄"></ul>
+    <details id="quick-search"><summary>沒有條碼？搜尋物料加入</summary>
+        <label for="quick-search-query">料號、品名或規格</label>
+        <input id="quick-search-query" maxlength="100" autocomplete="off" />
+        <button type="button" id="quick-search-button" class="secondary">搜尋</button>
+        <div id="quick-search-results" role="status"></div>
+    </details>
+    <button type="button" id="quick-undo" class="secondary" disabled>撤銷上一筆加入</button>
     <div class="quick-qty" id="quick-qty-row" hidden>
         <label for="quick-qty">數量</label>
         <input type="text" id="quick-qty" inputmode="decimal" autocomplete="off" maxlength="20" />
         <span class="muted" id="quick-qty-item"></span>
-        <button type="button" id="quick-qty-add">加入</button>
+        <button type="button" id="quick-qty-add">確認這是數量並加入</button>
+        <button type="button" id="quick-qty-scan" class="secondary">把此內容當下一筆掃碼</button>
+        <button type="button" class="secondary" id="quick-qty-cancel">取消這筆</button>
     </div>
     <div class="scan-options">
         <label>加入方式
             <select id="quick-add-mode" aria-label="加入方式">
                 <option value="manual">手動：掃到後輸入數量，按 Enter 加入</option>
-                <option value="auto">自動：每掃一次加一個包裝量（同料同儲位合併）</option>
+                <option value="auto" selected>自動：每掃一次加一個包裝量（同料同儲位合併）</option>
             </select>
         </label>
-        <span>目前儲位：<strong id="quick-location">（未指定）</strong> <button type="button" class="link" id="quick-location-clear" hidden>清除</button></span>
         <label><input type="checkbox" id="scan-mute" /> 靜音</label>
         <span id="scan-caps" class="bad" hidden>大寫鎖定開著（不影響比對）</span>
     </div>
@@ -51,12 +79,45 @@
     </div>
 </div>
 
+<div class="actions"><button type="button" id="quick-save-draft" class="secondary">儲存核對草稿至帳號</button><span id="quick-draft-status" role="status">尚未修改</span><button type="button" id="quick-review-draft" class="secondary" hidden>已核對目前清單，保留草稿</button></div>
+<div id="quick-draft-conflicts" class="message warn" hidden></div>
+
 <partial name="_CartLines" model="c" />
 
+<section id="quick-allocation-panel" class="panel" hidden>
+    <h2>購物車內容與儲位</h2>
+    <div id="quick-allocations"></div>
+    <details class="quick-bulk-details">
+        <summary>批次補空白儲位</summary>
+        <div class="actions"><label><input type="checkbox" id="quick-select-all" /> 勾選全部</label><input id="quick-bulk-location" placeholder="填入勾選列的空白儲位" aria-label="批次儲位" maxlength="200" /><button type="button" id="quick-bulk-apply" class="secondary">只填空白儲位</button></div>
+    </details>
+</section>
+
+<section id="quick-operation" class="panel" hidden>
+    <label for="quick-checkout-type">這批要做什麼</label>
+    <select id="quick-checkout-type">
+        <option value="">請選擇作業</option>
+        <option value="Inbound">進貨入庫</option>
+        <option value="Outbound">領料出庫</option>
+        <option value="DraftTransfer">移庫（轉草稿）</option>
+        <option value="DraftInbound">進倉（轉草稿）</option>
+        <option value="DraftOutbound">出倉（轉草稿）</option>
+    </select>
+</section>
+
+<partial name="_Checkout" model="Model" />
+
+<div id="quick-checkout-result" role="status" aria-live="polite" tabindex="-1"></div>
+<div class="quick-checkout-bar" hidden>
+    <strong id="quick-summary"></strong>
+    <button type="button" id="quick-checkout">選作業</button>
+</div>
+
 <div class="panel" id="quick-actions">
-    <h2>掃完了？整批選動作</h2>
+    <h2>其他作業：轉草稿／移庫</h2>
     <p class="muted">選了之後到下一頁選倉庫、用途，補齊沒有儲位的行，再產生草稿單。</p>
     <form method="get" action="/Quick/Convert/@c.Id" class="actions" id="quick-action-form">
+        <input type="hidden" id="quick-convert-warehouse" name="WarehouseId" value="@c.WarehouseId" />
         <button type="submit" name="type" value="Inbound" id="quick-inbound">進倉</button>
         <button type="submit" name="type" value="Outbound" id="quick-outbound">出倉</button>
         <button type="submit" name="type" value="Transfer" id="quick-transfer">移庫</button>
@@ -74,7 +135,10 @@
     </form>
 </div>
 
+<script id="quick-initial" type="application/json">@Json.Serialize(c)</script>
+<script id="quick-preferences" type="application/json">@Json.Serialize(Model.Preferences)</script>
 @section Scripts {
+    <script src="~/js/picker.js" asp-append-version="true"></script>
     <script src="~/js/scan-input.js" asp-append-version="true"></script>
     <script src="~/js/quick-cart.js" asp-append-version="true"></script>
 }

@@ -31,6 +31,15 @@ public class IndexModel(
 
     [BindProperty(SupportsGet = true)]
     public StockDocumentStatus? Status { get; set; }
+    [BindProperty(SupportsGet = true)] public string? Recipient { get; set; }
+    [BindProperty(SupportsGet = true)] public string? Project { get; set; }
+    [BindProperty(SupportsGet = true)] public string? DocNo { get; set; }
+    [BindProperty(SupportsGet = true)] public string? ItemCode { get; set; }
+    [BindProperty(SupportsGet = true)] public string? Creator { get; set; }
+    [BindProperty(SupportsGet = true)] public bool Mine { get; set; }
+    [BindProperty(SupportsGet = true)] public bool ReturnedOnly { get; set; }
+    [BindProperty(SupportsGet = true)] public DateOnly? From { get; set; }
+    [BindProperty(SupportsGet = true)] public DateOnly? To { get; set; }
 
     [BindProperty(SupportsGet = true)]
     public Guid? WarehouseId { get; set; }
@@ -70,7 +79,7 @@ public class IndexModel(
 
     public Task OnGetAsync(CancellationToken cancellationToken) => LoadAsync(cancellationToken);
 
-    public async Task<IActionResult> OnPostCreateAsync(CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostCreateAsync(Guid? operatorNameId, CancellationToken cancellationToken)
     {
         if (!(await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded)
         {
@@ -87,7 +96,7 @@ public class IndexModel(
                 throw new DomainRuleException("請選擇倉庫。");
             }
             var header = await DocumentFormSupport.ToHeaderAsync(Header, master, cancellationToken);
-            var actor = User.ToActor();
+            var actor = await OperatorActor.ResolveAsync(User, operatorNameId, master, cancellationToken);
             var id = await documents.CreateAsync(type, warehouseId, header, actor, cancellationToken, Create.RequestId);
             // 記住這次的倉庫，下次建單預設帶入（M8-06；只是畫面預設，權限仍在建單時檢查）
             await preferences.TrySetAsync(actor.Id, Warehouse.Application.Accounts.UserPreferenceKeys.DocumentsLastWarehouse,
@@ -102,13 +111,31 @@ public class IndexModel(
         return Page();
     }
 
-    public string PageUrl(int page) => Url.Page("/Documents/Index", new { Type, Status, WarehouseId, p = page })!;
+    public string PageUrl(int page) => Url.Page("/Documents/Index", new
+    {
+        Type, Status, WarehouseId, Recipient, Project, DocNo, ItemCode, Creator, Mine, ReturnedOnly,
+        From = From?.ToString("yyyy-MM-dd"), To = To?.ToString("yyyy-MM-dd"), p = page
+    })!;
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
         Warehouses = await warehouses.ListWarehousesAsync(includeDeleted: true, cancellationToken); // 歷史查詢可選已刪除的倉庫
         Operable = await HttpContext.OperableWarehousesAsync(cancellationToken);
-        Result = await documents.ListAsync(Type, Status, WarehouseId, PageNumber, cancellationToken);
+        var earliest = new DateOnly(2000, 1, 1);
+        var latest = new DateOnly(2100, 12, 31);
+        if (!ModelState.IsValid || From < earliest || To < earliest || From > latest || To > latest
+            || (From is { } f && To is { } t && f > t))
+        {
+            Error ??= "查詢日期需介於 2000-01-01 至 2100-12-31，且起日不可晚於迄日。";
+            Result = new([], 1, Paging.DefaultPageSize, 0);
+        }
+        else
+        {
+            Result = await documents.ListAsync(Type, Status, WarehouseId, PageNumber, cancellationToken, Recipient, Project,
+                new DocumentListFilter(DocNo, ItemCode, Creator, Mine ? User.ToActor().Id : null,
+                    From is { } start ? TaipeiTime.StartOfDay(start) : null,
+                    To is { } end ? TaipeiTime.StartOfDay(end.AddDays(1)) : null, ReturnedOnly: ReturnedOnly));
+        }
         CanEdit = (await authorization.AuthorizeAsync(User, Policies.DocumentEdit)).Succeeded;
         if (CanEdit)
         {

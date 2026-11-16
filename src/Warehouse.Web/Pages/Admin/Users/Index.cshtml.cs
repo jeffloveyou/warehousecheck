@@ -39,6 +39,8 @@ public class IndexModel(IUserAdminService admin) : PageModel
         public string DisplayName { get; set; } = string.Empty;
 
         public List<string> Roles { get; set; } = [];
+
+        public bool IsShared { get; set; }
     }
 
     public async Task OnGetAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
@@ -48,7 +50,7 @@ public class IndexModel(IUserAdminService admin) : PageModel
         try
         {
             Created = await admin.CreateAsync(
-                new CreateUserRequest(Input.UserName, Input.DisplayName, Input.Roles), User.ToActor(), cancellationToken);
+                new CreateUserRequest(Input.UserName, Input.DisplayName, Input.Roles, Input.IsShared), User.ToActor(), cancellationToken);
             Input = new CreateForm();
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)

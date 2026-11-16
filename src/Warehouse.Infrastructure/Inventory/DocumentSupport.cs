@@ -1,10 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Warehouse.Application.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
 using Warehouse.Domain;
 using Warehouse.Domain.Inventory;
+using Warehouse.Infrastructure.Identity;
 using Warehouse.Infrastructure.Persistence;
 using static Warehouse.Infrastructure.Persistence.DbCommands;
 
@@ -25,6 +29,44 @@ internal static class DocumentSupport
             throw new DomainRuleException("缺少或不正確的請求識別碼（Idempotency-Key，8～100 字）。");
         }
         return trimmed;
+    }
+
+    public const string LineQuantityCommand = "stock_document.line_quantity";
+
+    public static (string Key, string Hash) LineQuantityRequest(Guid documentId, LineQuantityInput input, Actor actor)
+    {
+        if (input.LineId == Guid.Empty || input.OperationId == Guid.Empty)
+        {
+            throw new DomainRuleException("缺少明細或請求識別碼。");
+        }
+        return ($"{LineQuantityCommand}:{documentId:N}:{input.OperationId:N}", Hash(JsonSerializer.Serialize(new { actor.Id, Input = input })));
+    }
+
+    public static async Task<(string, object?)> UpdateLineQuantityAsync(
+        WarehouseDbContext db, StockDocument doc, LineQuantityInput input, Actor actor, string key, string hash, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var line = doc.Lines.FirstOrDefault(l => l.Id == input.LineId)
+            ?? throw new ConflictException("document.line_missing", "明細已不存在，請核對目前明細。");
+        if (line.ItemId is not { } itemId)
+        {
+            throw new DomainRuleException("空儲位明細不能修改數量。");
+        }
+        if (line.TargetLocationId is { } targetId)
+        {
+            var targetWarehouseId = await db.Locations.Where(l => l.Id == targetId).Select(l => l.WarehouseId).SingleAsync(cancellationToken);
+            await WarehouseAccess.EnsureAsync(db, actor, targetWarehouseId, cancellationToken);
+        }
+        if (line.Quantity != input.OriginalQuantity)
+        {
+            throw new ConflictException("document.line_quantity_changed", $"這行數量已變更為 {line.Quantity:0.####}，請核對後再修改。");
+        }
+        var item = await (from i in db.Items.AsNoTracking()
+                          join u in db.Units.AsNoTracking() on i.BaseUnitId equals u.Id
+                          where i.Id == itemId
+                          select new { i.TrackingMode, u.DecimalPlaces }).SingleAsync(cancellationToken);
+        doc.UpdateLineQuantity(line.Id, item.TrackingMode, item.DecimalPlaces, input.Quantity);
+        db.ProcessedCommands.Add(ProcessedCommand.Create(key, LineQuantityCommand, hash, $"line:{line.Id:N}", now));
+        return (LineQuantityCommand, new { LineId = line.Id, Before = input.OriginalQuantity, After = line.Quantity });
     }
 
     public static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

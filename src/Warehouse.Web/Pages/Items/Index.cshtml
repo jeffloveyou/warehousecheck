@@ -1,14 +1,16 @@
 @page
 @model Warehouse.Web.Pages.Items.IndexModel
 @{
+    ViewData["PageUpdates"] = true;
     ViewData["Title"] = "物料";
 }
 <h1>物料</h1>
+<p><a href="/Items/Labels" id="item-labels-link">選取物料／補印標籤</a></p>
 @if (TempData["Message"] is string message)
 {
     <div class="message info">@message</div>
 }
-<form method="get" class="filters" id="item-filters">
+<form method="get" data-page-query class="filters" id="item-filters">
     <input type="text" name="q" value="@Model.Keyword" placeholder="申請單號、料號、品名、型號" aria-label="關鍵字" />
     <select name="Status" aria-label="狀態">
         <option value="">全部狀態</option>
@@ -31,6 +33,7 @@
         <a href="/Import?Kind=Items" id="item-import-link">從 Excel 匯入</a>
     }
 </form>
+<div id="query-results" data-page-region>
 <partial name="_ExportLink" model="Model.ExportUrl" />
 
 <p class="muted">共 @Model.Result.TotalCount 筆</p>
@@ -71,4 +74,5 @@
     {
         <a href="@Model.PageUrl(Model.Result.Page + 1)" id="next-page">下一頁</a>
     }
+</div>
 </div>

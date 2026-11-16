@@ -30,6 +30,8 @@ public sealed record SystemSettings(
     /// <summary>進出倉單是否需要審核（預設 false：確認即過帳，FR-08）。開啟時出倉單送審即預留（D-26）。</summary>
     public bool DocumentApprovalEnabled { get; init; }
 
+    public bool QuickCheckoutEnabled { get; init; } = true;
+
     /// <summary>進出倉單審核時，建立者可否核准自己的單（預設 false；與期初的 D-07 開關分開）。</summary>
     public bool AllowSelfApproveDocuments { get; init; }
 
@@ -70,6 +72,8 @@ public sealed record SystemSettings(
 
     /// <summary>顯示批號、序號欄（關閉時只在料號需要時顯示）。</summary>
     public bool LineLotSerialEnabled { get; init; } = true;
+
+    public bool LineScanNumericToQuantity { get; init; }
 
     /// <summary>
     /// 已有異動紀錄的物料可否改基本單位、追蹤模式（M8-05，ADR-0023；預設 false）。
@@ -157,6 +161,7 @@ public static class SettingKeys
     public const string OpeningApprovalEnabled = "stock.opening.approval_enabled";
     public const string StocktakeApprovalEnabled = "stock.stocktake.approval_enabled";
     public const string DocumentApprovalEnabled = "stock.documents.approval_enabled";
+    public const string QuickCheckoutEnabled = "stock.documents.quick_checkout_enabled";
     public const string AllowSelfApproveDocuments = "stock.documents.allow_self_approval";
     public const string DocumentPurposeEnabled = "stock.documents.field.purpose.enabled";
     public const string DocumentPurposeRequired = "stock.documents.field.purpose.required";
@@ -174,6 +179,7 @@ public static class SettingKeys
     public const string LineReservationEnabled = "stock.documents.line.reservation.enabled";
     public const string LineCrossTransferEnabled = "stock.documents.line.cross_transfer.enabled";
     public const string LineLotSerialEnabled = "stock.documents.line.lot_serial.enabled";
+    public const string LineScanNumericToQuantity = "stock.documents.line.scan_numeric_to_quantity";
     public const string AllowItemUnitTrackingChangeWithActivity = "items.allow_unit_tracking_change_with_activity";
     public const string AllowItemCodeChange = "items.allow_item_code_change";
     public const string RememberMeDays = "auth.remember_me_days";

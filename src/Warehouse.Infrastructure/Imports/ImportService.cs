@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Warehouse.Application.Abstractions;
 using Warehouse.Application.Errors;
@@ -128,7 +130,8 @@ public sealed class ImportService(
         var batch = await db.ImportBatches.AsNoTracking().Where(b => b.Id == id)
             .Select(b => new
             {
-                b.Id, b.Kind, b.AutoApprove, b.Status, b.FileName, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount, b.IssuesJson,
+                b.Id, b.Kind, b.AutoApprove, b.Status, b.FileName, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount,
+                IssuesJson = maxIssues > 0 ? b.IssuesJson : "[]",
                 b.CreatedById, b.CreatedByName, b.CreatedAt, b.CommittedAt,
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -145,6 +148,28 @@ public sealed class ImportService(
             batch.CreatedById, batch.CreatedByName, batch.CreatedAt, expires, batch.CommittedAt,
             batch.Status == ImportStatus.Validated && batch.ErrorCount == 0 && batch.CreatedById == viewer.Id && clock.GetUtcNow() < expires,
             batch.AutoApprove);
+    }
+
+    public async IAsyncEnumerable<ImportIssue> ReadIssuesAsync(Guid id, Actor viewer, bool viewerIsAdmin,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // DB 逐筆展開 JSON，避免在 Web/服務端建立完整問題清單；同一 reader 提供一致的報告快照。
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.Transaction = transaction.GetDbTransaction();
+        command.CommandText = """
+            SELECT (x.issue ->> 'RowNo')::integer, x.issue ->> 'Message', (x.issue ->> 'IsError')::boolean
+            FROM import_batches b
+            CROSS JOIN LATERAL jsonb_array_elements(b.issues_json) WITH ORDINALITY AS x(issue, ordinal)
+            WHERE b.id = @id AND (b.created_by_id = @viewer OR @admin)
+            ORDER BY x.ordinal
+            """;
+        command.Parameters.Add(DbCommands.Param("id", id));
+        command.Parameters.Add(DbCommands.Param("viewer", viewer.Id));
+        command.Parameters.Add(DbCommands.Param("admin", viewerIsAdmin));
+        await using var reader = await command.ExecuteReaderAsync(System.Data.CommandBehavior.SequentialAccess, cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            yield return new(reader.GetInt32(0), reader.GetString(1), reader.GetBoolean(2));
     }
 
     public async Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken)

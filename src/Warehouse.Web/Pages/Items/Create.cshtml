@@ -4,7 +4,7 @@
     ViewData["Title"] = "提出新物料";
 }
 <h1>提出新物料</h1>
-<p class="muted">提出後會產生申請單號；物料管理員核准時才會發正式料號。</p>
+<p class="muted">@(Model.ApprovalEnabled ? "提出後會產生申請單號；物料管理員核准時才會發正式料號。" : "提出後會產生申請單號與正式料號；疑似重複的物料仍需管理員確認。")</p>
 <form method="post" id="item-create-form">
     <div asp-validation-summary="ModelOnly" class="message error"></div>
     <input type="hidden" asp-for="RequestId" />
