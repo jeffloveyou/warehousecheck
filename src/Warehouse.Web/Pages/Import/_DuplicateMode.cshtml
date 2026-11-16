@@ -1,0 +1,11 @@
+@model (ImportKind Kind, ItemDuplicateMode Selected, bool CanUpdateItems)
+@using Warehouse.Application.Imports
+
+<label for="DuplicateMode">遇到重複物料時</label>
+<select id="DuplicateMode" name="DuplicateMode">
+    @foreach (var mode in ImportDuplicateModes.For(Model.Kind))
+    {
+        <option value="@mode" selected="@(mode == Model.Selected)"
+                disabled="@(Model.Kind == ImportKind.Items && mode == ItemDuplicateMode.UpdateExisting && !Model.CanUpdateItems)">@IndexModel.DuplicateModeLabel(Model.Kind, mode)</option>
+    }
+</select>

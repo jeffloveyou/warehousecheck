@@ -34,6 +34,19 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
     [BindProperty]
     public bool AutoApprove { get; set; }
 
+    [BindProperty]
+    public ItemDuplicateMode DuplicateMode { get; set; }
+
+    public bool CanUpdateItems => User.ToActor().IsItemManager;
+
+    public static string DuplicateModeLabel(ImportKind kind, ItemDuplicateMode mode) => mode switch
+    {
+        ItemDuplicateMode.SkipExact => kind == ImportKind.Items ? "略過確定重複" : "略過已存在",
+        ItemDuplicateMode.UpdateExisting => kind == ImportKind.Items ? "更新既有物料" : "更新既有儲位",
+        ItemDuplicateMode.ReportError => "標記異常",
+        _ => "保留待核准",
+    };
+
     /// <summary>物料審核（M12）：關閉時匯入即啟用，不顯示「自動核准」勾選。</summary>
     public bool ItemApprovalEnabled { get; private set; } = true;
 
@@ -73,6 +86,7 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
         {
             return BadRequest();
         }
+        DuplicateMode = ImportDuplicateModes.For(Kind).FirstOrDefault();
         await LoadAsync(cancellationToken);
         return Page();
     }
@@ -81,9 +95,15 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
         !Enum.IsDefined(Kind) ? BadRequest()
             : await gate.RunAsync(this, () => imports.TemplateAsync(Kind, cancellationToken), Url.Page("/Import/Index", new { Kind })!);
 
-    public async Task<IActionResult> OnPostAsync([FromServices] ImportGate gate, CancellationToken cancellationToken)
+    public Task<IActionResult> OnPostAsync([FromServices] ImportGate gate, CancellationToken cancellationToken) =>
+        UploadAsync(gate, versionedItems: false, cancellationToken);
+
+    public Task<IActionResult> OnPostItemPlanAsync([FromServices] ImportGate gate, CancellationToken cancellationToken) =>
+        UploadAsync(gate, versionedItems: true, cancellationToken);
+
+    private async Task<IActionResult> UploadAsync(ImportGate gate, bool versionedItems, CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(Kind))
+        if (!Enum.IsDefined(Kind) || (versionedItems && ImportDuplicateModes.For(Kind).Count == 0))
         {
             return BadRequest();
         }
@@ -98,6 +118,11 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
             {
                 throw new ConflictException("import.busy", "目前有其他人正在匯入，請稍等約一分鐘再試。");
             }
+            if (versionedItems && (!ModelState.ContainsKey(nameof(DuplicateMode))
+                || ModelState[nameof(DuplicateMode)]?.Errors.Count > 0 || !ImportDuplicateModes.For(Kind).Contains(DuplicateMode)))
+                throw new DomainRuleException("請選擇有效的重複處理方式。");
+            if (!versionedItems && ModelState.ContainsKey(nameof(DuplicateMode)))
+                throw new DomainRuleException("請重新開啟匯入頁，再依選定方式上傳。");
             if (Upload is null || Upload.Length == 0)
             {
                 throw new DomainRuleException("請選擇要上傳的檔案。");
@@ -107,7 +132,10 @@ public class IndexModel(IImportService imports, IWarehouseService warehouses, IA
                 throw new ConflictException("import.too_large", $"檔案超過 {IImportService.MaxBytes / 1024 / 1024} MB，請分成多個檔案。");
             }
             await using var stream = Upload.OpenReadStream();
-            var id = await imports.UploadAsync(Kind, Target, Upload.FileName, stream, AutoApprove && CanAutoApprove, User.ToActor(), cancellationToken);
+            // 舊版頁面在 A/B 切換後仍可送原表單，沿用舊版批次及確認流程。
+            var mode = versionedItems ? DuplicateMode : (ItemDuplicateMode?)null;
+            var id = await imports.UploadAsync(Kind, Target, Upload.FileName, stream, AutoApprove && CanAutoApprove, User.ToActor(),
+                cancellationToken, mode);
             return RedirectToPage("/Import/Details", new { id });
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)

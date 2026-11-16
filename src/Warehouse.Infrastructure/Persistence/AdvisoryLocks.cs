@@ -22,13 +22,15 @@ internal static class AdvisoryLocks
             : db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock_shared(hashtext({CategoryTree}))", cancellationToken);
 
     /// <summary>
-    /// 「提出時自動核准」的鎖（D-31 審查 🟠-1）：提出與核准在同一個交易，提交前別人看不到這筆新物料，
-    /// 兩個自動核准同時進行時，重複檢查會互相看不到。所有自動核准（表單、匯入）都先取這把鎖排隊，
-    /// 後到的在先到的提交後才查重複。一般提出、手動核准不需要（待核准物料已提交，核准檢查看得到）。
+    /// 物料重複檢查與批次決策的鎖。匯入、主檔異動、專屬別名及原廠條碼先取得此鎖，
+    /// 再查候選或鎖物料／識別碼，讓試算確認的查重和並行異動按順序進行。
     /// 必須在交易內呼叫。鍵名不可變更（A/B 兩版需鎖到同一把）。
     /// </summary>
     public static Task LockItemAutoApproveAsync(WarehouseDbContext db, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"item-auto-approve"}))", cancellationToken);
+
+    public static Task LockLocationImportAsync(WarehouseDbContext db, Guid warehouseId, CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtext({"location-import:" + warehouseId.ToString("N")}))", cancellationToken);
 
     /// <summary>
     /// 料號前綴的鎖（D-32，ADR-0025）：自動發號、核准時指定料號、變更料號都先取這把鎖，再檢查號碼是否已被物料

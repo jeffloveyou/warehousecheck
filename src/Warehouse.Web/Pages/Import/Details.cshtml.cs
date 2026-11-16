@@ -23,6 +23,19 @@ public class DetailsModel(IImportService imports, IAuthorizationService authoriz
 
     public string? Error { get; private set; }
 
+    public bool CanRecalculate => Batch.ItemPreview is not null && Batch.Status == ImportStatus.Validated
+        && Batch.CreatedById == User.ToActor().Id && !IsExpired;
+    public bool CanUpdateItems => User.ToActor().IsItemManager;
+    public bool IsExpired => HttpContext.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow() >= Batch.ExpiresAt;
+
+    public static string ActionLabel(ItemImportAction action) => action switch
+    {
+        ItemImportAction.Add => "新增",
+        ItemImportAction.Update => "更新",
+        ItemImportAction.Skip => "略過",
+        _ => "異常",
+    };
+
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken) =>
         await LoadAsync(id, cancellationToken) ? Page() : NotFound();
 
@@ -34,9 +47,19 @@ public class DetailsModel(IImportService imports, IAuthorizationService authoriz
         Response.Headers.ContentDisposition = $"attachment; filename=import-issues-{id:N}.csv";
         Response.Headers.CacheControl = "no-store";
         await using var writer = new StreamWriter(Response.Body, new UTF8Encoding(true), 4096, leaveOpen: true);
-        await writer.WriteLineAsync("來源列,類型,說明".AsMemory(), cancellationToken);
-        await foreach (var issue in imports.ReadIssuesAsync(id, User.ToActor(), User.IsInRole(Roles.SystemAdmin), cancellationToken))
-            await writer.WriteLineAsync($"{issue.RowNo},{(issue.IsError ? "錯誤" : "警告")},{CsvCell(issue.Message)}".AsMemory(), cancellationToken);
+        if (batch.ItemPreview is not null)
+        {
+            var codeLabel = batch.Kind == ImportKind.Locations ? "儲位碼" : batch.Kind == ImportKind.Indexes ? "料號" : "料號或申請單號";
+            await writer.WriteLineAsync($"來源列,處理結果,{codeLabel},說明".AsMemory(), cancellationToken);
+            await foreach (var row in imports.ReadItemResultsAsync(id, User.ToActor(), User.IsInRole(Roles.SystemAdmin), cancellationToken))
+                await writer.WriteLineAsync($"{row.RowNo},{ActionLabel(row.Action)},{CsvCell(row.ItemCode ?? "")},{CsvCell(row.Message)}".AsMemory(), cancellationToken);
+        }
+        else
+        {
+            await writer.WriteLineAsync("來源列,類型,說明".AsMemory(), cancellationToken);
+            await foreach (var issue in imports.ReadIssuesAsync(id, User.ToActor(), User.IsInRole(Roles.SystemAdmin), cancellationToken))
+                await writer.WriteLineAsync($"{issue.RowNo},{(issue.IsError ? "錯誤" : "警告")},{CsvCell(issue.Message)}".AsMemory(), cancellationToken);
+        }
         await writer.FlushAsync(cancellationToken);
         return new EmptyResult();
     }
@@ -49,7 +72,30 @@ public class DetailsModel(IImportService imports, IAuthorizationService authoriz
         return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 
-    public async Task<IActionResult> OnPostCommitAsync(Guid id, [FromServices] ImportGate gate, CancellationToken cancellationToken)
+    public async Task<IActionResult> OnPostRecalculateAsync(Guid id, ItemDuplicateMode duplicateMode, Guid previewVersion,
+        [FromServices] ImportGate gate, CancellationToken cancellationToken, ImportKind kind = ImportKind.Items)
+    {
+        if (ImportDuplicateModes.For(kind).Count == 0) return BadRequest();
+        if (!(await authorization.AuthorizeAsync(User, IndexModel.PolicyOf(kind))).Succeeded) return Forbid();
+        if (!await LoadAsync(id, cancellationToken)) return NotFound();
+        if (Batch.Kind != kind) return Forbid();
+        using var slot = await gate.TryEnterAsync();
+        try
+        {
+            if (slot is null) throw new ConflictException("import.busy", "目前有其他人正在匯入，請稍後再試。");
+            if (!ModelState.IsValid) throw new DomainRuleException("請選擇有效的重複處理方式。");
+            await imports.RecalculateAsync(id, duplicateMode, previewVersion, User.ToActor(), cancellationToken);
+            return RedirectToPage(new { id });
+        }
+        catch (Exception ex) when (ex is DomainRuleException or AppException)
+        {
+            Error = ex.Message;
+        }
+        await LoadAsync(id, cancellationToken);
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostCommitAsync(Guid id, Guid? previewVersion, [FromServices] ImportGate gate, CancellationToken cancellationToken)
     {
         if (!await LoadAsync(id, cancellationToken))
         {
@@ -66,8 +112,8 @@ public class DetailsModel(IImportService imports, IAuthorizationService authoriz
             {
                 throw new ConflictException("import.busy", "目前有其他人正在匯入，請稍等約一分鐘再試。");
             }
-            var rows = await imports.CommitAsync(id, User.ToActor(), cancellationToken);
-            TempData["Message"] = $"已匯入 {rows} 列。";
+            var rows = await imports.CommitAsync(id, User.ToActor(), cancellationToken, previewVersion);
+            TempData["Message"] = rows == 0 && Batch.ItemPreview is not null ? "已確認，本批沒有資料異動。" : $"已匯入 {rows} 列。";
             return RedirectToPage(new { id });
         }
         catch (Exception ex) when (ex is DomainRuleException or AppException)

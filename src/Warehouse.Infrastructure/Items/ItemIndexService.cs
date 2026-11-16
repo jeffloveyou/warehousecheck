@@ -69,7 +69,15 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
 
     public async Task<Guid> AddAsync(
         Guid itemId, ItemIndexKind kind, string text, Actor actor, CancellationToken cancellationToken,
-        decimal packQuantity = 1m, string? symbology = null)
+        decimal packQuantity = 1m, string? symbology = null) =>
+        (await AddCoreAsync(itemId, kind, text, actor, cancellationToken, packQuantity, symbology, skipExact: false)).Id;
+
+    public Task<(Guid Id, bool Added)> AddForImportAsync(Guid itemId, ItemIndexKind kind, string text, bool skipExact, Actor actor,
+        CancellationToken cancellationToken) =>
+        AddCoreAsync(itemId, kind, text, actor, cancellationToken, 1m, null, skipExact);
+
+    private async Task<(Guid Id, bool Added)> AddCoreAsync(Guid itemId, ItemIndexKind kind, string text, Actor actor,
+        CancellationToken cancellationToken, decimal packQuantity, string? symbology, bool skipExact)
     {
         var now = clock.GetUtcNow();
 
@@ -77,6 +85,8 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         // 「本物料別名與關鍵字不重複」「數量上限」因此不會被同時送出的請求繞過（M2 審查 S2、S3）。
         // 不同物料搶同一個別名（或條碼）由資料庫唯一索引把關；別名與條碼互搶由識別碼鎖把關（M5-01）。
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
+        if (kind is ItemIndexKind.Alias or ItemIndexKind.Barcode)
+            await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
         var (status, createdById) = await LockItemStatusAsync(itemId, cancellationToken)
             ?? throw new NotFoundException("item.not_found", "找不到物料。");
         // 原廠條碼可在提出時就登錄（M8-05）：先占住條碼，核准前掃碼解析會拒絕（尚未核准），拒絕或撤回時釋放
@@ -103,7 +113,11 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         {
             await AdvisoryLocks.LockIdentifierAsync(db, entry.NormalizedText, cancellationToken);
         }
-        await EnsureNoConflictAsync(itemId, kind, entry.NormalizedText, cancellationToken);
+        if (await EnsureNoConflictAsync(itemId, kind, entry.NormalizedText, cancellationToken, skipExact) is { } existing)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return (existing, false);
+        }
         await EnsureWithinLimitAsync(itemId, kind, cancellationToken);
 
         db.Add(entry);
@@ -124,7 +138,7 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
             throw new ConflictException("index.duplicate", "這個索引剛被別人新增，請重新整理。");
         }
         await transaction.CommitAsync(cancellationToken);
-        return entry.Id;
+        return (entry.Id, true);
     }
 
     /// <summary>在目前交易內鎖住物料列，回傳狀態文字（items.status）與提出人；物料不存在時回傳 null。</summary>
@@ -185,6 +199,11 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
     public async Task DeactivateAsync(
         Guid itemId, ItemIndexKind kind, Guid entryId, Actor actor, CancellationToken cancellationToken)
     {
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
+        if (kind is ItemIndexKind.Alias or ItemIndexKind.Barcode)
+            await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+        else
+            await LockItemStatusAsync(itemId, cancellationToken);
         ItemIndexEntry? entry = kind switch
         {
             ItemIndexKind.Alias => await db.ItemAliases.SingleOrDefaultAsync(a => a.Id == entryId && a.ItemId == itemId, cancellationToken),
@@ -209,6 +228,7 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
         {
             throw new ConcurrencyConflictException("index.concurrency_conflict", "這筆索引已被他人修改，請重新整理。");
         }
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>
@@ -219,8 +239,8 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
     /// - 原廠條碼（M5-01）：其他物料已登錄同一條碼 → index.barcode_taken；
     ///   別名與條碼互斥（任何物料、含本物料）→ index.identifier_conflict。掃碼時才不會一個碼對到兩種意思。
     /// </summary>
-    private async Task EnsureNoConflictAsync(
-        Guid itemId, ItemIndexKind kind, string normalized, CancellationToken cancellationToken)
+    private async Task<Guid?> EnsureNoConflictAsync(
+        Guid itemId, ItemIndexKind kind, string normalized, CancellationToken cancellationToken, bool skipExact = false)
     {
         if (kind == ItemIndexKind.Barcode)
         {
@@ -248,7 +268,7 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
             {
                 throw new ConflictException("index.identifier_conflict", $"這個條碼與 {aliasHolder} 的專屬別名相同，請先停用該別名。");
             }
-            return;
+            return null;
         }
         if (kind == ItemIndexKind.Alias)
         {
@@ -270,15 +290,20 @@ public sealed class ItemIndexService(WarehouseDbContext db, TimeProvider clock) 
             }
         }
 
-        var ownAlias = await db.ItemAliases.AnyAsync(
-            a => a.IsActive && a.ItemId == itemId && a.NormalizedText == normalized, cancellationToken);
-        var ownKeyword = await db.ItemKeywords.AnyAsync(
-            k => k.IsActive && k.ItemId == itemId && k.NormalizedText == normalized, cancellationToken);
-        if (ownAlias || ownKeyword)
+        var ownAlias = await db.ItemAliases.Where(a => a.IsActive && a.ItemId == itemId && a.NormalizedText == normalized)
+            .Select(a => (Guid?)a.Id).FirstOrDefaultAsync(cancellationToken);
+        var ownKeyword = await db.ItemKeywords.Where(k => k.IsActive && k.ItemId == itemId && k.NormalizedText == normalized)
+            .Select(k => (Guid?)k.Id).FirstOrDefaultAsync(cancellationToken);
+        if (skipExact && kind == ItemIndexKind.Alias && ownKeyword is null && ownAlias is not null)
+            return ownAlias;
+        if (skipExact && kind == ItemIndexKind.Keyword && ownAlias is null && ownKeyword is not null)
+            return ownKeyword;
+        if (ownAlias is not null || ownKeyword is not null)
         {
             throw new ConflictException(
-                "index.duplicate", $"此物料已經有這個{(ownAlias ? "專屬別名" : "共用關鍵字")}，不需要重複新增。");
+                "index.duplicate", $"此物料已經有這個{(ownAlias is not null ? "專屬別名" : "共用關鍵字")}，不需要重複新增。");
         }
+        return null;
     }
 
     /// <summary>某張索引表中與文字相同的有效紀錄屬於哪個物料（料號＋品名）；沒有則回傳 null。</summary>

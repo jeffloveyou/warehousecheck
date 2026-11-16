@@ -32,9 +32,9 @@ namespace Warehouse.Infrastructure.Imports;
 /// 所以一次就能列出全部錯誤。試算最後整筆回滾；確認時有任何錯誤也整筆回滾（不會只匯入一半）。
 /// 上述服務以 <see cref="JoinableTransaction"/> 加入這個外層交易。
 /// </summary>
-public sealed class ImportService(
+public sealed partial class ImportService(
     WarehouseDbContext db, IItemWorkflowService items, IItemIndexService indexes, IWarehouseService warehouses,
-    IOpeningService openings, TimeProvider clock) : IImportService
+    IOpeningService openings, ISettingsService settings, TimeProvider clock) : IImportService
 {
     private static readonly JsonSerializerOptions Json = new();
 
@@ -42,7 +42,7 @@ public sealed class ImportService(
     {
         [ImportKind.Items] =
         [
-            ("品名", true, "必填"),
+            ("品名", true, "新增時必填；更新時空白保留"),
             ("分類", true, "分類代碼或名稱，例：EL"),
             ("基本單位", true, "單位代碼，例：PCS"),
             ("追蹤模式", true, "不追蹤／批號／序號"),
@@ -50,6 +50,7 @@ public sealed class ImportService(
             ("原廠型號", false, ""),
             ("規格", false, ""),
             ("原廠條碼", false, "包裝上的條碼（英數字），多個用頓號、逗號或分號分隔，最多 10 個；這一欄請設為「文字」格式"),
+            ("正式料號", false, "指定既有物料；更新時必填"),
         ],
         [ImportKind.Indexes] =
         [
@@ -81,7 +82,8 @@ public sealed class ImportService(
     public IReadOnlyList<(string Name, bool Required, string Note)> Columns(ImportKind kind) => Layouts[kind];
 
     public async Task<Guid> UploadAsync(
-        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken)
+        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken,
+        ItemDuplicateMode? duplicateMode = null)
     {
         if (autoApprove && (kind != ImportKind.Items || !actor.IsItemManager))
         {
@@ -89,7 +91,11 @@ public sealed class ImportService(
         }
         var bytes = await ReadLimitedAsync(content, cancellationToken);
         var (headers, rows) = ImportFileReader.Read(fileName, bytes);
-        var missing = Layouts[kind].Where(c => c.Required && !headers.Contains(c.Name)).Select(c => c.Name).ToList();
+        if (duplicateMode is { } mode)
+            EnsureDuplicateMode(kind, mode, autoApprove, actor);
+        var explicitTargetsOnly = kind == ImportKind.Items && (duplicateMode is ItemDuplicateMode.UpdateExisting or ItemDuplicateMode.SkipExact)
+            && rows.All(row => row.Get("正式料號") is not null);
+        var missing = Layouts[kind].Where(c => c.Required && !explicitTargetsOnly && !headers.Contains(c.Name)).Select(c => c.Name).ToList();
         if (missing.Count > 0)
         {
             throw new ConflictException("import.bad_file", $"缺少必要欄位：{string.Join("、", missing)}（請使用範本）。");
@@ -100,7 +106,9 @@ public sealed class ImportService(
         }
         await EnsureTargetAsync(kind, targetId, actor, cancellationToken);
 
-        var issues = await RunAsync(kind, targetId, autoApprove, rows, actor, commit: false, null, cancellationToken);
+        var issues = duplicateMode is null
+            ? await RunAsync(kind, targetId, autoApprove, rows, actor, commit: false, null, cancellationToken)
+            : [];
         var batch = new ImportBatch
         {
             Id = Guid.NewGuid(),
@@ -119,6 +127,15 @@ public sealed class ImportService(
             CreatedByName = actor.Name,
             CreatedAt = clock.GetUtcNow(),
         };
+        if (duplicateMode is { } itemMode)
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await RunItemPlanAsync(batch, rows, itemMode, actor, transaction, expected: null, cancellationToken);
+            db.ImportBatches.Add(batch);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return batch.Id;
+        }
         db.ImportBatches.Add(batch);
         await db.SaveChangesAsync(cancellationToken);
         return batch.Id;
@@ -130,8 +147,9 @@ public sealed class ImportService(
         var batch = await db.ImportBatches.AsNoTracking().Where(b => b.Id == id)
             .Select(b => new
             {
-                b.Id, b.Kind, b.AutoApprove, b.Status, b.FileName, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount,
+                b.Id, b.Kind, b.AutoApprove, b.Status, b.FileName, b.FileHash, b.TargetId, b.RowCount, b.ErrorCount, b.WarningCount,
                 IssuesJson = maxIssues > 0 ? b.IssuesJson : "[]",
+                b.ItemPlanJson,
                 b.CreatedById, b.CreatedByName, b.CreatedAt, b.CommittedAt,
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -141,13 +159,34 @@ public sealed class ImportService(
         }
         var issues = JsonSerializer.Deserialize<List<ImportIssue>>(batch.IssuesJson, Json) ?? [];
         var expires = batch.CreatedAt + IImportService.Lifetime;
+        var plan = DeserializePlan(batch.ItemPlanJson);
+        var errorCount = batch.ErrorCount - (plan is not null && batch.Status == ImportStatus.Validated ? LegacyErrorGuard : 0);
+        var previous = batch.Status == ImportStatus.Validated && maxIssues > 0
+            ? await FindPreviousImportAsync(batch.Id, batch.CreatedById, batch.Kind, batch.TargetId, batch.FileHash, cancellationToken) : null;
         return new ImportBatchView(
             batch.Id, batch.Kind, batch.Status, batch.FileName, batch.TargetId, await TargetLabelAsync(batch.Kind, batch.TargetId, cancellationToken),
-            batch.RowCount, batch.ErrorCount, batch.WarningCount,
+            batch.RowCount, errorCount, batch.WarningCount,
             issues.OrderBy(i => i.IsError ? 0 : 1).ThenBy(i => i.RowNo).Take(maxIssues).ToList(),
             batch.CreatedById, batch.CreatedByName, batch.CreatedAt, expires, batch.CommittedAt,
-            batch.Status == ImportStatus.Validated && batch.ErrorCount == 0 && batch.CreatedById == viewer.Id && clock.GetUtcNow() < expires,
-            batch.AutoApprove);
+            batch.Status == ImportStatus.Validated && errorCount == 0 && batch.CreatedById == viewer.Id && clock.GetUtcNow() < expires
+                && (plan is null || ActorCanConfirm(batch.Kind, plan.Mode, batch.AutoApprove, viewer)),
+            batch.AutoApprove, plan?.ToView(maxIssues), previous);
+    }
+
+    private async Task<PreviousImportResult?> FindPreviousImportAsync(Guid id, Guid owner, ImportKind kind, Guid? targetId, string hash,
+        CancellationToken cancellationToken)
+    {
+        var retention = (await settings.GetAsync(cancellationToken)).RetentionImportBatchesDays;
+        var cutoff = clock.GetUtcNow().AddDays(-Math.Max(retention, RetentionLimits.ImportBatchesDaysMin));
+        var previous = await db.ImportBatches.AsNoTracking()
+            .Where(b => b.Id != id && b.CreatedById == owner && b.Kind == kind && b.TargetId == targetId && b.FileHash == hash
+                && b.CreatedAt >= cutoff && b.Status == ImportStatus.Committed && b.CommittedAt != null)
+            .OrderByDescending(b => b.CommittedAt).ThenByDescending(b => b.Id)
+            .Select(b => new { b.CommittedAt, b.RowCount, b.ItemPlanJson }).FirstOrDefaultAsync(cancellationToken);
+        if (previous is null) return null;
+        var plan = DeserializePlan(previous.ItemPlanJson);
+        var summary = plan?.ToView(0);
+        return new(previous.CommittedAt!.Value, plan?.Affected ?? previous.RowCount, summary?.Added, summary?.Updated, summary?.Skipped);
     }
 
     public async IAsyncEnumerable<ImportIssue> ReadIssuesAsync(Guid id, Actor viewer, bool viewerIsAdmin,
@@ -172,7 +211,7 @@ public sealed class ImportService(
             yield return new(reader.GetInt32(0), reader.GetString(1), reader.GetBoolean(2));
     }
 
-    public async Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken)
+    public async Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken, Guid? previewVersion = null)
     {
         // 先在交易外讀一次：已匯入就直接回傳（重送、連點）
         var existing = await db.ImportBatches.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id, cancellationToken)
@@ -181,6 +220,8 @@ public sealed class ImportService(
         {
             throw new PermissionDeniedException("import.forbidden", "只有上傳的人可以確認這個匯入。");
         }
+        if (existing.ItemPlanJson is not null)
+            return await ConfirmItemPlanAsync(id, previewVersion, actor, cancellationToken);
         if (existing.Status == ImportStatus.Committed)
         {
             return existing.RowCount;
@@ -265,7 +306,7 @@ public sealed class ImportService(
                 throw new ConflictException("import.has_errors", "這個檔案有錯誤，不能匯入；請修正後重新上傳。");
             }
         }
-        if (autoApprove)
+        if (kind is ImportKind.Items or ImportKind.Indexes)
         {
             // 先排隊再查重複：別人的自動核准提交後，這批的重複檢查才看得到它（D-31 審查 🟠-1）
             await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
@@ -305,6 +346,8 @@ public sealed class ImportService(
                     DuplicateCandidatesUnconfirmedException => "自動核准時發現新的疑似重複物料（可能剛被他人建立），請重新上傳試算。",
                     _ => ex.Message,
                 };
+                if (kind == ImportKind.OpeningLines && message.Contains("草稿第", StringComparison.Ordinal))
+                    message += "草稿行號可能是本批較早的試算列。";
                 issues.Add(new ImportIssue(row.Row, message, true));
             }
         }
@@ -338,13 +381,7 @@ public sealed class ImportService(
                 var name = Required(row, "品名");
                 var category = Lookup(context.Lookups, "分類", Required(row, "分類"));
                 var unit = Lookup(context.Lookups, "基本單位", Required(row, "基本單位"));
-                var tracking = Required(row, "追蹤模式") switch
-                {
-                    "不追蹤" or "無" or "None" => TrackingMode.None,
-                    "批號" or "Lot" => TrackingMode.Lot,
-                    "序號" or "Serial" => TrackingMode.Serial,
-                    var other => throw new DomainRuleException($"追蹤模式「{other}」不正確，請填 不追蹤、批號 或 序號。"),
-                };
+                var tracking = TrackingOf(Required(row, "追蹤模式"));
                 if (row.IsNumber("原廠條碼"))
                 {
                     // Excel 數字格式會去掉前導零、把 15 位以後的數字改成 0，讀到的已經不是包裝上的條碼（D-31 審查 🟠-3）
@@ -367,38 +404,14 @@ public sealed class ImportService(
             }
             case ImportKind.Indexes:
             {
-                var code = TextNormalizer.Normalize(Required(row, "料號"));
-                string? warning = null;
-                var itemId = await db.Items.AsNoTracking().Where(i => i.ItemCode == code).Select(i => (Guid?)i.Id).SingleOrDefaultAsync(cancellationToken);
-                if (itemId is null && await new ItemCodeRules(db).ReservedOwnerAsync(code, cancellationToken) is { } ownerId)
-                {
-                    // 舊 Excel 裡的歷史料號（D-32）：對應到改號後的同一個物料，並提醒使用新料號
-                    itemId = ownerId;
-                    var current = await db.Items.AsNoTracking().Where(i => i.Id == ownerId).Select(i => i.ItemCode).SingleAsync(cancellationToken);
-                    warning = $"{code} 是舊料號，已對應到目前的料號 {current}。";
-                }
-                if (itemId is null)
-                {
-                    throw new DomainRuleException($"找不到料號 {code}。");
-                }
-                var kindText = Required(row, "類型");
-                var indexKind = kindText switch
-                {
-                    "別名" or "專屬別名" or "Alias" => ItemIndexKind.Alias,
-                    "關鍵字" or "共用關鍵字" or "Keyword" => ItemIndexKind.Keyword,
-                    _ => throw new DomainRuleException($"類型「{kindText}」不正確，請填 別名 或 關鍵字（條碼請在物料頁登錄）。"),
-                };
-                await indexes.AddAsync(itemId.Value, indexKind, Required(row, "文字"), actor, cancellationToken);
-                return warning;
+                var input = await ReadIndexRowAsync(row, cancellationToken);
+                await indexes.AddAsync(input.ItemId, input.Kind, input.Text, actor, cancellationToken);
+                return input.Warning;
             }
             case ImportKind.Locations:
             {
-                var details = new LocationDetails(
-                    row.Get("名稱"), row.Get("備註"), row.Get("區"), row.Get("架"), row.Get("層"), row.Get("格"),
-                    row.Get("類型") is { } type ? LocationTypeOf(type) : null,
-                    row.Get("承重kg") is { } load ? Number(load, "承重kg") : null,
-                    YesNo(row.Get("溫控"), "溫控"), YesNo(row.Get("危險品"), "危險品"));
-                await warehouses.CreateLocationAsync(context.TargetId!.Value, new LocationInput(Required(row, "儲位碼"), details), actor, cancellationToken);
+                await warehouses.CreateLocationAsync(context.TargetId!.Value,
+                    new LocationInput(Required(row, "儲位碼"), ReadLocationDetails(row)), actor, cancellationToken);
                 return null;
             }
             default:
