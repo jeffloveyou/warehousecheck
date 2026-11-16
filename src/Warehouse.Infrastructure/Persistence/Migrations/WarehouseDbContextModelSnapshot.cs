@@ -2721,6 +2721,10 @@ namespace Warehouse.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("issues_json");
 
+                    b.Property<string>("ItemPlanJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("item_plan_json");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(20)

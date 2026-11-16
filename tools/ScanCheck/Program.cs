@@ -30,6 +30,7 @@ Directory.CreateDirectory(shots);
 var suffix = Guid.NewGuid().ToString("N")[..5];
 var failures = new List<string>();
 var pageUpdateOnly = args.Contains("--page-update-only", StringComparer.Ordinal);
+var itemImportOnly = args.Contains("--item-import-only", StringComparer.Ordinal);
 void Check(bool ok, string what) { Console.WriteLine((ok ? "  ✔ " : "  ✘ ") + what); if (!ok) failures.Add(what); }
 WarehouseDbContext Db() => new(new DbContextOptionsBuilder<WarehouseDbContext>().UseNpgsql(cs).Options);
 
@@ -47,7 +48,7 @@ string CreateUser(string name, string role)
 
 // 1. 資料：作業員、倉庫（A-01、A-02）、10 個一般物料、1 個序號物料；物料 0 有單件條碼、物料 1 有 12 個一箱的外箱條碼
 var user = "scop" + suffix;
-var password = CreateUser(user, "Operator");
+var password = CreateUser(user, itemImportOnly ? "ItemManager,WarehouseManager" : "Operator");
 var warehouseCode = "SC" + suffix.ToUpperInvariant();
 Guid warehouseId;
 var itemCodes = new List<string>();
@@ -125,6 +126,15 @@ async Task<IPage> LoginAsync(int width, IBrowser? on = null)
         }
     }
     return page;
+}
+
+if (itemImportOnly)
+{
+    var importPage = await LoginAsync(1280);
+    await ItemImportCheck.RunAsync(importPage, baseUrl, suffix, Check);
+    await ImportDuplicateCheck.RunAsync(importPage, baseUrl, warehouseId, itemCodes[0], suffix, Check);
+    Check(consoleErrors.Count == 0, "物料匯入：無瀏覽器主控台錯誤");
+    return failures.Count == 0 ? 0 : 1;
 }
 
 // 條碼槍：每字 10 ms，最後送尾碼（Enter 或 Tab）；不等處理完就繼續下一筆

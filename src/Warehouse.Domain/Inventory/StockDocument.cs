@@ -302,9 +302,13 @@ public sealed class StockDocument
         var line = StockDocumentLine.Create(
             lineId, Id, _lines.Count == 0 ? 1 : _lines.Max(l => l.LineNo) + 1, itemId, trackingMode, decimalPlaces,
             locationId, lotNo, serialNo, expiryDate, quantity);
-        if (_lines.Any(l => l.ItemId is null && l.LocationId == locationId))
+        if (_lines.FirstOrDefault(l => l.ItemId is null && l.LocationId == locationId) is { } emptyLine)
         {
-            throw new DomainRuleException("這個儲位已標記為空儲位，請先刪除那一行。");
+            throw OpeningConflict("這個儲位已標記為空儲位，請先刪除那一行。", emptyLine, quantity);
+        }
+        if (line.SerialNo is { } serial && _lines.FirstOrDefault(l => l.ItemId == itemId && l.SerialNo == serial) is { } sameSerial)
+        {
+            throw OpeningConflict($"序號 {serial} 已在第 {sameSerial.LineNo} 行，同一序號不能加兩次。", sameSerial, quantity);
         }
         if (_lines.FirstOrDefault(l => l.SameKey(line)) is { } existing)
         {
@@ -313,7 +317,7 @@ public sealed class StockDocument
                 existing.IncreaseQuantity(line.Quantity, decimalPlaces);
                 return existing;
             }
-            throw existing.DuplicateError();
+            throw OpeningConflict("這張單已經有相同儲位、物料、批號／序號的明細。", existing, quantity);
         }
         if (_lines.Count >= MaxLines)
         {
@@ -329,15 +333,19 @@ public sealed class StockDocument
     public StockDocumentLine AddEmptyLocation(Guid lineId, Guid locationId)
     {
         EnsureDraft();
-        if (_lines.Any(l => l.LocationId == locationId))
+        if (_lines.FirstOrDefault(l => l.LocationId == locationId) is { } existing)
         {
-            throw new DomainRuleException("這個儲位已經有明細，不能再標記為空儲位。");
+            var reason = existing.ItemId is null ? "這個儲位已標記為空儲位。" : "這個儲位已經有明細，不能再標記為空儲位。";
+            throw OpeningConflict(reason, existing, 0);
         }
         var line = StockDocumentLine.CreateEmptyLocation(
             lineId, Id, _lines.Count == 0 ? 1 : _lines.Max(l => l.LineNo) + 1, locationId);
         _lines.Add(line);
         return line;
     }
+
+    private static DomainRuleException OpeningConflict(string reason, StockDocumentLine existing, decimal incoming) =>
+        new($"{reason}草稿第 {existing.LineNo} 行數量 {existing.Quantity:0.####}，本列數量 {incoming:0.####}。");
 
     public void UpdateLineQuantity(Guid lineId, TrackingMode tracking, int decimalPlaces, decimal quantity)
     {

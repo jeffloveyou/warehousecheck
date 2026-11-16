@@ -236,7 +236,8 @@ public partial class ImportTests
             var sp = scope.ServiceProvider;
             var later = new Warehouse.Infrastructure.Imports.ImportService(
                 sp.GetRequiredService<WarehouseDbContext>(), sp.GetRequiredService<IItemWorkflowService>(), sp.GetRequiredService<IItemIndexService>(),
-                sp.GetRequiredService<IWarehouseService>(), sp.GetRequiredService<IOpeningService>(), new ShiftedClock(TimeSpan.FromHours(25)));
+                sp.GetRequiredService<IWarehouseService>(), sp.GetRequiredService<IOpeningService>(),
+                sp.GetRequiredService<Warehouse.Application.Settings.ISettingsService>(), new ShiftedClock(TimeSpan.FromHours(25)));
             Assert.Equal("import.expired", (await Assert.ThrowsAsync<ConflictException>(() => later.CommitAsync(other, actor, Ct))).ErrorCode);
         }
         Assert.Equal(2, await CountItemsAsync(token));
@@ -393,12 +394,12 @@ public partial class ImportTests
         return (id, code);
     }
 
-    private static async Task<string> ItemCodeAsync()
+    private static async Task<string> ItemCodeAsync(TrackingMode tracking = TrackingMode.None)
     {
         await using var db = MigratedDatabaseFixture.CreateContext();
         var workflow = new ItemWorkflowService(db, TimeProvider.System);
         var item = await workflow.SubmitAsync(Guid.NewGuid(),
-            new ItemDraft("匯入物料 " + Guid.NewGuid().ToString("N")[..6], El, Pcs, TrackingMode.None, null, null, null), ItemManager, Ct);
+            new ItemDraft("匯入物料 " + Guid.NewGuid().ToString("N")[..6], El, Pcs, tracking, null, null, null), ItemManager, Ct);
         var version = await db.Items.Where(i => i.Id == item.ItemId).Select(i => EF.Property<uint>(i, "Version")).SingleAsync(Ct);
         await workflow.ApproveAsync(item.ItemId, version, [], null, ItemManager, Ct);
         return await db.Items.Where(i => i.Id == item.ItemId).Select(i => i.ItemCode!).SingleAsync(Ct);

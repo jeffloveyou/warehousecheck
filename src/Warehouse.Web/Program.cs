@@ -80,6 +80,8 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Stocktakes", Policies.StockRead);
     // 匯入：頁面要登入；每種資料的權限在 handler 內依種類檢查（ItemsSubmit、ItemsIndex、WarehousesManage、OpeningEdit）
     options.Conventions.AuthorizeFolder("/Import", Policies.StockRead);
+    options.Conventions.AddPageRoute("/Import/Index", "Import/ItemPlan");
+    options.Conventions.AddPageRoute("/Import/Index", "Import/DuplicatePlan");
     options.Conventions.AuthorizeFolder("/Stock", Policies.StockRead);
     options.Conventions.AuthorizeFolder("/Scan", Policies.StockRead);
 });

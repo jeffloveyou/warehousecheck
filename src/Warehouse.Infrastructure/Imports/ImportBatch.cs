@@ -32,6 +32,9 @@ public sealed class ImportBatch
     /// <summary>試算（或確認失敗）的問題清單。</summary>
     public string IssuesJson { get; set; } = "[]";
 
+    /// <summary>新版物料匯入試算。待確認時 ErrorCount 多計一筆，阻擋舊版略過新版規則確認。</summary>
+    public string? ItemPlanJson { get; set; }
+
     public int RowCount { get; set; }
 
     public int ErrorCount { get; set; }
@@ -64,6 +67,7 @@ public class ImportBatchConfiguration : IEntityTypeConfiguration<ImportBatch>
         builder.Property(b => b.FileHash).HasMaxLength(64);
         builder.Property(b => b.RowsJson).HasColumnType("jsonb");
         builder.Property(b => b.IssuesJson).HasColumnType("jsonb");
+        builder.Property(b => b.ItemPlanJson).HasColumnType("jsonb");
         builder.Property(b => b.CreatedByName).HasMaxLength(100);
         builder.HasIndex(b => new { b.CreatedById, b.CreatedAt });
         builder.HasIndex(b => b.CreatedAt); // 保留期限清理（M7）

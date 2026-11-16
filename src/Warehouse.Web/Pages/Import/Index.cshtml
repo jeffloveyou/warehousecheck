@@ -49,7 +49,14 @@ else if (Model.Kind == ImportKind.OpeningLines && Model.Target is null)
 }
 else
 {
-    <form method="post" enctype="multipart/form-data" class="panel" id="import-form">
+    var uploadPath = Model.Kind switch
+    {
+        ImportKind.Items => "~/Import/ItemPlan?handler=ItemPlan",
+        ImportKind.Locations or ImportKind.Indexes => "~/Import/DuplicatePlan?handler=ItemPlan",
+        _ => "~/Import",
+    };
+    <form method="post" action="@Url.Content(uploadPath)"
+          asp-antiforgery="true" enctype="multipart/form-data" class="panel" id="import-form">
         <input type="hidden" name="Kind" value="@Model.Kind" />
         @if (Model.Kind == ImportKind.OpeningLines)
         {
@@ -69,7 +76,23 @@ else
             }
             <label for="Upload">檔案</label>
             <input type="file" id="Upload" name="Upload" accept=".xlsx,.csv" required />
+            @if (ImportDuplicateModes.For(Model.Kind).Count != 0)
+            {
+                <partial name="_DuplicateMode" model="(Model.Kind, Model.DuplicateMode, Model.CanUpdateItems)" />
+            }
         </div>
+        @if (Model.Kind == ImportKind.Items)
+        {
+            <p class="muted">略過只適用於確定重複。更新時請填目前的正式料號，空白欄位保留原值。標記異常會擋下整批。可在上傳後換做法重新試算。</p>
+        }
+        else if (Model.Kind == ImportKind.Locations)
+        {
+            <p class="muted">依所選倉庫與儲位碼比對。更新只套用有填值的名稱、備註、區、架、層、格。</p>
+        }
+        else if (Model.Kind == ImportKind.Indexes)
+        {
+            <p class="muted">只略過同料號、同類型且仍有效的相同索引。別名歸屬或條碼衝突會列為異常。</p>
+        }
         @if (Model.CanAutoApprove)
         {
             <p><label><input type="checkbox" name="AutoApprove" value="true" checked="@Model.AutoApprove" id="import-auto-approve" /> 匯入後自動核准（立即發出正式料號；疑似重複的列維持待核准）</label></p>
