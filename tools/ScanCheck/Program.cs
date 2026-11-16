@@ -23,7 +23,9 @@ var baseUrl = "https://localhost:5447";
 var cs = Environment.GetEnvironmentVariable("WAREHOUSE_TEST_DB") ?? throw new InvalidOperationException("WAREHOUSE_TEST_DB");
 var root = FindRepoRoot();
 var webDll = Path.Combine(root, "src", "Warehouse.Web", "bin", "Debug", "net10.0", "Warehouse.Web.dll");
-var chrome = Path.Combine(root, "poc", ".browsers", "chromium-109", "chrome-win", "chrome.exe");
+// SCANCHECK_CHROMIUM：在 git worktree 執行時指向主工作目錄的 poc\.browsers（瀏覽器檔案不進 Git）
+var chrome = Environment.GetEnvironmentVariable("SCANCHECK_CHROMIUM") is { Length: > 0 } chromeOverride
+    ? chromeOverride : Path.Combine(root, "poc", ".browsers", "chromium-109", "chrome-win", "chrome.exe");
 var shots = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? Path.Combine(root, "tools", "ScanCheck", "results");
 shots = Path.GetFullPath(shots); // Chromium 的假鏡頭檔案參數必須可從瀏覽器工作目錄解析。
 Directory.CreateDirectory(shots);
@@ -33,9 +35,9 @@ var pageUpdateOnly = args.Contains("--page-update-only", StringComparer.Ordinal)
 void Check(bool ok, string what) { Console.WriteLine((ok ? "  ✔ " : "  ✘ ") + what); if (!ok) failures.Add(what); }
 WarehouseDbContext Db() => new(new DbContextOptionsBuilder<WarehouseDbContext>().UseNpgsql(cs).Options);
 
-string CreateUser(string name, string role)
+string CreateUser(string name, string role, bool shared = false)
 {
-    var psi = new ProcessStartInfo("dotnet", $"\"{webDll}\" users create --user {name} --display {name} --role {role}")
+    var psi = new ProcessStartInfo("dotnet", $"\"{webDll}\" users create --user {name} --display {name} --role {role}{(shared ? " --shared" : "")}")
     { RedirectStandardOutput = true, RedirectStandardError = true };
     psi.Environment["ConnectionStrings__Warehouse"] = cs;
     psi.Environment["DOTNET_ENVIRONMENT"] = "Development";
@@ -198,6 +200,50 @@ if (args.Contains("--maintenance-only", StringComparer.Ordinal))
     }
     await MaintenanceCheck.RunAsync(page, browser, LoginAsAsync, baseUrl, cs, warehouseId, itemCodes, suffix, Check);
     Check(consoleErrors.Count == 0, "維護表單沒有瀏覽器錯誤：" + string.Join(" | ", consoleErrors));
+    return failures.Count == 0 ? 0 : 1;
+}
+if (args.Contains("--shared-only", StringComparer.Ordinal))
+{
+    var sharedUser = "scsh" + suffix;
+    var sharedPassword = CreateUser(sharedUser, "Operator", shared: true);
+    var storageErrors = new List<string>();
+    async Task<(IPage Page, string User)> LoginSharedAsync(bool blockStorage)
+    {
+        var context = await browser.NewContextAsync(new() { ViewportSize = new() { Width = 1280, Height = 900 }, IgnoreHTTPSErrors = true });
+        if (blockStorage)
+            await context.AddInitScriptAsync("Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage blocked'); } });");
+        var p = await context.NewPageAsync();
+        var sink = blockStorage ? storageErrors : consoleErrors;
+        p.Console += (_, m) => { if (m.Type == "error") sink.Add($"{p.Url}: {m.Text}"); };
+        p.PageError += (_, e) => sink.Add($"{p.Url}: {e}");
+        await p.GotoAsync(baseUrl + "/Account/Login");
+        await p.FillAsync("input[name='Input.UserName']", sharedUser);
+        await p.FillAsync("input[name='Input.Password']", sharedPassword);
+        await p.ClickAsync("form button[type=submit]");
+        await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        if (p.Url.Contains("ChangePassword", StringComparison.OrdinalIgnoreCase))
+        {
+            var changed = "Shared-check-pass-" + suffix;
+            await p.FillAsync("input[name='Input.CurrentPassword']", sharedPassword);
+            await p.FillAsync("input[name='Input.NewPassword']", changed);
+            await p.FillAsync("input[name='Input.ConfirmPassword']", changed);
+            await p.Locator("input[name='Input.NewPassword']").Locator("xpath=ancestor::form").Locator("button[type=submit]").ClickAsync();
+            await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            sharedPassword = changed;
+            if (p.Url.Contains("Login", StringComparison.OrdinalIgnoreCase))
+            {
+                await p.FillAsync("input[name='Input.UserName']", sharedUser);
+                await p.FillAsync("input[name='Input.Password']", changed);
+                await p.ClickAsync("form button[type=submit]");
+                await p.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            }
+        }
+        return (p, sharedUser);
+    }
+    await SharedAccountCheck.RunAsync(page, LoginSharedAsync, browser, baseUrl, cs, warehouseCode, warehouseId, itemCodes, suffix, Check, shots);
+    Check(storageErrors.All(e => !e.Contains("operator-picker", StringComparison.Ordinal)), "localStorage 不可用：operator-picker.js 沒有錯誤");
+    Check(consoleErrors.Count == 0, "沒有瀏覽器主控台錯誤" + (consoleErrors.Count > 0 ? "：" + string.Join(" | ", consoleErrors) : ""));
+    Console.WriteLine(failures.Count == 0 ? "全部通過" : $"失敗 {failures.Count} 項");
     return failures.Count == 0 ? 0 : 1;
 }
 if (pageUpdateOnly)

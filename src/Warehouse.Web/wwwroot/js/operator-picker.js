@@ -48,5 +48,7 @@
   }, true);
 
   window.WhOperator = { id: function () { return select.value; }, name: name, element: select };
-  label();
+  // 選單可能在按鈕表單之前輸出（例：單據明細頁），等整頁解析完再補一次按鈕姓名
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', label);
+  else label();
 })();
