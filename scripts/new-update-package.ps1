@@ -5,19 +5,22 @@
 .DESCRIPTION
     1. 以 publish.ps1 發布網站（含全部測試，失敗就停止）與代理。同一 commit 已發布過時沿用，
        但要求 release.json 的 commit 等於 HEAD、SHA256SUMS 全部相符，否則請刪除後重新發布。
-    2. 組成 <OutputRoot>\WarehouseUpdate-<版本>-<commit>\：
+    2. 組成 <OutputRoot>\WarehouseUpdate-<版本>-<commit>\（預設 OutputRoot＝專案的 artifacts\updates，已被 .gitignore 排除）：
          scripts\（只取 git 追蹤的檔案）、網站與代理發布資料夾、一鍵換版.cmd、一鍵回滾.cmd、
          換版說明.json／.txt（版本、Migration、與上一包相比的新 Migration 與 commit）、換版本手冊.md（本機有才放）、
          SHA256SUMS（整個換版包，正式主機複製後核對）
     3. 另壓成同名 .zip。正式主機可選資料夾或 zip。
     代理一律放入（約 1 MB）；正式主機比較已安裝代理的 commit，不同才詢問是否更新。
+.PARAMETER OutputRoot
+    換版包輸出資料夾。預設專案內的 artifacts\updates（2026-11-16 起，與 codex 產包位置一致）；
+    相對路徑以專案根目錄為準。「上一個換版包」也只在這個資料夾裡找。
 .PARAMETER ExcludeProxy
     不放代理（正式主機就不會詢問更新代理）。
 .EXAMPLE
     .\scripts\new-update-package.ps1
 #>
 param(
-    [string]$OutputRoot = $env:USERPROFILE,
+    [string]$OutputRoot = '',
     [switch]$ExcludeProxy,
     [string]$ManualPath = (Join-Path $env:USERPROFILE 'WarehouseSetup\換版本手冊.md')
 )
@@ -27,6 +30,9 @@ Import-Module (Join-Path $PSScriptRoot 'windows\WarehouseDeploy.psm1') -Force
 $repo = Split-Path $PSScriptRoot -Parent
 Push-Location $repo
 try {
+    if (-not $OutputRoot) { $OutputRoot = Join-Path $repo 'artifacts\updates' }
+    $OutputRoot = [IO.Path]::GetFullPath($OutputRoot, $repo)
+    New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
     if (git status --porcelain) { throw '工作目錄有未提交的修改，換版包無法對應 commit。請先提交。' }
 
     $commit = (git rev-parse HEAD).Trim()

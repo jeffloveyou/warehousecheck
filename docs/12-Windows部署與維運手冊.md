@@ -38,7 +38,7 @@
    .\scripts\new-update-package.ps1
    ```
    - 會跑全部測試。
-   - 產生 `%USERPROFILE%\WarehouseUpdate-<版本>-<commit>\` 和同名 `.zip`。內容有：
+   - 產生 `C:\CodeProject\物料管理系統\artifacts\updates\WarehouseUpdate-<版本>-<commit>\` 和同名 `.zip`。`artifacts\` 不進 Git；要放到別處可加 `-OutputRoot`。2026-11-16 以前產生的 b9b5fa5 等舊包在 `%USERPROFILE%`。內容有：
      - `scripts\`、網站發布檔
      - 代理（只有程式有變動時才放）
      - 兩個 `.cmd`
