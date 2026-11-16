@@ -46,6 +46,9 @@ public sealed class AliasTakenException(Guid holderItemId, string holderLabel)
 /// </summary>
 public interface IItemIndexService
 {
+    Task<(Guid Id, bool Added)> AddForImportAsync(Guid itemId, ItemIndexKind kind, string text, bool skipExact, Actor actor,
+        CancellationToken cancellationToken);
+
     /// <summary>物料的全部索引（含已停用，供稽核），有效的排前面。</summary>
     Task<IReadOnlyList<ItemIndexRow>> ListAsync(Guid itemId, CancellationToken cancellationToken);
 

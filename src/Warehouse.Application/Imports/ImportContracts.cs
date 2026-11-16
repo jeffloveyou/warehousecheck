@@ -26,13 +26,36 @@ public enum ImportStatus
     Committed,
 }
 
+public enum ItemDuplicateMode { KeepPending, SkipExact, UpdateExisting, ReportError }
+
+public static class ImportDuplicateModes
+{
+    public static IReadOnlyList<ItemDuplicateMode> For(ImportKind kind) => kind switch
+    {
+        ImportKind.Items => [ItemDuplicateMode.KeepPending, ItemDuplicateMode.SkipExact, ItemDuplicateMode.UpdateExisting, ItemDuplicateMode.ReportError],
+        ImportKind.Locations => [ItemDuplicateMode.ReportError, ItemDuplicateMode.SkipExact, ItemDuplicateMode.UpdateExisting],
+        ImportKind.Indexes => [ItemDuplicateMode.ReportError, ItemDuplicateMode.SkipExact],
+        _ => [],
+    };
+}
+
+public enum ItemImportAction { Add, Update, Skip, Error }
+
+public sealed record ItemImportRowResult(int RowNo, ItemImportAction Action, string? ItemCode, string Message);
+
+public sealed record ItemImportPreview(ItemDuplicateMode Mode, Guid Version, int Added, int Updated, int Skipped,
+    IReadOnlyList<ItemImportRowResult> Rows);
+
+public sealed record PreviousImportResult(DateTimeOffset CommittedAt, int Affected, int? Added, int? Updated, int? Skipped);
+
 /// <summary>一列的問題：<see cref="IsError"/> 為 true 時整批不能匯入；警告（例如疑似重複物料）不擋。</summary>
 public sealed record ImportIssue(int RowNo, string Message, bool IsError);
 
 public sealed record ImportBatchView(
     Guid Id, ImportKind Kind, ImportStatus Status, string FileName, Guid? TargetId, string? TargetLabel, int RowCount,
     int ErrorCount, int WarningCount, IReadOnlyList<ImportIssue> Issues, Guid CreatedById, string CreatedByName,
-    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? CommittedAt, bool CanCommit, bool AutoApprove);
+    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, DateTimeOffset? CommittedAt, bool CanCommit, bool AutoApprove,
+    ItemImportPreview? ItemPreview = null, PreviousImportResult? PreviousImport = null);
 
 /// <summary>
 /// Excel／CSV 匯入（M6-03，ADR-0019）：上傳 → 試算（每列錯誤與警告）→ 確認。
@@ -62,7 +85,12 @@ public interface IImportService
     /// 沒有疑似重複的物料直接核准、發正式料號；疑似重複的列維持待核准並列為警告。選項存在批次裡，確認時照同一個選項執行。
     /// </summary>
     Task<Guid> UploadAsync(
-        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken);
+        ImportKind kind, Guid? targetId, string fileName, Stream content, bool autoApprove, Actor actor, CancellationToken cancellationToken,
+        ItemDuplicateMode? duplicateMode = null);
+
+    Task RecalculateAsync(Guid id, ItemDuplicateMode mode, Guid previewVersion, Actor actor, CancellationToken cancellationToken);
+
+    IAsyncEnumerable<ItemImportRowResult> ReadItemResultsAsync(Guid id, Actor viewer, bool viewerIsAdmin, CancellationToken cancellationToken);
 
     /// <summary>檢視批次（建立者或系統管理員）；問題清單最多回傳前 <paramref name="maxIssues"/> 筆。</summary>
     Task<ImportBatchView?> GetAsync(Guid id, Actor viewer, bool viewerIsAdmin, int maxIssues, CancellationToken cancellationToken);
@@ -71,7 +99,7 @@ public interface IImportService
     IAsyncEnumerable<ImportIssue> ReadIssuesAsync(Guid id, Actor viewer, bool viewerIsAdmin, CancellationToken cancellationToken);
 
     /// <summary>確認匯入（建立者本人）。重送同一批次不會重複匯入；確認時又出現錯誤則整批不匯入並更新問題清單。</summary>
-    Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken);
+    Task<int> CommitAsync(Guid id, Actor actor, CancellationToken cancellationToken, Guid? previewVersion = null);
 
     /// <summary>範本（只有標題列的 xlsx）。</summary>
     Task<ExportFile> TemplateAsync(ImportKind kind, CancellationToken cancellationToken);

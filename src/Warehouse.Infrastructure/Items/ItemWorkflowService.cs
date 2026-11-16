@@ -69,12 +69,6 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         {
             throw new DomainRuleException("提出請求缺少識別碼。");
         }
-        // 冪等：requestId 直接當物料 ID。重送（逾時重試、連點）時回傳第一次的結果，不會產生第二筆申請
-        if (await FindPreviousSubmissionAsync(requestId, actor, cancellationToken) is { } previous)
-        {
-            return previous;
-        }
-
         await EnsureCategoryAndUnitUsableAsync(draft.CategoryId, draft.BaseUnitId, cancellationToken);
 
         var now = clock.GetUtcNow();
@@ -104,16 +98,18 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
             return previous;
         }
         // 物料審核關閉（M12，ADR-0027）：提出即啟用；疑似重複的維持待核准（物料管理員已確認的候選除外）
-        var approvalDisabled = !options.AutoApprove && !await SettingItemApprovalEnabledAsync(cancellationToken);
+        var approvalDisabled = !options.AutoApprove && !options.ForcePending && !await SettingItemApprovalEnabledAsync(cancellationToken);
 
         // 提出、條碼、自動核准在同一個交易：任何一步失敗整筆不建立（下面的服務方法都加入這個交易）。
         // 匯入（D-31）時加入匯入的外層交易，失敗由外層回到該列的 savepoint
         await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
         try
         {
+            await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
+            if (await FindPreviousSubmissionAsync(requestId, actor, cancellationToken) is { } committedWhileWaiting)
+                return committedWhileWaiting;
             if (options.AutoApprove || approvalDisabled)
             {
-                await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
                 // 排隊期間管理員可能重新開啟審核：取鎖後再讀一次，以這時的設定為準（M12 審查建議-2）
                 approvalDisabled = approvalDisabled && !await SettingItemApprovalEnabledAsync(cancellationToken);
             }
@@ -451,7 +447,8 @@ public sealed class ItemWorkflowService(WarehouseDbContext db, TimeProvider cloc
         Guid itemId, uint expectedVersion, CancellationToken cancellationToken,
         Func<Item, DateTimeOffset, Task<ItemReview>> action)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await db.Database.BeginOrJoinTransactionAsync(cancellationToken);
+        await AdvisoryLocks.LockItemAutoApproveAsync(db, cancellationToken);
         var item = await db.Items.SingleOrDefaultAsync(i => i.Id == itemId, cancellationToken)
             ?? throw new NotFoundException("item.not_found", "找不到物料。");
         var version = db.Entry(item).Property<uint>("Version");

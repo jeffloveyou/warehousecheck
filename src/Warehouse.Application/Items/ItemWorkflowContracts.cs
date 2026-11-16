@@ -53,6 +53,8 @@ public sealed record ItemSubmitOptions(
     bool AutoApprove,
     IReadOnlyCollection<Guid> AcknowledgedCandidateIds)
 {
+    public bool ForcePending { get; init; }
+
     public static readonly ItemSubmitOptions None = new([], false, []);
 
     /// <summary>一張提出／修改單最多一起登錄幾個原廠條碼（更多請到物料頁「搜尋索引」）。</summary>

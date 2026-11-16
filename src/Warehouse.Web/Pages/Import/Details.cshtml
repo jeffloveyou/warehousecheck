@@ -3,6 +3,8 @@
 @using Warehouse.Application.Imports
 @{
     var b = Model.Batch;
+    var preview = b.ItemPreview;
+    var codeLabel = b.Kind == ImportKind.Locations ? "儲位碼" : b.Kind == ImportKind.Indexes ? "料號" : "料號／申請單號";
     ViewData["Title"] = "匯入結果";
 }
 <p><a href="/Import?Kind=@b.Kind@(b.Kind == ImportKind.OpeningLines ? $"&Target={b.TargetId}" : "")">← 匯入</a></p>
@@ -17,26 +19,52 @@
 }
 <div class="panel">
     <p>檔案 @b.FileName@(b.TargetLabel is null ? "" : $"｜目標 {b.TargetLabel}")｜上傳 @b.CreatedByName @Display.Time(b.CreatedAt)</p>
+    @if (b.PreviousImport is { } previous)
+    {
+        <p id="import-previous" class="message warn">這份檔案曾於 @Display.Time(previous.CommittedAt) 成功匯入相同目標。
+            上次實際處理 @previous.Affected 列@(previous.Added is not null ? $"（新增 {previous.Added}、更新 {previous.Updated}、略過 {previous.Skipped}）" : "")。
+            請核對這次試算結果後再確認。</p>
+    }
     @if (b.Kind == ImportKind.Items)
     {
-        <p id="import-approve-mode">@(b.AutoApprove ? "自動核准：沒有疑似重複的物料直接發出正式料號；有警告的列維持待核准。" : "匯入後成為待核准物料，由物料管理員核准。")</p>
+        <p id="import-approve-mode">@(b.AutoApprove ? "自動核准：沒有疑似重複的新物料直接發出正式料號。"
+            : preview is not null ? "新物料依系統審核設定處理，更新列保留既有狀態。" : "匯入後成為待核准物料，由物料管理員核准。")</p>
     }
     <p id="import-summary">共 @b.RowCount 列；錯誤 <strong>@b.ErrorCount</strong> 列；警告 @b.WarningCount 列
         @if (b.Status == ImportStatus.Committed && b.CommittedAt is { } at) { <span class="chip" id="import-status">已匯入 @Display.Time(at)</span> }
     </p>
-    @if (b.ErrorCount + b.WarningCount > 0)
+    @if (preview is not null)
+    {
+        <p id="import-item-summary">做法 <strong>@IndexModel.DuplicateModeLabel(b.Kind, preview.Mode)</strong>｜新增 @preview.Added｜更新 @preview.Updated｜略過 @preview.Skipped｜異常 @b.ErrorCount</p>
+        <p><a asp-page-handler="Issues" asp-route-id="@b.Id" id="import-issues-download">下載完整逐列結果（CSV）</a></p>
+        @if (Model.CanRecalculate)
+        {
+            <form method="post" asp-page-handler="Recalculate" asp-route-id="@b.Id" class="filters">
+                <input type="hidden" name="PreviewVersion" value="@preview.Version" />
+                <input type="hidden" name="Kind" value="@b.Kind" />
+                <partial name="_DuplicateMode" model="(b.Kind, preview.Mode, Model.CanUpdateItems)" />
+                <button type="submit" class="secondary" id="import-recalculate">重新試算</button>
+            </form>
+        }
+    }
+    else if (b.ErrorCount + b.WarningCount > 0)
     {
         <p><a asp-page-handler="Issues" asp-route-id="@b.Id" id="import-issues-download">下載完整錯誤與警告（CSV，含來源列號）</a></p>
     }
     @if (b.ErrorCount > 0)
     {
-        <p class="message error">有錯誤，整批不會匯入。請依下表修正檔案後重新上傳。</p>
+        <p class="message error">有錯誤，整批不會匯入。@(preview is null ? "請依下表修正檔案後重新上傳。" : "可以改選做法重新試算，或修正檔案後重新上傳。")</p>
     }
     else if (b.CanCommit)
     {
         <form method="post" asp-page-handler="Commit" asp-route-id="@b.Id">
             <p class="muted">試算在 @Display.Time(b.ExpiresAt) 前有效。確認時會再檢查一次，若資料已被他人變更而出現錯誤，整批不匯入。</p>
-            <button type="submit" id="import-commit">確認匯入 @b.RowCount 列</button>
+            @if (preview is not null)
+            {
+                <input type="hidden" name="PreviewVersion" value="@preview.Version" />
+            }
+            <button type="submit" id="import-commit">@(preview is null ? $"確認匯入 {b.RowCount} 列"
+                : preview.Added + preview.Updated == 0 ? "確認（無主檔異動）" : $"確認匯入 {preview.Added + preview.Updated} 列")</button>
         </form>
     }
     else if (b.Status == ImportStatus.Validated)
@@ -48,8 +76,32 @@
         <p><a href="/Opening/Details/@doc">回期初單</a></p>
     }
 </div>
-@if (b.Issues.Count > 0)
+@if (preview is not null)
 {
+    <div class="table-wrap">
+        <table id="import-item-results">
+            <thead><tr><th>列</th><th>處理結果</th><th>@codeLabel</th><th>說明</th></tr></thead>
+            <tbody>
+                @foreach (var row in preview.Rows)
+                {
+                    <tr class="@(row.Action == ItemImportAction.Error ? "bad" : "")">
+                        <td class="num">@row.RowNo</td><td>@DetailsModel.ActionLabel(row.Action)</td><td>@row.ItemCode</td><td>@row.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (b.RowCount > preview.Rows.Count)
+    {
+        <p class="muted">畫面列出 @preview.Rows.Count 筆，請下載完整結果查看全部。</p>
+    }
+}
+else if (b.Issues.Count > 0)
+{
+    @if (b.Kind == ImportKind.OpeningLines)
+    {
+        <p class="muted">草稿行號也可能指本批較早的試算列，並以試算當時的明細為準。</p>
+    }
     <div class="table-wrap">
         <table id="import-issues">
             <thead><tr><th>列</th><th>類型</th><th>說明</th></tr></thead>
